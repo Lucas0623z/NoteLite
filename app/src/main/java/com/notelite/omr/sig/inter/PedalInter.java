@@ -1,0 +1,184 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                                       P e d a l I n t e r                                      //
+//                                                                                                //
+//------------------------------------------------------------------------------------------------//
+// <editor-fold defaultstate="collapsed" desc="hdr">
+//
+//  Copyright © NoteLite 2026. All rights reserved.
+//
+//  This program is free software: you can redistribute it and/or modify it under the terms of the
+//  GNU Affero General Public License as published by the Free Software Foundation, either version
+//  3 of the License, or (at your option) any later version.
+//
+//  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU Affero General Public License for more details.
+//
+//  You should have received a copy of the GNU Affero General Public License along with this
+//  program.  If not, see <http://www.gnu.org/licenses/>.
+//------------------------------------------------------------------------------------------------//
+// </editor-fold>
+package com.notelite.omr.sig.inter;
+
+import com.notelite.omr.glyph.Glyph;
+import com.notelite.omr.glyph.Shape;
+import com.notelite.omr.sheet.Staff;
+import com.notelite.omr.sheet.SystemInfo;
+import com.notelite.omr.sheet.rhythm.Measure;
+import com.notelite.omr.sheet.rhythm.MeasureStack;
+import com.notelite.omr.sig.relation.ChordPedalRelation;
+import com.notelite.omr.sig.relation.Link;
+import com.notelite.omr.sig.relation.Relation;
+import com.notelite.omr.util.HorizontalSide;
+
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.util.Collection;
+import java.util.Collections;
+
+import javax.xml.bind.annotation.XmlRootElement;
+
+/**
+ * Class <code>PedalInter</code> represents a pedal (start) or pedal up (stop) event.
+ *
+ * @author NoteLite Contributors
+ */
+@XmlRootElement(name = "pedal")
+public class PedalInter
+        extends AbstractDirectionInter
+{
+    //~ Constructors -------------------------------------------------------------------------------
+
+    /**
+     * No-argument constructor meant for JAXB.
+     */
+    private PedalInter ()
+    {
+        super(null, null, null, 0.0);
+    }
+
+    /**
+     * Creates a new <code>PedalInter</code> object.
+     *
+     * @param glyph the pedal glyph
+     * @param shape PEDAL_MARK (start) or PEDAL_UP_MARK (stop)
+     * @param grade the interpretation quality
+     */
+    public PedalInter (Glyph glyph,
+                       Shape shape,
+                       Double grade)
+    {
+        super(glyph, (glyph != null) ? glyph.getBounds() : null, shape, grade);
+    }
+
+    //~ Methods ------------------------------------------------------------------------------------
+
+    //-------//
+    // added //
+    //-------//
+    @Override
+    public void added ()
+    {
+        super.added();
+
+        setAbnormal(true); // No chord linked yet
+    }
+
+    //---------------//
+    // checkAbnormal //
+    //---------------//
+    @Override
+    public boolean checkAbnormal ()
+    {
+        // Check if a chord is connected
+        setAbnormal(!sig.hasRelation(this, ChordPedalRelation.class));
+
+        return isAbnormal();
+    }
+
+    //----------//
+    // getChord //
+    //----------//
+    /**
+     * Report the related chord, if any.
+     *
+     * @return the related chord, or null
+     */
+    public AbstractChordInter getChord ()
+    {
+        if (sig != null) {
+            for (Relation rel : sig.getRelations(this, ChordPedalRelation.class)) {
+                AbstractChordInter chord = (AbstractChordInter) sig.getOppositeInter(this, rel);
+
+                return chord;
+            }
+        }
+
+        return null;
+    }
+
+    //----------//
+    // getStaff //
+    //----------//
+    @Override
+    public Staff getStaff ()
+    {
+        if (staff == null) {
+            if (sig != null) {
+                staff = sig.getSystem().getStaffAtOrAbove(getCenter());
+            }
+        }
+
+        return staff;
+    }
+
+    //-------------//
+    // searchLinks //
+    //-------------//
+    @Override
+    public Collection<Link> searchLinks (SystemInfo system)
+    {
+        Link link = null;
+
+        try {
+            final Point location = getCenter();
+            final MeasureStack stack = system.getStackAt(location);
+
+            if (stack != null) {
+                final Rectangle box = getBounds();
+
+                // A PedalUp may not be strictly horizontally aligned with the related chord
+                // and may appear much farther on right
+                // So, for this up shape, we extend the lookup box abscissa on the left of the pedal
+                // until the beginning of the measure.
+                if (getShape() == Shape.PEDAL_UP_MARK) {
+                    final Staff theStaff = system.getStaffAtOrAbove(location);
+                    final Measure measure = stack.getMeasureAt(theStaff);
+                    final int left = measure.getAbscissa(HorizontalSide.LEFT, theStaff);
+                    final int margin = box.x - left;
+                    box.x -= margin;
+                    box.width += margin;
+                }
+
+                final AbstractChordInter chordAbove = stack.getStandardChordAbove(location, box);
+
+                if (chordAbove != null) {
+                    link = new Link(chordAbove, new ChordPedalRelation(), false);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        return (link == null) ? Collections.emptyList() : Collections.singleton(link);
+    }
+
+    //---------------//
+    // searchUnlinks //
+    //---------------//
+    @Override
+    public Collection<Link> searchUnlinks (SystemInfo system,
+                                           Collection<Link> links)
+    {
+        return searchObsoletelinks(links, ChordPedalRelation.class);
+    }
+}

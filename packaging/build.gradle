@@ -1,0 +1,296 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                         : p a c k a g i n g / b u i l d . g r a d l e                          //
+//                                                                                                //
+//------------------------------------------------------------------------------------------------//
+//
+// This "packaging" sub-project aims to manage the packaging of NoteLite for all supported OSes.
+// It must be run on the same operating system as the one being targeted.
+//
+// 'installerType' is an optional parameter, that can be specified using the Gradle argument:
+//      -PinstallerType=XXX
+// The valid values for XXX are:
+// - for Windows: DEFAULT, EXE or MSI
+// - for macOS: DEFAULT, DMG or PKG
+// - for Linux: DEFAULT, DEB or RPM
+// If not provided, the DEFAULT type is chosen (EXE for Windows, DMG for macOS, DEB for Linux)
+//
+// For all OSes, 'jlink' and 'jpackage' are required
+// Windows requires 'WiX' 3 or higher
+// Linux requires 'fakeroot'
+// macOS requires '[image]magick', 'iconutil'
+//
+// The outputs are in the 'build' folder:
+// - build/jars:            NoteLite.jar, plus all the dependencies .jar files
+// - build/custom-jre:      A shrunk copy of the host Java runtime environment
+// - build/macos.iconset:   Temporary icons for macOS
+// - build/dist:            The installer(s) built
+//--------------------------------------------------------------------------------------------------
+
+plugins {
+    // Mainly for the clean task
+    id 'base'
+
+    // Plugin which provides the jpackage task
+    id 'org.panteleyev.jpackageplugin' version '1.7.3'
+}
+
+import org.panteleyev.jpackage.ImageType
+import java.nio.file.Paths
+
+def pkg = project(':packaging')
+
+// Pointers to the 'app' sibling sub-project
+def app     = project(':app')
+def appDir  = app.projectDir
+def rootDir = getRootDir()
+
+// Playing with host name, plus option if any
+ext.osname = "${app.ext.hostOSName}"
+ext.option = ""
+
+tasks.register('linuxGetName', Exec) {
+    description "Getting Linux host name"
+    commandLine "lsb_release", "-s", "-i"
+    standardOutput = new ByteArrayOutputStream()
+    
+    doLast {
+        pkg.ext.osname = standardOutput.toString().toLowerCase().replaceAll('\n', '')
+        println "osname: ${pkg.ext.osname}"
+    }
+}
+
+tasks.register('linuxGetVersion', Exec) {
+    description "Getting Linux host version"
+    commandLine "lsb_release", "-s", "-r"
+    standardOutput = new ByteArrayOutputStream()
+    
+    doLast {
+        pkg.ext.option = standardOutput.toString().replaceAll('\n', '')
+        println "Linux option: ${pkg.ext.option}"
+    }
+}
+
+tasks.register('collectJars', Copy) {
+    description = "Copies the application jar and all external jars it depends upon"
+    dependsOn ':app:classes'
+    onlyIf('jars folder does not exist yet') {
+        !file('build/jars').exists()
+    }
+    doFirst {
+        mkdir('build/jars')
+    }
+
+    into 'build/jars'
+    from app.tasks.jar
+    from app.sourceSets.main.runtimeClasspath
+}
+
+tasks.register('customJre', Exec) {
+    description = "Assembles a custom JRE"
+    onlyIf('custom-jre folder does not exist yet') {
+        !file('build/custom-jre').exists()
+    }
+
+    // module jdk.zipfs provides the implementation of the zip file system provider
+    // module jdk.crypto.ec fixes javax.net.ssl.SSLHandshakeException
+    // module jdk.unsupported is needed by pdfbox which calls jdk.internal.ref.Cleaner
+    commandLine "jlink",\
+        "--output", "build/custom-jre",\
+        "--no-header-files",\
+        "--no-man-pages",\
+        "--strip-debug",\
+        "--add-modules", "java.base,java.datatransfer,java.desktop,java.xml,java.naming,jdk.zipfs,jdk.crypto.ec,jdk.unsupported"
+}
+
+tasks.register('macImagemagick', Exec) {
+    description = "Install imagemagick"
+
+    commandLine "brew", "install", "imagemagick"
+}
+
+tasks.register('macCreateFolder') {
+    description = "Allocate target folder"
+    
+    def iconDir = file("build/macos.iconset")
+    outputs.dir(iconDir)
+
+    doFirst {
+        iconDir.mkdirs()
+    }
+}
+
+def src = "$appDir/src/main/java/org/notelite/omr/ui/resources/icon-256.png"
+
+tasks.register('macSimples') {
+    description = "Generate icons in simple size"
+}
+
+tasks.register('macDoubles') {
+    description = "Generate icons in double size"
+}
+
+// Generate different icon sizes
+// Including retina displays (@2x)
+[16, 32, 64, 128, 256, 512].each {size ->
+    tasks.register("macSimple$size", Exec) {
+        dependsOn('macImagemagick')
+        dependsOn('macCreateFolder')
+        inputs.dir("build/macos.iconset")
+
+        commandLine "magick", src, "-resize", "${size}x${size}",\
+        "build/macos.iconset/icon_${size}x${size}.png"
+    }
+    macSimples.dependsOn("macSimple$size")
+   
+    def dbl = size * 2
+    tasks.register("macDouble$size", Exec) {
+        dependsOn('macImagemagick')
+        dependsOn('macCreateFolder')
+        inputs.dir("build/macos.iconset")
+
+        commandLine "magick", src, "-resize", "${dbl}x${dbl}",\
+        "build/macos.iconset/icon_${size}x${size}@2x.png"
+    }
+    macDoubles.dependsOn("macDouble$size")
+}
+
+tasks.register('macListIcons', Exec) {
+    description = "Just to inspect the created icon files"
+    dependsOn('macSimples')
+    dependsOn('macDoubles')
+    
+    commandLine "ls", "-la", "build/macos.iconset/"
+}
+
+
+tasks.register('macConvertIcons', Exec) {
+    description = "Convert macos.iconset to icns"
+    dependsOn('macSimples')
+    dependsOn('macDoubles')
+    dependsOn('macListIcons')
+
+    commandLine "iconutil",\
+            "--convert", "icns",\
+            "--output", "build/NoteLite.icns",\
+            "build/macos.iconset"
+}
+
+// Configure the jpackage task
+tasks.jpackage {
+    dependsOn 'customJre'
+    dependsOn 'collectJars'
+
+    input               = layout.buildDirectory.dir("jars")
+    destination         = layout.buildDirectory.dir("dist")
+
+    verbose             = true
+
+    runtimeImage        = layout.buildDirectory.dir("custom-jre")
+
+    appName             = app.ext.programName
+    vendor              = "notelite.example.com"
+    licenseFile         = file(rootDir.toPath().resolve('LICENSE'))
+    appDescription      = "Optical Music Recognition"
+    appVersion          = app.version
+    mainJar             = "${app.ext.programId}.jar"
+    mainClass           = app.ext.mainClass
+
+    fileAssociations    = files(layout.projectDirectory.file("dev/omr.properties"))
+
+    // REMINDER: Check consistency with "applicationDefaultJvmArgs" in file app/build.gradle
+    javaOptions         = ["--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+                           "--enable-native-access=ALL-UNNAMED",
+                           "-Dfile.encoding=UTF-8",
+                           "-Xms512m",
+                           "-Xmx8G"]
+
+    // Chosen installer type, if any
+    ImageType installerType = null
+    if (project.hasProperty('installerType')) {
+        try {
+            installerType = ImageType.valueOf(project.property('installerType').toString().toUpperCase())
+            println "installerType: " + installerType
+        } catch (IllegalArgumentException ex) {
+            println "Illegal installerType: " + project.property('installerType')
+            throw new RuntimeException("Error: installerType should be one of " + ImageType.values())
+        }
+    }
+
+    windows {
+        icon = file("$appDir/res/icon-256.ico")   // Path to the icon of the application package
+        winDirChooser = true                // Let the user choose the installation directory
+        winMenu = true                      // Add a Start Menu shortcut
+        winShortcutPrompt = true            // Let the user decide on shortcuts
+        winShortcut = true                  // Create a desktop shortcut
+        ///winPerUserInstall = true            // Perform an install on a per-user basis (vs system basis)
+
+        // Create a console launcher? (Useful only for errors)
+        pkg.ext.option = project(':').findProperty('option')?:''
+        println "Windows option: ${pkg.ext.option}"
+        winConsole = (pkg.ext.option == "Console")
+
+        // Check validity of installerType for Windows
+        if (installerType != null) {
+            if (installerType != ImageType.DEFAULT && installerType != ImageType.EXE && installerType != ImageType.MSI) {
+                throw new RuntimeException("Error: Illegal installerType for Windows: " + installerType)
+            }
+            type = installerType
+        } else {
+            type = ImageType.MSI
+        }
+    }
+
+    mac {
+        dependsOn 'macConvertIcons'
+        icon = layout.buildDirectory.file("NoteLite.icns")
+
+        macPackageIdentifier = "com.notelite.app"
+        macPackageName = app.ext.programName
+
+        // Check validity of installerType for macOS
+        if (installerType != null) {
+            if (installerType != ImageType.DEFAULT && installerType != ImageType.DMG && installerType != ImageType.PKG) {
+                throw new RuntimeException("Error: Illegal installerType for macOS: " + installerType)
+            }
+            type = installerType
+        }
+    }
+
+    linux {
+        dependsOn 'linuxGetName'
+        dependsOn 'linuxGetVersion'
+        icon = file("$appDir/res/icon-256.png")   // Path to the icon of the application package
+        linuxShortcut = true                // Create a shortcut for the application
+
+        // Check validity of installerType for Linux
+        if (installerType != null) {
+            if (installerType != ImageType.DEFAULT && installerType != ImageType.DEB && installerType != ImageType.RPM) {
+                throw new RuntimeException("Error: Illegal installerType for Linux: " + installerType)
+            }
+            type = installerType
+        }
+    }
+
+    doLast {
+        // Rename artifact as: program name + version + host name + option? + architecture + .ext
+        def dest = destination.get().asFile
+        
+        fileTree(destination).each { file ->
+            println "oldFile: ${file}"
+
+            // Retrieve suffix
+            def oldName = "${file.name}"
+            def dot = oldName.lastIndexOf('.');
+            def suffix = oldName.substring(dot)
+
+            // Forge artifact new file
+            def newName = "${app.ext.programName}-${app.version}-${pkg.ext.osname}${pkg.ext.option}-${app.ext.hostOSArch}$suffix"
+            def newFile = Paths.get("$dest", newName).toFile()
+            println "newFile: ${newFile}"
+
+            def result = file.renameTo(newFile)
+            println "Success: $result"
+        }
+    }
+}

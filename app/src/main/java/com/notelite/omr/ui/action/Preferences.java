@@ -1,0 +1,754 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                                      P r e f e r e n c e s                                     //
+//                                                                                                //
+//------------------------------------------------------------------------------------------------//
+// <editor-fold defaultstate="collapsed" desc="hdr">
+//
+//  Copyright © NoteLite 2026. All rights reserved.
+//
+//  This program is free software: you can redistribute it and/or modify it under the terms of the
+//  GNU Affero General Public License as published by the Free Software Foundation, either version
+//  3 of the License, or (at your option) any later version.
+//
+//  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU Affero General Public License for more details.
+//
+//  You should have received a copy of the GNU Affero General Public License along with this
+//  program.  If not, see <http://www.gnu.org/licenses/>.
+//------------------------------------------------------------------------------------------------//
+// </editor-fold>
+package com.notelite.omr.ui.action;
+
+import com.notelite.omr.Main;
+import com.notelite.omr.OMR;
+import com.notelite.omr.constant.Constant;
+import com.notelite.omr.plugin.PluginsManager;
+import com.notelite.omr.sheet.BookManager;
+import com.notelite.omr.sheet.ui.StubsController;
+import com.notelite.omr.step.OmrStep;
+import com.notelite.omr.ui.util.Panel;
+import com.notelite.omr.ui.util.UIUtil;
+import com.notelite.omr.util.LabeledEnum;
+
+import org.jdesktop.application.Application;
+import org.jdesktop.application.ApplicationContext;
+import org.jdesktop.application.ResourceMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.jgoodies.forms.builder.FormBuilder;
+import com.jgoodies.forms.layout.FormLayout;
+
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.io.File;
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
+
+import javax.swing.AbstractAction;
+import javax.swing.Action;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JSlider;
+import javax.swing.JTextField;
+import javax.swing.border.TitledBorder;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+
+/**
+ * Class <code>Preferences</code> handles a dialog to manage user preferences.
+ * <p>
+ * This class relies on some Constants management but operates at a higher level.
+ *
+ * @author NoteLite Contributors
+ */
+public abstract class Preferences
+{
+    //~ Static fields/initializers -----------------------------------------------------------------
+
+    private static final Logger logger = LoggerFactory.getLogger(Preferences.class);
+
+    /**
+     * Common column specifications for all rows.
+     * For the browse pane, last field on right must be kept extended, hence the fixed 190dlu value
+     */
+    private static final String columnSpecs = "" //
+            + "12dlu,1dlu,90dlu" // 1,x,3: (Checkbox + gap + item) or button alone
+            + ",10dlu,190dlu"; // x,5: Gap, then large field on right for explanation
+
+    private static final ApplicationContext context = Application.getInstance().getContext();
+
+    private static final ResourceMap resources = context.getResourceMap(Preferences.class);
+
+    //~ Constructors -------------------------------------------------------------------------------
+
+    /** Not meant to be instantiated. */
+    private Preferences ()
+    {
+    }
+
+    //~ Static Methods -----------------------------------------------------------------------------
+
+    //------------//
+    // getMessage //
+    //------------//
+    /**
+     * Report the message panel to be displayed to the user.
+     * Organized as a vertical sequence of panes.
+     *
+     * @return the message panel
+     */
+    private static Panel getMessage ()
+    {
+        final Panel panel = new Panel();
+        panel.setName("Preferences");
+
+        final FormLayout layout = new FormLayout(
+                "pref",
+                "fill:pref" // Standard
+                        + ",2dlu,fill:pref" // Early
+                        + ",2dlu,fill:pref" // Plugin
+                        + ",2dlu,fill:pref" // Outputs
+                        + ",2dlu,fill:pref"); // Advanced
+        final FormBuilder builder = FormBuilder.create().layout(layout).panel(panel);
+
+        int r = -1;
+        builder.addRaw(new StandardTopicsPane()).xy(1, r += 2);
+        builder.addRaw(new EarlyPane()).xy(1, r += 2);
+        builder.addRaw(new PluginPane()).xy(1, r += 2);
+        builder.addRaw(new OutputsPane()).xy(1, r += 2);
+        builder.addRaw(new AdvancedTopicsPane()).xy(1, r += 2);
+
+        return panel;
+    }
+
+    //------//
+    // show //
+    //------//
+    /**
+     * Display this entity.
+     */
+    public static void show ()
+    {
+        OMR.gui.displayMessage(getMessage(), resources.getString("Preferences.title"));
+    }
+
+    //~ Inner Classes ------------------------------------------------------------------------------
+
+    //--------------------//
+    // AdvancedTopicsPane //
+    //--------------------//
+    /**
+     * Pane for the advanced topic switches.
+     */
+    private static class AdvancedTopicsPane
+            extends Panel
+    {
+        public AdvancedTopicsPane ()
+        {
+            final String className = getClass().getSimpleName();
+            setBorder(new TitledBorder(resources.getString(className + ".titledBorder.text")));
+
+            // Localized values of Topic enum type
+            final LabeledEnum<Topic>[] localeTopics = LabeledEnum.values(
+                    Topic.values(),
+                    resources,
+                    Topic.class);
+
+            // Layout
+            final FormLayout layout = new FormLayout(
+                    "fill:pref",
+                    "6dlu" // Title height
+                            + ",pref" // Scaling
+                            + ",1dlu,pref" // Locale
+                            + ",1dlu,pref" // Topic
+                            + ",1dlu,pref" // Topic
+                            + ",1dlu,pref" // Topic
+                            + ",1dlu,pref" // Topic
+                            + ",1dlu,pref" // Topic
+                            + ",1dlu,pref" // Topic
+                            + ",1dlu,pref"); // Topic
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+            int r = 0;
+
+            // Scaling
+            builder.addRaw(new ScalingPane()).xy(1, r += 2);
+
+            // Locale
+            builder.addRaw(new LocalePane()).xy(1, r += 2);
+
+            // Advanced switches
+            for (Topic topic : Topic.values()) {
+                if (topic.isAdvanced()) {
+                    final String topicName = LabeledEnum.valueOf(topic, localeTopics).label;
+                    builder.addRaw(new TopicPane(topic, topicName)).xy(1, r += 2);
+                }
+            }
+        }
+    }
+
+    //------------//
+    // BrowsePane //
+    //------------//
+    /**
+     * Choosing the default output folder.
+     */
+    private static class BrowsePane
+            extends Panel
+    {
+        private final String className;
+
+        private final JButton browse; // To choose a folder
+
+        private final JTextField field; // Current folder path
+
+        public BrowsePane ()
+        {
+            className = getClass().getSimpleName();
+            browse = new JButton(new BrowseAction());
+            field = new JTextField();
+            field.setText(BookManager.getBaseFolder().toString());
+            field.setToolTipText(resources.getString(className + ".toolTipText"));
+
+            // Layout
+            final FormLayout layout = new FormLayout(columnSpecs, "pref");
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+            builder.addRaw(browse).xyw(1, 1, 3);
+            builder.addRaw(field).xy(5, 1);
+        }
+
+        @Override
+        public void setEnabled (boolean enabled)
+        {
+            super.setEnabled(enabled);
+            browse.setEnabled(enabled);
+            field.setEnabled(enabled);
+        }
+
+        private class BrowseAction
+                extends AbstractAction
+        {
+            public BrowseAction ()
+            {
+                super(resources.getString(className + ".text"));
+                putValue(Action.SHORT_DESCRIPTION, resources.getString(className + ".title"));
+            }
+
+            @Override
+            public void actionPerformed (ActionEvent e)
+            {
+                final File dir = UIUtil.directoryChooser(
+                        true,
+                        BrowsePane.this,
+                        BookManager.getBaseFolder().toFile(),
+                        resources.getString(className + ".title"));
+
+                if (dir != null) {
+                    field.setText(dir.toString());
+                    BookManager.setBaseFolder(dir.toPath());
+                    logger.info("Output folder is now {}", dir);
+                }
+            }
+        }
+    }
+
+    //-----------//
+    // EarlyPane //
+    //-----------//
+    /**
+     * Which step should we trigger on any input image.
+     */
+    private static class EarlyPane
+            extends Panel
+            implements ActionListener
+    {
+        private final JComboBox<OmrStep> stepBox; // ComboBox for desired step
+
+        public EarlyPane ()
+        {
+            final String className = getClass().getSimpleName();
+            final String tip = resources.getString(className + ".stepBox.toolTipText");
+            setBorder(new TitledBorder(resources.getString(className + ".titledBorder.text")));
+
+            // Define stepBox
+            stepBox = new JComboBox<>(OmrStep.values());
+            stepBox.addActionListener(this);
+
+            // Layout
+            final Panel content = new Panel();
+            final FormLayout layout = new FormLayout(columnSpecs, "pref");
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(content);
+            builder.addRaw(stepBox).xyw(1, 1, 3);
+            builder.addRaw(new JLabel(tip)).xy(5, 1);
+
+            // Outer panel
+            final FormLayout outerLayout = new FormLayout("fill:pref", "6dlu,pref"); // Content
+            final FormBuilder outerBuilder = FormBuilder.create().layout(outerLayout).panel(this);
+            outerBuilder.addRaw(content).xy(1, 2);
+
+            // Initial status
+            stepBox.setSelectedItem(StubsController.getEarlyStep());
+        }
+
+        @Override
+        public void actionPerformed (ActionEvent e)
+        {
+            final OmrStep step = stepBox.getItemAt(stepBox.getSelectedIndex());
+            StubsController.setEarlyStep(step);
+        }
+    }
+
+    //------------//
+    // LocalePane //
+    //------------//
+    /**
+     * Which locale should be used in application.
+     */
+    private static class LocalePane
+            extends Panel
+            implements ActionListener
+    {
+        private static final List<Locale> locales = Main.getSupportedLocales();
+
+        private final JComboBox<Locale> localeBox; // ComboBox for supported locales
+
+        public LocalePane ()
+        {
+            final String className = getClass().getSimpleName();
+            final String tip = resources.getString(className + ".localeBox.toolTipText");
+
+            // Define localeBox
+            localeBox = new JComboBox<>(locales.toArray(new Locale[locales.size()]));
+            localeBox.addActionListener(this);
+
+            // Layout
+            final FormLayout layout = new FormLayout(columnSpecs, "fill:pref");
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+            builder.addRaw(localeBox).xyw(1, 1, 3);
+            builder.addRaw(new JLabel(tip)).xy(5, 1);
+
+            // Initial status
+            localeBox.setSelectedItem(Locale.getDefault());
+        }
+
+        @Override
+        public void actionPerformed (ActionEvent e)
+        {
+            final Locale locale = localeBox.getItemAt(localeBox.getSelectedIndex());
+            Main.setLocale(locale);
+        }
+    }
+
+    //------------//
+    // OutputPane //
+    //------------//
+    /**
+     * Handling of an output switch.
+     */
+    private static abstract class OutputPane
+            extends Panel
+            implements ActionListener
+    {
+        protected final JCheckBox box;
+
+        private final JLabel name;
+
+        private final JLabel desc;
+
+        public OutputPane ()
+        {
+            box = new JCheckBox();
+            box.addActionListener(this);
+
+            final String className = getClass().getSimpleName();
+            name = new JLabel(resources.getString(className + ".text"));
+            desc = new JLabel(resources.getString(className + ".desc"));
+            name.setToolTipText(resources.getString(className + ".toolTipText"));
+
+            // Layout
+            final FormLayout layout = new FormLayout(columnSpecs, "pref");
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+            builder.addRaw(box).xy(1, 1);
+            builder.addRaw(name).xy(3, 1);
+            builder.addRaw(desc).xy(5, 1);
+        }
+
+        @Override
+        public void setEnabled (boolean enabled)
+        {
+            super.setEnabled(enabled);
+            box.setEnabled(enabled);
+            name.setEnabled(enabled);
+            desc.setEnabled(enabled);
+        }
+    }
+
+    //-------------//
+    // OutputsPane //
+    //-------------//
+    /**
+     * Where should outputs be stored.
+     */
+    private static class OutputsPane
+            extends Panel
+    {
+        final SeparatePane separatePane = new SeparatePane();
+
+        final BrowsePane defaultPane = new BrowsePane();
+
+        final SiblingPane siblingPane = new SiblingPane(defaultPane, separatePane);
+
+        public OutputsPane ()
+        {
+            final String className = getClass().getSimpleName();
+            setBorder(new TitledBorder(resources.getString(className + ".titledBorder.text")));
+
+            // Layout
+            final FormLayout layout = new FormLayout(
+                    "fill:pref",
+                    "6dlu" // Title height
+                            + ",pref" // Sibling
+                            + ",1dlu,pref" // Default
+                            + ",1dlu,pref"); // Separate
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+
+            int r = 0;
+            builder.addRaw(siblingPane).xy(1, r += 2);
+            builder.addRaw(defaultPane).xy(1, r += 2);
+            builder.addRaw(separatePane).xy(1, r += 2);
+        }
+    }
+
+    //------------//
+    // PluginPane //
+    //------------//
+    /**
+     * Which plugin should be the default one.
+     */
+    private static class PluginPane
+            extends Panel
+            implements ActionListener
+    {
+        private final JComboBox<String> pluginBox; // ComboBox for registered plugins
+
+        public PluginPane ()
+        {
+            final String className = getClass().getSimpleName();
+            setBorder(new TitledBorder(resources.getString(className + ".titledBorder.text")));
+            final String tip = resources.getString(className + ".pluginBox.toolTipText");
+
+            // Define pluginBox
+            final Collection<String> ids = PluginsManager.getInstance().getPluginIds();
+            pluginBox = new JComboBox<>(ids.toArray(new String[ids.size()]));
+            pluginBox.setToolTipText(tip);
+            pluginBox.addActionListener(this);
+
+            // Layout
+            final Panel content = new Panel();
+            final FormLayout layout = new FormLayout(columnSpecs, "pref");
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(content);
+            builder.addRaw(pluginBox).xyw(1, 1, 3);
+            builder.addRaw(new JLabel(tip)).xy(5, 1);
+
+            // Outer panel
+            final FormLayout outerLayout = new FormLayout("fill:pref", "6dlu,pref"); // Content
+            final FormBuilder outerBuilder = FormBuilder.create().layout(outerLayout).panel(this);
+            outerBuilder.addRaw(content).xy(1, 2);
+
+            // Initial status
+            pluginBox.setSelectedItem(PluginsManager.defaultPluginId.getValue());
+        }
+
+        @Override
+        public void actionPerformed (ActionEvent e)
+        {
+            PluginsManager.defaultPluginId.setSpecific(
+                    pluginBox.getItemAt(pluginBox.getSelectedIndex()));
+        }
+    }
+
+    //-------------//
+    // ScalingPane //
+    //-------------//
+    /**
+     * Handling of global font ratio at application level.
+     */
+    private static class ScalingPane
+            extends Panel
+            implements ChangeListener
+    {
+        private final int defaultSize = UIUtil.getDefaultFontSize();
+
+        private final double min = UIUtil.getMinGlobalFontRatio();
+
+        private final double max = UIUtil.getMaxGlobalFontRatio();
+
+        private final JSlider slider = new JSlider(0, 100); // 0 for min, 100 for max
+
+        private final JLabel label = new JLabel();
+
+        private final String sliderText;
+
+        public ScalingPane ()
+        {
+            final String className = getClass().getSimpleName();
+            sliderText = resources.getString(className + ".slider.text");
+
+            // Define slider
+            slider.setToolTipText(sliderText);
+            slider.addChangeListener(this);
+            slider.addMouseListener(new MouseAdapter()
+            {
+                @Override
+                public void mouseReleased (MouseEvent e)
+                {
+                    // Register ratio value
+                    final double ratio = ratioOf(slider.getValue());
+                    UIUtil.setGlobalFontRatio(ratio);
+                }
+            });
+
+            // Layout
+            final FormLayout layout = new FormLayout(columnSpecs, "fill:pref");
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+            builder.addRaw(slider).xyw(1, 1, 3);
+            builder.addRaw(label).xy(5, 1);
+
+            // Initial status
+            final double ratio = UIUtil.getGlobalFontRatio();
+            slider.setValue(tickOf(ratio));
+            adjustLabelFont(ratio);
+        }
+
+        private void adjustLabelFont (double ratio)
+        {
+            label.setFont(label.getFont().deriveFont((float) ratio * defaultSize));
+
+            final int percent = (int) Math.rint(ratio * 100);
+            label.setText(percent + "% " + sliderText);
+        }
+
+        private double ratioOf (int tick)
+        {
+            return min + ((tick * (max - min)) / 100);
+        }
+
+        @Override
+        public void stateChanged (ChangeEvent e)
+        {
+            final double ratio = ratioOf(slider.getValue());
+            adjustLabelFont(ratio);
+        }
+
+        private int tickOf (double ratio)
+        {
+            return (int) Math.rint((100 * (ratio - min)) / (max - min));
+        }
+    }
+
+    //--------------//
+    // SeparatePane //
+    //--------------//
+    /**
+     * Handling of separate switch.
+     */
+    private static class SeparatePane
+            extends OutputPane
+    {
+        public SeparatePane ()
+        {
+            box.setSelected(BookManager.useSeparateBookFolders().isSet());
+        }
+
+        @Override
+        public void actionPerformed (ActionEvent e)
+        {
+            BookManager.useSeparateBookFolders().setValue(box.isSelected());
+        }
+    }
+
+    //-------------//
+    // SiblingPane //
+    //-------------//
+    /**
+     * Handling of sibling switch.
+     */
+    private static class SiblingPane
+            extends OutputPane
+    {
+        final BrowsePane defaultPane;
+
+        final SeparatePane separatePane;
+
+        public SiblingPane (BrowsePane defaultPane,
+                            SeparatePane separatePane)
+        {
+            this.defaultPane = defaultPane;
+            this.separatePane = separatePane;
+
+            final boolean isSet = BookManager.useInputBookFolder().isSet();
+            box.setSelected(isSet);
+            defaultPane.setEnabled(!isSet);
+            separatePane.setEnabled(!isSet);
+        }
+
+        @Override
+        public void actionPerformed (ActionEvent e)
+        {
+            final boolean isSet = box.isSelected();
+            BookManager.useInputBookFolder().setValue(isSet);
+            defaultPane.setEnabled(!isSet);
+            separatePane.setEnabled(!isSet);
+        }
+    }
+
+    //--------------------//
+    // StandardTopicsPane //
+    //--------------------//
+    /**
+     * Pane for the standard topic switches.
+     */
+    private static class StandardTopicsPane
+            extends Panel
+    {
+        public StandardTopicsPane ()
+        {
+            final String className = getClass().getSimpleName();
+            setBorder(new TitledBorder(resources.getString(className + ".titledBorder.text")));
+
+            // Localized values of Topic enum type
+            final LabeledEnum<Topic>[] localeTopics = LabeledEnum.values(
+                    Topic.values(),
+                    resources,
+                    Topic.class);
+
+            // Layout
+            final FormLayout layout = new FormLayout(
+                    "fill:pref",
+                    "6dlu" // Title height
+                            + ",pref" // Topic1
+                            + ",1dlu,pref" // Topic2
+                            + ",1dlu,pref"); // Topic3
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+            int r = 0;
+
+            // Standard switches
+            for (Topic topic : Topic.values()) {
+                if (!topic.isAdvanced()) {
+                    final String topicName = LabeledEnum.valueOf(topic, localeTopics).label;
+                    builder.addRaw(new TopicPane(topic, topicName)).xy(1, r += 2);
+                }
+            }
+        }
+    }
+
+    //-------//
+    // Topic //
+    //-------//
+    /**
+     * All topics.
+     */
+    public static enum Topic
+    {
+        // Standard
+        SWAPPED_SHEETS(AdvancedTopics.constants.swapProcessedSheets),
+        PARALLEL_SYSTEMS(AdvancedTopics.constants.processSystemsInParallel),
+        MULTIPLE_DELETE(AdvancedTopics.constants.multipleDelete),
+
+        // Advanced
+        SAMPLES(AdvancedTopics.constants.useSamples),
+        ANNOTATIONS(AdvancedTopics.constants.useAnnotations),
+        PLOTS(AdvancedTopics.constants.usePlots),
+        SPECIFIC_VIEWS(AdvancedTopics.constants.useSpecificViews),
+        SPECIFIC_ITEMS(AdvancedTopics.constants.useSpecificItems),
+        DEBUG(AdvancedTopics.constants.useDebug);
+
+        /** Underlying constant. */
+        private final Constant.Boolean constant;
+
+        Topic (Constant.Boolean constant)
+        {
+            this.constant = constant;
+        }
+
+        public String getDescription ()
+        {
+            return constant.getDescription();
+        }
+
+        public boolean isSet ()
+        {
+            return constant.isSet();
+        }
+
+        public void set (boolean val)
+        {
+            constant.setValue(val);
+        }
+
+        public boolean isAdvanced ()
+        {
+            return switch (this) {
+                case SWAPPED_SHEETS, PARALLEL_SYSTEMS, MULTIPLE_DELETE -> false;
+                default -> true;
+            };
+        }
+    }
+
+    //-----------//
+    // TopicPane //
+    //-----------//
+    /**
+     * Handling of one topic switch.
+     */
+    private static class TopicPane
+            extends Panel
+            implements ActionListener
+    {
+        private final Topic topic; // Handled topic
+
+        /**
+         * Build a pane for one topic.
+         *
+         * @param topic     enum Topic
+         * @param topicName translated value of enum topic
+         */
+        public TopicPane (Topic topic,
+                          String topicName)
+        {
+            this.topic = topic;
+
+            String desc = resources.getString("Topic." + topic + ".toolTipText");
+
+            if (desc == null) {
+                desc = topic.getDescription();
+            }
+
+            final JCheckBox box = new JCheckBox();
+            box.addActionListener(this);
+            box.setSelected(topic.isSet());
+
+            // Layout
+            final FormLayout layout = new FormLayout(columnSpecs, "fill:pref");
+            final FormBuilder builder = FormBuilder.create().layout(layout).panel(this);
+            builder.addRaw(box).xy(1, 1);
+            builder.addRaw(new JLabel(topicName)).xy(3, 1);
+            builder.addRaw(new JLabel(desc)).xy(5, 1);
+        }
+
+        @Override
+        public void actionPerformed (ActionEvent e)
+        {
+            final JCheckBox box = (JCheckBox) e.getSource();
+            topic.set(box.isSelected());
+        }
+    }
+}

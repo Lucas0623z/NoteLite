@@ -1,0 +1,84 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                               C h o r d P e d a l R e l a t i o n                              //
+//                                                                                                //
+//------------------------------------------------------------------------------------------------//
+// <editor-fold defaultstate="collapsed" desc="hdr">
+//
+//  Copyright © NoteLite 2026. All rights reserved.
+//
+//  This program is free software: you can redistribute it and/or modify it under the terms of the
+//  GNU Affero General Public License as published by the Free Software Foundation, either version
+//  3 of the License, or (at your option) any later version.
+//
+//  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU Affero General Public License for more details.
+//
+//  You should have received a copy of the GNU Affero General Public License along with this
+//  program.  If not, see <http://www.gnu.org/licenses/>.
+//------------------------------------------------------------------------------------------------//
+// </editor-fold>
+package com.notelite.omr.sig.relation;
+
+import com.notelite.omr.sig.inter.Inter;
+import com.notelite.omr.sig.inter.PedalInter;
+
+import org.jgrapht.event.GraphEdgeChangeEvent;
+
+import javax.xml.bind.annotation.XmlRootElement;
+
+/**
+ * Class <code>ChordPedalRelation</code> represents a support relation between a chord
+ * and a pedal item (either start or stop).
+ *
+ * @author NoteLite Contributors
+ */
+@XmlRootElement(name = "chord-pedal")
+public class ChordPedalRelation
+        extends Support
+{
+    //~ Methods ------------------------------------------------------------------------------------
+
+    //-------//
+    // added //
+    //-------//
+    @Override
+    public void added (GraphEdgeChangeEvent<Inter, Relation> e)
+    {
+        final PedalInter pedal = (PedalInter) e.getEdgeTarget();
+
+        pedal.checkAbnormal();
+    }
+
+    //----------------//
+    // isSingleSource //
+    //----------------//
+    @Override
+    public boolean isSingleSource ()
+    {
+        return true;
+    }
+
+    //----------------//
+    // isSingleTarget //
+    //----------------//
+    @Override
+    public boolean isSingleTarget ()
+    {
+        return true;
+    }
+
+    //---------//
+    // removed //
+    //---------//
+    @Override
+    public void removed (GraphEdgeChangeEvent<Inter, Relation> e)
+    {
+        final PedalInter pedal = (PedalInter) e.getEdgeTarget();
+
+        if (!pedal.isRemoved()) {
+            pedal.checkAbnormal();
+        }
+    }
+}

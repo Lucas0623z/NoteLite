@@ -1,0 +1,48 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                                  s e t t i n g s . g r a d l e                                 //
+//                                                                                                //
+//------------------------------------------------------------------------------------------------//
+//
+// NoteLite project.
+//
+// Sub-projects:
+//      - app       : The application
+//      - docs      : The handbook documentation
+//      - flatpak   : The Linux flatpak
+//      - packaging : The building of installers for Windows, Linux and macOS
+//      - schemas   : The documentation about the .omr files
+//
+//--------------------------------------------------------------------------------------------------
+
+pluginManagement {
+  repositories {
+    maven { url="app/build/dependencies" }
+    maven { url="dependencies" }
+    gradlePluginPortal()
+  }
+}
+
+// Name for the project
+rootProject.name = 'NoteLite'
+
+// Application
+include 'app'
+
+// Installer for Linux
+include 'flatpak'
+
+if (startParameter.projectProperties['isFlatpak'] == 'true') {
+    println "Initialization. isFlatpak is set, skipping useless subprojects"
+} else {
+    println "Initialization. isFlatpak is not set"
+
+    // Documentation
+    include 'docs'
+
+    // Multi-OS packaging
+    include 'packaging'
+
+    // Generation of schemas-based documentation
+    include 'schemas'
+}

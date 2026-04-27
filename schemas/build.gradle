@@ -1,0 +1,405 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                           : s c h e m a s / b u i l d . g r a d l e                            //
+//                                                                                                //
+//--------------------------------------------------------------------------------------------------
+// The goals of this 'schemas' sub-project are:
+//
+// 1. Generate the 3 XSD schemas that correspond to book.xml and sheet#N.xml files found in any
+//    .omr NoteLite project file and to a PlayList.xml file handled by Split and Merge.
+//    The purpose is to allow any consumer to read these files regardless of the coding language.
+//    These schemas could also be used for validation purposes.
+//
+// 2. Automatically generate the end-user documentation for these book.xml, sheet#N.xml
+//    and playlist.xml files.
+//
+// Project structuring:
+//    
+// The jaxb2-maven-plugin should be able to generate the JavaDoc-annotated schemas from Java
+// source files. Unfortunately, I could not make it work.
+//
+// So, the current working solution is as follows:
+//    Global task: genSchemaDoc
+//
+// 1. Use JAXB (already used in NoteLite [un]marshalling) to generate plain schemas from the Java 
+//    sources.
+//    They are called 'plain' because these JAXB-generated schemas contain no JavaDoc information.
+//    Tasks: genPlainSchemas (genPlainSchemaBook, genPlainSchemaPlayList, genPlainSchemaSheet)
+//
+// 2. Call jaxb2-maven-plugin as a basic Java library to annotate the plain schemas with JavaDoc 
+//    retrieved from the relevant Java sources.
+//    Tasks: injectJavadoc
+//
+// 3. Add a header text at the beginning of each schema, renamed according to the root class,
+//    and collect the names of all linked image files.
+//    Tasks: completeSchemas (completeSchemaBook, completeSchemaPlayList, completeSchemaSheet)
+//
+// 4. Copy selected images from doc-files folders of Java sources into a single doc-files folder
+//    next to the XSD and HTML files, so that links to images can work.
+//    Tasks: copyImages
+//
+// 5. Use xs3p.xsl file and XSLT transformer to generate the HTML files from the annotated schemas.
+//    The XSLT transformer is xsltproc .
+//    Tasks: genHtmls (genHtmlBook, genHtmlPlayList, genHtmlSheet)
+//
+// 6. Wrap all files as a ZIP archive.
+//    Tasks: genArchive
+//--------------------------------------------------------------------------------------------------
+/*
+ In order to execute [:schemas:genSchemaDoc], the following tasks would be executed in this order:
+
+  1. :app:getCommit                   (org.gradle.api.tasks.Exec)
+  2. :app:getCommitShort              (org.gradle.api.tasks.Exec)
+  3. :app:generateProgramId           (org.gradle.api.DefaultTask)
+  4. :app:compileJava                 (org.gradle.api.tasks.compile.JavaCompile)
+  5. :app:processResources            (org.gradle.language.jvm.tasks.ProcessResources)
+  6. :app:classes                     (org.gradle.api.DefaultTask)
+
+  7. :schemas:compileJava             (org.gradle.api.tasks.compile.JavaCompile)
+  8. :schemas:processResources        (org.gradle.language.jvm.tasks.ProcessResources)
+  9. :schemas:classes                 (org.gradle.api.DefaultTask)
+
+ 10. :schemas:createFolders           (org.gradle.api.DefaultTask)
+
+ 11. :schemas:genPlainSchemaBook      (org.gradle.api.tasks.JavaExec)
+ 12. :schemas:genPlainSchemaPlayList  (org.gradle.api.tasks.JavaExec)
+ 13. :schemas:genPlainSchemaSheet     (org.gradle.api.tasks.JavaExec)
+ 14. :schemas:genPlainSchemas         (org.gradle.api.DefaultTask)
+
+ 15. :schemas:injectJavadoc           (org.gradle.api.tasks.JavaExec)
+
+ 16. :schemas:completeSchemaBook      (org.gradle.api.DefaultTask)
+ 17. :schemas:completeSchemaPlayList  (org.gradle.api.DefaultTask)
+ 18. :schemas:completeSchemaSheet     (org.gradle.api.DefaultTask)
+ 19. :schemas:completeSchemas         (org.gradle.api.DefaultTask)
+
+ 20. :schemas:checkIndexFile          (org.gradle.api.DefaultTask)
+ 21. :schemas:copyImages              (org.gradle.api.tasks.Copy)
+
+ 22. :schemas:copyIndexFile           (org.gradle.api.tasks.Copy)
+
+ 23. :schemas:checkXsltProc           (org.gradle.api.DefaultTask)
+ 24. :schemas:GenHtmlBook             (org.gradle.api.tasks.Exec)
+ 25. :schemas:GenHtmlPlayList         (org.gradle.api.tasks.Exec)
+ 26. :schemas:GenHtmlSheet            (org.gradle.api.tasks.Exec)
+ 27. :schemas:genHtmls                (org.gradle.api.DefaultTask)
+
+ 28. :schemas:genArchive              (org.gradle.api.tasks.bundling.Zip)
+
+ 29. :schemas:genSchemaDoc            (org.gradle.api.DefaultTask)
+*/
+
+apply plugin: 'java'
+
+evaluationDependsOn(':app')
+
+def app = project(':app')
+def prj = project(':schemas')
+
+// Pattern to detect a link to some doc-files folder
+String docFilesPattern = 'src="doc-files/([^"]*)"'
+
+repositories {
+    mavenCentral() 
+}
+
+dependencies { 
+    implementation(
+        'args4j:args4j:2.33',
+        'javax.xml.bind:jaxb-api:2.3.1',
+        'org.apache.maven:maven-plugin-api:3.9.11',
+        'org.apache.maven.plugin-tools:maven-plugin-annotations:3.5.1',
+        'org.codehaus.mojo:jaxb2-maven-plugin:3.3.0'
+    )
+}
+
+// Main task
+task genSchemaDoc {
+    group = "Documentation"
+    description = "Generate commented schemas and HTML doc to document NoteLite .omr format"
+    dependsOn(':app:classes')
+    dependsOn('injectJavadoc')
+    dependsOn('completeSchemas')
+    dependsOn('copyIndexFile')
+    dependsOn('copyImages')
+    dependsOn('genHtmls')
+    dependsOn('genArchive')
+}
+
+task createFolders {
+    description = "Allocate target folders"
+    
+    def plain = file("build/plain")                 // Plain .xsd files (w/o JavaDoc)
+    outputs.dir(plain)
+    
+    def annotated = file("build/annotated")         // Annotated .xsd files (w/ JavaDoc)
+    outputs.dir(annotated)
+
+    def output = file("build/output")               // Complete .xsd and .html files
+    
+    def docFiles = file("build/output/doc-files")   // Images referred from the .html files
+
+    // Declaration needed to prevent output content to be later deleted by the task 'copyIndexFile'
+    outputs.dir(output)
+
+    doFirst {
+        plain.mkdirs()
+        annotated.mkdirs()
+        docFiles.mkdirs()
+    }
+}
+
+task genPlainSchemas {
+    description = "Generate all plain schemas, without javadoc" 
+}
+
+task completeSchemas {
+    description = "Add header text to schemas"
+}
+
+task genHtmls {
+    description = "Generate all HTMLs from complete schemas"
+    group = "Documentation"
+}
+
+ext.toCopy = [] // Names of image files to copy
+
+task checkIndexFile {
+    description = "Check index.html for doc-files links"
+
+    doLast {
+        file('dev/index.html').eachLine { srcLine ->
+            srcLine.eachMatch(docFilesPattern) { group ->
+                println "Got image " + group[1]
+                prj.ext.toCopy.add(group[1])
+            }
+        }
+    }
+}
+
+task copyIndexFile (type: Copy) {
+    description = "Copy index.html to output"
+    dependsOn('createFolders')
+
+    // Warning: This task would first empty the target directory (build/output)!
+    // unless this directory is declared as an output of task 'createFolders'.
+
+    from(file('dev/index.html'))
+    into("build/output")
+}
+
+task copyImages(type: Copy) {
+    description = "Copy all image files into a single doc-files directory"
+    dependsOn('createFolders')
+    dependsOn('checkIndexFile')
+
+    int copied = 0
+    includeEmptyDirs = false
+
+    from(file("../app/src/main/java"), file("dev"))
+    include("**/*.png")
+    into("build/output/doc-files")
+
+    eachFile { fileCopyDetails ->
+        // Check file name against list of names to copy
+        String fName = fileCopyDetails.getName()
+
+        if (prj.ext.toCopy.contains(fName)) {
+            println "Copying image " + fName
+            // Discard directory hierarchy information and copy the file
+            fileCopyDetails.setPath(fName)
+            copied++
+        } else {
+            exclude()
+        }
+    }
+
+    doLast {
+        println copied + " images to " + destinationDir
+    }
+}
+
+task injectJavadoc(type: JavaExec) {
+    description = "Annotate plain schemas with JavaDoc content"
+    dependsOn(genPlainSchemas)
+    dependsOn(compileJava)
+
+    inputs.dir("build/plain")
+    outputs.dir("build/annotated")
+
+    mainClass = 'com.notelite.schema.SchemaAnnotator'
+    classpath(sourceSets.main.runtimeClasspath)
+    args = ["build/plain", "build/annotated", "../app/src/main/java/org/notelite/omr"]
+}
+
+// Defining 'debug' task allows to set its arguments later
+task debug(type: JavaExec) {
+    description = "Annotate plain schemas with JavaDoc content in DEBUG mode"
+    dependsOn(genPlainSchemas)
+    dependsOn('classes')
+
+    mainClass = 'com.notelite.schema.SchemaAnnotator'
+    classpath(sourceSets.main.runtimeClasspath)
+    args = ["build/plain", "build/annotated", "../app/src/main/java/org/notelite/omr"]
+    debug = true
+}
+
+ext.xsltprocFound = 'no'
+task checkXsltProc {
+    description = "Verifies that xsltproc is installed"
+
+    doLast {
+        try {
+            def path = "xsltproc"
+            def proc = [path, "--version"].execute()
+            proc.waitFor()
+            println ""
+            println "xsltproc found. Output for --version option is as follows:"
+            println proc.in.text.trim()
+            println ""
+            prj.ext.xsltprocFound = 'yes'
+        } catch (ignored) {
+            println "*** =================================================="
+            println "*** xsltproc not found!"
+            println "***    Annotated XSD schemas will still be generated,"
+            println "***    but no HTML will be derived from them."
+            println "*** =================================================="
+        }
+    }
+}
+
+// Data for XSLT transformation
+String styleSheet = "xs3p.xsl"
+int xmlDocWidth = 50
+
+// Definition of tasks for root-classes Book, Sheet and PlayList
+[["cls" : "Book",  "src" : "com.notelite.omr.sheet.Book",  "sch" : "schema1.xsd"],
+ ["cls" : "Sheet", "src" : "com.notelite.omr.sheet.Sheet", "sch" : "schema2.xsd"],
+ ["cls" : "PlayList", "src" : "com.notelite.omr.sheet.PlayList", "sch" : "schema3.xsd"]].each { map ->
+    def cls = "${map["cls"]}" // Class
+    def src = "${map["src"]}" // Source
+    def sch = "${map["sch"]}" // Schema
+    
+    // Generating plain schema
+    task ("genPlainSchema$cls", type: JavaExec) {
+        description = "Generate plain XSD schema for $cls class"
+        dependsOn('createFolders')
+        outputs.file("build/plain/$sch")
+  
+        mainClass = 'com.notelite.omr.SchemaGeneration'
+        classpath(app.sourceSets.main.runtimeClasspath)
+        args=["$src", "build/plain/$sch"]
+        
+        doFirst {
+            println "Generating build/plain/$sch for $cls class"
+        }
+    }    
+    genPlainSchemas.dependsOn("genPlainSchema$cls")    
+    
+    // Adding schema header to complete (annotated) schemaN.xsd as <RootClass>.xsd
+    // While reading all input lines, we record the name of each linked image file
+    task ("completeSchema$cls") {
+        description = "Complete schema ${cls}.xsd"
+        dependsOn(injectJavadoc)
+        
+        inputs.file("build/annotated/$sch")
+        outputs.file("build/output/${cls}.xsd")
+
+        doLast {
+            File target = file("build/output/${cls}.xsd")
+            if (target.exists()) {
+                delete(target)
+            }
+                        
+            boolean done = false
+            String lineSeparator = System.getProperty("line.separator")
+
+            // We'll check each xsd line for image link to doc-files, something like:
+            // <img src="doc-files/Book-vs-Sheet.png" alt="Book-vs-Sheet UML">
+            // to retrieve file name: Book-vs-Sheet.png
+            
+            file("build/annotated/$sch").eachLine() { srcLine ->
+                // Insert external header text at beginning of schema
+                if (!done && (srcLine.indexOf("element") != -1)) {
+                    done = true
+
+                    File header = file("dev/headers/schemaHeaderFor${cls}.xsd")
+                    if (header.exists()) {
+                        header.eachLine() { hdrLine ->                    
+                            hdrLine.eachMatch(docFilesPattern) { group ->  
+                                println "Got header image " + group[1]
+                                prj.ext.toCopy.add(group[1])
+                            }
+                            
+                            target << hdrLine << lineSeparator
+                        }
+                    } else {
+                        println "No $header to include"
+                    }
+                }
+                
+                srcLine.eachMatch(docFilesPattern) { group ->  
+                    println "Got schema image " + group[1]
+                    prj.ext.toCopy.add(group[1])
+                }
+                
+                target << srcLine << lineSeparator
+            }  
+        }        
+    }
+    completeSchemas.dependsOn("completeSchema$cls")
+    copyImages.dependsOn("completeSchema$cls")
+    
+    // Generating HTML from complete schema, using xsltproc
+    // NOTA: this processor works but is getting old, stuck to stylesheet version 1.0
+    task ("GenHtml$cls", type: Exec) {
+        description = "Generate HTML for $cls class, using XsltProc"
+        group = "Documentation"
+        dependsOn('checkXsltProc')
+        dependsOn("completeSchema$cls")
+        dependsOn("copyIndexFile")          // Needed to please Gradle
+
+        inputs.file("build/output/${cls}.xsd")
+        outputs.file("build/output/${cls}.html")
+
+        doFirst {
+            def args = (app.ext.hostOSName == "windows") ? ["cmd", "/c"] : []
+
+            if (prj.ext.xsltprocFound == 'yes') {
+                println "Generating HTML for $cls class"
+
+                args.add("xsltproc")
+                args.addAll(["--stringparam", "title", "$cls-rooted Schema Documentation"])
+                args.addAll(["--stringparam", "printNSPrefixes", "false"])
+                args.addAll(["--stringparam", "xmlDocWidth", "$xmlDocWidth"])
+                args.addAll(["--stringparam", "useTypeShortcut", "true"])
+                args.addAll(["--stringparam", "useMarkdown", "false"])
+                ///args.addAll(["--stringparam", "debug", "true"])
+                args.add("--nonet")
+                args.addAll(["--output", "build/output/${cls}.html"])
+                args.add(styleSheet)
+                args.add("build/output/${cls}.xsd")
+            } else {
+                println "*** No HTML generated from ${cls}.xsd schema"
+            }
+             
+            commandLine(args)
+        }
+    }
+
+    genHtmls.dependsOn("GenHtml$cls")       
+}
+
+// Build a ZIP archive with relevant .xsd and .html files (plus doc-files folder)
+task genArchive(type: Zip) {
+    description = "Generate the schemas doc ZIP archive"
+    dependsOn("copyImages")
+    dependsOn("genHtmls")
+
+    setArchiveBaseName("NoteLite_Schemas_Doc")
+    setArchiveVersion(app.version)
+
+    from("build/output")
+
+    eachFile { fileCopyDetails -> println "Zipping " + fileCopyDetails.getName() }
+}

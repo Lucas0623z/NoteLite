@@ -1,0 +1,52 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                                       N o t e L i t e                                              //
+//                                                                                                //
+//------------------------------------------------------------------------------------------------//
+// <editor-fold defaultstate="collapsed" desc="hdr">
+//
+//  Copyright © NoteLite 2026. All rights reserved.
+//
+//  This program is free software: you can redistribute it and/or modify it under the terms of the
+//  GNU Affero General Public License as published by the Free Software Foundation, either version
+//  3 of the License, or (at your option) any later version.
+//
+//  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU Affero General Public License for more details.
+//
+//  You should have received a copy of the GNU Affero General Public License along with this
+//  program.  If not, see <http://www.gnu.org/licenses/>.
+//------------------------------------------------------------------------------------------------//
+// </editor-fold>
+
+/**
+ * Class <code>NoteLite</code> is simply a convenient entry point to OMR, which
+ * delegates the call to {@link com.notelite.omr.Main#main}.
+ *
+ * @author NoteLite Contributors
+ */
+public final class NoteLite
+{
+    //~ Constructors -------------------------------------------------------------------------------
+
+    /** To avoid instantiation. */
+    private NoteLite ()
+    {
+    }
+
+    //~ Methods ------------------------------------------------------------------------------------
+
+    //------//
+    // main //
+    //------//
+    /**
+     * The main entry point, which just calls {@link com.notelite.omr.Main#main}.
+     *
+     * @param args These arguments are simply passed to Main
+     */
+    public static void main (final String[] args)
+    {
+        com.notelite.omr.Main.main(args);
+    }
+}

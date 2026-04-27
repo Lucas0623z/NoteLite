@@ -1,0 +1,16 @@
+    <xs:annotation>
+      <xs:documentation>
+        <![CDATA[This documentation describes any <b><code>sheet#N.xml</code></b> file within an NoteLite <code>.omr</code> project file.
+<ul>
+<li>The <b><a href="#type_sheet">Sheet</a></b> class is the root of the schema.
+<li>The <a href="Sheet.xsd"><b>Sheet.xsd</b></a> file contains the annotated raw schema.
+</ul>
+<p>
+The diagram below presents <code>Book</code> and <code>Sheet</code> simplified structures.
+<p>
+This <code>Sheet</code> documentation corresponds to the <b>right half</b> of the diagram.
+<p>
+<img src="doc-files/Book-vs-Sheet.png" alt="Book-vs-Sheet UML">]]>
+      </xs:documentation>
+    </xs:annotation>
+

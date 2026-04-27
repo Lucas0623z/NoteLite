@@ -1,0 +1,41 @@
+    <xs:annotation>
+      <xs:documentation>
+        <![CDATA[This documentation describes the format of any playlist <b><code>.xml</code></b> file.
+<br>
+Such playlist can be saved/loaded by the NoteLite Split &amp; Merge feature or even
+created/edited via any text editor.
+<ul>
+<li>The <b><a href="#type_playList">PlayList</a></b> class is the root of the schema.
+<li>The <a href="PlayList.xsd"><b>PlayList.xsd</b></a> file contains the annotated raw schema.
+</ul>
+<p>
+Here is an example of a playlist .xml file:
+<pre>
+&lt;?xml version="1.0" ?&gt;
+&lt;play-list&gt;
+  &lt;excerpt&gt;
+    &lt;path&gt;D:\soft\notelite-github\development\data\examples\Dichterliebe01.pdf&lt;/path&gt;
+    &lt;sheets-selection&gt;2&lt;/sheets-selection&gt;
+  &lt;/excerpt&gt;
+  &lt;excerpt&gt;
+    &lt;path&gt;D:\soft\notelite-github\development\data\examples\chula.png&lt;/path&gt;
+    &lt;sheets-selection&gt;1&lt;/sheets-selection&gt;
+  &lt;/excerpt&gt;
+  &lt;excerpt&gt;
+    &lt;path&gt;D:\soft\notelite-github\development\data\examples\carmen.png&lt;/path&gt;
+    &lt;sheets-selection&gt;1&lt;/sheets-selection&gt;
+  &lt;/excerpt&gt;
+&lt;/play-list&gt;
+</pre>
+<p>
+The diagram below presents <code>PlayList</code> and <code>Excerpt</code> 
+entities and their role in the Split &amp; Merge feature:
+<ol>
+<li>Interactive definition or edition of a playlist
+<li>Use of the playlist to build the resulting compound .omr book file.
+</ol>
+<p>
+<img src="doc-files/PlayList.png" alt="PlayList UML">]]>
+      </xs:documentation>
+    </xs:annotation>
+

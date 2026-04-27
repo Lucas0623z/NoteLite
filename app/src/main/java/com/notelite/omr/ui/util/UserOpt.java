@@ -1,0 +1,48 @@
+//------------------------------------------------------------------------------------------------//
+//                                                                                                //
+//                                          U s e r O p t                                         //
+//                                                                                                //
+//------------------------------------------------------------------------------------------------//
+// <editor-fold defaultstate="collapsed" desc="hdr">
+//
+//  Copyright © NoteLite 2026. All rights reserved.
+//
+//  This program is free software: you can redistribute it and/or modify it under the terms of the
+//  GNU Affero General Public License as published by the Free Software Foundation, either version
+//  3 of the License, or (at your option) any later version.
+//
+//  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU Affero General Public License for more details.
+//
+//  You should have received a copy of the GNU Affero General Public License along with this
+//  program.  If not, see <http://www.gnu.org/licenses/>.
+//------------------------------------------------------------------------------------------------//
+// </editor-fold>
+package com.notelite.omr.ui.util;
+
+import org.jdesktop.application.Application;
+import org.jdesktop.application.ResourceMap;
+
+/**
+ * Class <code>UserOpt</code> provides user options.
+ *
+ * @author NoteLite Contributors
+ */
+public enum UserOpt
+{
+    OK,
+    Commit,
+    Apply,
+    Cancel,
+    Exit;
+
+    private static final ResourceMap resources = Application.getInstance().getContext()
+            .getResourceMap(UserOpt.class);
+
+    @Override
+    public String toString ()
+    {
+        return resources.getString(name() + ".text");
+    }
+}

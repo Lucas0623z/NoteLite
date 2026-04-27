@@ -1,0 +1,362 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<diagram program="umlet" version="14.2">
+  <help_text>//Uncomment the following line to change the fontsize:
+        //fontsize=14
+
+        //Welcome to UMLet!
+
+        // *Double-click on UML elements to add them to the diagram.
+        // *Edit element properties by modifying the text in this panel.
+        // *Edit the files in the 'palettes' directory to store your own element palettes.
+        // *Press Del or Backspace to remove elements from the diagram.
+        // *Hold down Ctrl key to select multiple elements.
+        // *Press c to copy the UML diagram to the system clipboard.
+        // * This text will be stored with each diagram. Feel free to use the area for notes.
+    </help_text>
+  <zoom_level>9</zoom_level>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>450</x>
+      <y>459</y>
+      <w>89</w>
+      <h>44</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;&lt;&lt;-</panel_attributes>
+    <additional_attributes>27;27;72;27</additional_attributes>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Class</type>
+    <coordinates>
+      <x>369</x>
+      <y>477</y>
+      <w>108</w>
+      <h>171</h>
+    </coordinates>
+    <panel_attributes>*Book*
+--
+path
+offset
+scores
+--
+reachBookStep()
+transcribe()
+export()
+print()
+store()
+sample()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Class</type>
+    <coordinates>
+      <x>522</x>
+      <y>477</y>
+      <w>90</w>
+      <h>153</h>
+    </coordinates>
+    <panel_attributes>*/SheetStub/*
+--
+number
+invalid?
+doneSteps
+currentStep
+pageRefs
+--
+reachStep()
+storeSheet()
+swapSheet()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Class</type>
+    <coordinates>
+      <x>522</x>
+      <y>9</y>
+      <w>117</w>
+      <h>180</h>
+    </coordinates>
+    <panel_attributes>&lt;&lt;singleton&gt;&gt;
+*StubsController*
+bg=#ffaaff
+--
+stubsPane
+stubService
+--
+getCurrentStub()
+getCurrentBook()
+subscribe()
+unsubscribe()
+addAssembly()
+selectAssembly()
+removeAssembly()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>558</x>
+      <y>180</y>
+      <w>36</w>
+      <h>315</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;-</panel_attributes>
+    <additional_attributes>12.0;330.0;10.0;10.0</additional_attributes>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>414</x>
+      <y>414</y>
+      <w>44</w>
+      <h>80</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;&lt;&lt;-</panel_attributes>
+    <additional_attributes>27;27;27;63</additional_attributes>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>9</x>
+      <y>261</y>
+      <w>72</w>
+      <h>54</h>
+    </coordinates>
+    <panel_attributes>*NoteLite*
+--
+--
+main()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>117</x>
+      <y>261</y>
+      <w>45</w>
+      <h>54</h>
+    </coordinates>
+    <panel_attributes>*Main*
+--
+--
+main()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>144</x>
+      <y>369</y>
+      <w>108</w>
+      <h>126</h>
+    </coordinates>
+    <panel_attributes>*CLI*
+bg=#88ff88
+--
+parameters
+--
+getOutputFolder()
+getOptions()
+getCliTasks()
+isBatchMode()
+isHelpMode()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>54</x>
+      <y>270</y>
+      <w>80</w>
+      <h>44</h>
+    </coordinates>
+    <panel_attributes>lt=.&gt;</panel_attributes>
+    <additional_attributes>27;27;63;27</additional_attributes>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>126</x>
+      <y>288</y>
+      <w>44</w>
+      <h>98</h>
+    </coordinates>
+    <panel_attributes>lt=-&gt;</panel_attributes>
+    <additional_attributes>27;27;27;81</additional_attributes>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>198</x>
+      <y>261</y>
+      <w>99</w>
+      <h>45</h>
+    </coordinates>
+    <panel_attributes>*OMR*
+bg=#ff5555
+--
+{file extensions}</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>369</x>
+      <y>9</y>
+      <w>108</w>
+      <h>135</h>
+    </coordinates>
+    <panel_attributes>*/OmrGui/*
+bg=#ffcfff
+--
+--
+getApplication()
+getFrame()
+getGlassPane()
+displayXXX()
+xxxLog()
+xxxErrorsPane()
+xxxBoardsPane()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>369</x>
+      <y>171</y>
+      <w>108</w>
+      <h>36</h>
+    </coordinates>
+    <panel_attributes>&lt;&lt;singleton&gt;&gt;
+*MainGui*
+bg=#ffaaff</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>414</x>
+      <y>135</y>
+      <w>27</w>
+      <h>54</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;.</panel_attributes>
+    <additional_attributes>10.0;10.0;10.0;40.0</additional_attributes>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>369</x>
+      <y>252</y>
+      <w>108</w>
+      <h>90</h>
+    </coordinates>
+    <panel_attributes>*/OmrEngine/*
+bg=#bbffff
+--
+--
+loadInput()
+loadBook()
+getAllBooks()
+removeBook()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>369</x>
+      <y>369</y>
+      <w>108</w>
+      <h>72</h>
+    </coordinates>
+    <panel_attributes>&lt;&lt;singleton&gt;&gt;
+*BookManager*
+bg=#55ffff
+--
+imageHistory
+bookHistory
+</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>414</x>
+      <y>333</y>
+      <w>27</w>
+      <h>54</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;.</panel_attributes>
+    <additional_attributes>10.0;10.0;10.0;40.0</additional_attributes>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>270</x>
+      <y>162</y>
+      <w>116</w>
+      <h>125</h>
+    </coordinates>
+    <panel_attributes>lt=-&gt;
+m1=gui</panel_attributes>
+    <additional_attributes>27;108;81;108;81;27;99;27</additional_attributes>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>270</x>
+      <y>270</y>
+      <w>116</w>
+      <h>134</h>
+    </coordinates>
+    <panel_attributes>lt=-&gt;
+m1=engine</panel_attributes>
+    <additional_attributes>27;27;81;27;81;117;99;117</additional_attributes>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>135</x>
+      <y>270</y>
+      <w>80</w>
+      <h>44</h>
+    </coordinates>
+    <panel_attributes>lt=.&gt;</panel_attributes>
+    <additional_attributes>27;27;63;27</additional_attributes>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Class</type>
+    <coordinates>
+      <x>657</x>
+      <y>477</y>
+      <w>90</w>
+      <h>198</h>
+    </coordinates>
+    <panel_attributes>*/Sheet/*
+--
+number
+picture
+scale
+skew
+pages
+interIndex
+glyphIndex
+--
+export()
+print()
+store()
+sample()</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <type>com.baselet.element.old.element.Relation</type>
+    <coordinates>
+      <x>585</x>
+      <y>459</y>
+      <w>89</w>
+      <h>44</h>
+    </coordinates>
+    <panel_attributes>lt=-</panel_attributes>
+    <additional_attributes>27;27;72;27</additional_attributes>
+  </element>
+</diagram>
