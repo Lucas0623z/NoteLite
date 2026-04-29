@@ -30,7 +30,11 @@ import com.notelite.omr.constant.ConstantSet;
 import com.notelite.omr.log.LogUtil;
 import com.notelite.omr.plugin.Plugin;
 import com.notelite.omr.plugin.PluginsManager;
+import com.notelite.omr.score.MidiAbstractions;
+import com.notelite.omr.score.MidiExporter;
+import com.notelite.omr.score.PageRef;
 import com.notelite.omr.score.Score;
+import com.notelite.omr.score.ScoreReduction;
 import com.notelite.omr.score.ui.BookParameters;
 import com.notelite.omr.score.ui.LogicalPartsEditor;
 import com.notelite.omr.score.ui.SheetScaling;
@@ -80,6 +84,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.beans.PropertyChangeEvent;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -90,12 +95,14 @@ import java.util.Collection;
 import java.util.List;
 
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileFilter;
 
 /**
  * Class <code>BookActions</code> gathers all UI actions related to current book.
@@ -635,7 +642,9 @@ public class BookActions
     // exportBookAs //
     //--------------//
     /**
-     * Export the current book, using MusicXML format, to a user-provided location.
+     * Export the current book, in either MusicXML or MIDI format, to a
+     * user-chosen location. The format is determined by the file type
+     * dropdown (and the resulting extension) in the save dialog.
      *
      * @param e the event that triggered this action
      * @return the task to launch in background
@@ -649,26 +658,25 @@ public class BookActions
             return null;
         }
 
-        // Let user select book export target
-        //TODO: if we have several movements in this book, export will result in several files...
-        //TODO: so, how can we check/prompt for overwrite?
         final String ext = BookManager.getExportExtension();
         final Path sansExt = BookManager.getDefaultExportPathSansExt(book);
-        final Path targetPath = Paths.get(sansExt + ext);
-        final Path bookPath = UIUtil.pathChooser(
-                true,
-                OMR.gui.getFrame(),
-                targetPath,
-                filter(ext),
-                resources.getString("chooseBookExport"));
+        final Path defaultPath = Paths.get(sansExt + ext);
 
-        if ((bookPath == null) || !isTargetConfirmed(bookPath)) {
+        final ExportTarget target = chooseExportTarget(
+                defaultPath, resources.getString("chooseBookExport"));
+
+        if ((target == null) || !isTargetConfirmed(target.path)) {
             return null;
         }
 
-        // Remove extensions if any (.opus.mxl, .mxl, .xml, .mvt#.mxl, .mvt#.xml)
-        final Path bookPathSansExt = ExportPattern.getPathSansExt(bookPath);
+        if (target.format == ExportFormat.MIDI) {
+            final Path bookPathSansMidiExt = stripExtension(
+                    target.path, MidiAbstractions.MIDI_EXTENSION);
+            return new ExportBookMidiTask(book, bookPathSansMidiExt);
+        }
 
+        // Remove extensions if any (.opus.mxl, .mxl, .xml, .mvt#.mxl, .mvt#.xml)
+        final Path bookPathSansExt = ExportPattern.getPathSansExt(target.path);
         return new ExportBookTask(book, bookPathSansExt);
     }
 
@@ -676,8 +684,9 @@ public class BookActions
     // exportSheetAs //
     //---------------//
     /**
-     * Export the currently selected sheet using MusicXML format, to a user-provided
-     * location.
+     * Export the currently selected sheet in either MusicXML or MIDI format,
+     * to a user-chosen location. The format is picked from the file type
+     * dropdown in the save dialog.
      *
      * @param e the event that triggered this action
      * @return the task to launch in background
@@ -691,25 +700,126 @@ public class BookActions
             return null; // Not likely to happen, but safer
         }
 
-        // Let user select sheet export target
         final Book book = stub.getBook();
         final Path bookSansExt = BookManager.getDefaultExportPathSansExt(book);
         final boolean compressed = BookManager.useCompression();
         final String ext = compressed ? OMR.COMPRESSED_SCORE_EXTENSION : OMR.SCORE_EXTENSION;
         final String suffix = book.isMultiSheet() ? (OMR.SHEET_SUFFIX + stub.getNumber()) : "";
         final Path defaultSheetPath = Paths.get(bookSansExt + suffix + ext);
-        final Path sheetPath = UIUtil.pathChooser(
-                true,
-                OMR.gui.getFrame(),
-                defaultSheetPath,
-                filter(ext),
-                resources.getString("chooseSheetExport"));
 
-        if ((sheetPath == null) || !isTargetConfirmed(sheetPath)) {
+        final ExportTarget target = chooseExportTarget(
+                defaultSheetPath, resources.getString("chooseSheetExport"));
+
+        if ((target == null) || !isTargetConfirmed(target.path)) {
             return null;
         }
 
-        return new ExportSheetTask(stub.getSheet(), sheetPath);
+        if (target.format == ExportFormat.MIDI) {
+            return new ExportSheetMidiTask(stub.getSheet(), target.path);
+        }
+        return new ExportSheetTask(stub.getSheet(), target.path);
+    }
+
+    //--------------------//
+    // chooseExportTarget //
+    //--------------------//
+    /**
+     * Prompt the user with a save dialog that offers a file-type dropdown for
+     * MusicXML and MIDI. Switching the dropdown live-rewrites the extension on
+     * the entered file name. The format is finally determined by the picked
+     * extension.
+     *
+     * @param defaultPath  pre-filled path including default extension
+     * @param dialogTitle  localized title
+     * @return chosen target with format, or null when the user cancels
+     */
+    private static ExportTarget chooseExportTarget (Path defaultPath, String dialogTitle)
+    {
+        final String midiExt = MidiAbstractions.MIDI_EXTENSION;
+        final String mxlExt = OMR.COMPRESSED_SCORE_EXTENSION;
+        final String xmlExt = OMR.SCORE_EXTENSION;
+
+        final FileFilter mxlFilter = new OmrFileFilter(
+                resources.getString("filterMusicXml.description"),
+                new String[] { mxlExt, xmlExt });
+        final FileFilter midiFilter = new OmrFileFilter(
+                resources.getString("filterMidi.description"),
+                new String[] { midiExt });
+
+        final JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle(dialogTitle);
+        fc.setAcceptAllFileFilterUsed(false);
+        fc.addChoosableFileFilter(mxlFilter);
+        fc.addChoosableFileFilter(midiFilter);
+
+        final File defaultFile = defaultPath.toFile();
+        if (defaultFile.getParentFile() != null) {
+            fc.setCurrentDirectory(defaultFile.getParentFile());
+        }
+        fc.setSelectedFile(defaultFile);
+
+        final String defaultName = defaultFile.getName().toLowerCase();
+        fc.setFileFilter(defaultName.endsWith(midiExt) ? midiFilter : mxlFilter);
+
+        // Live-rewrite the typed file name when the user switches file type.
+        fc.addPropertyChangeListener(JFileChooser.FILE_FILTER_CHANGED_PROPERTY, evt -> {
+            final File current = fc.getSelectedFile();
+            if (current == null) {
+                return;
+            }
+            final FileFilter newFilter = (FileFilter) evt.getNewValue();
+            final String newExt = (newFilter == midiFilter) ? midiExt
+                    : (BookManager.useCompression() ? mxlExt : xmlExt);
+            final String name = current.getName();
+            final int dot = name.lastIndexOf('.');
+            final String stem = (dot > 0) ? name.substring(0, dot) : name;
+            fc.setSelectedFile(new File(current.getParentFile(), stem + newExt));
+        });
+
+        final int result = fc.showSaveDialog(OMR.gui.getFrame());
+        if (result != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+
+        final File selected = fc.getSelectedFile();
+        if (selected == null) {
+            return null;
+        }
+
+        final String selectedName = selected.getName().toLowerCase();
+        Path resolved = selected.toPath();
+        ExportFormat format;
+
+        if (selectedName.endsWith(midiExt)) {
+            format = ExportFormat.MIDI;
+        } else if (selectedName.endsWith(mxlExt) || selectedName.endsWith(xmlExt)) {
+            format = ExportFormat.MUSIC_XML;
+        } else {
+            // No (or unknown) extension: trust the active filter and append.
+            final FileFilter active = fc.getFileFilter();
+            if (active == midiFilter) {
+                format = ExportFormat.MIDI;
+                resolved = resolved.resolveSibling(selected.getName() + midiExt);
+            } else {
+                format = ExportFormat.MUSIC_XML;
+                final String fallback = BookManager.useCompression() ? mxlExt : xmlExt;
+                resolved = resolved.resolveSibling(selected.getName() + fallback);
+            }
+        }
+
+        return new ExportTarget(resolved, format);
+    }
+
+    //----------------//
+    // stripExtension //
+    //----------------//
+    private static Path stripExtension (Path path, String ext)
+    {
+        final String name = path.getFileName().toString();
+        if (name.toLowerCase().endsWith(ext)) {
+            return path.resolveSibling(name.substring(0, name.length() - ext.length()));
+        }
+        return path;
     }
 
     //--------------------//
@@ -2218,6 +2328,177 @@ public class BookActions
             }
 
             return null;
+        }
+    }
+
+    //--------------------//
+    // ExportBookMidiTask //
+    //--------------------//
+    private static class ExportBookMidiTask
+            extends VoidTask
+    {
+        final Book book;
+
+        final Path bookPathSansExt;
+
+        ExportBookMidiTask (Book book, Path bookPathSansExt)
+        {
+            this.book = book;
+            this.bookPathSansExt = bookPathSansExt;
+        }
+
+        @Override
+        protected Void doInBackground ()
+            throws InterruptedException
+        {
+            try {
+                LogUtil.start(book);
+
+                final boolean swap = (OMR.gui == null) || Main.getCli().isSwap()
+                        || swapProcessedSheets();
+                final boolean ok = book.transcribe(
+                        book.getValidSelectedStubs(), book.getScores(), swap);
+
+                if (!ok) {
+                    logger.warn("MIDI export aborted: transcription incomplete");
+                    return null;
+                }
+
+                final List<Score> scores = book.getScores();
+                final boolean multi = scores.size() > 1;
+                final String ext = MidiAbstractions.MIDI_EXTENSION;
+
+                for (Score score : scores) {
+                    final String suffix = multi
+                            ? (OMR.MOVEMENT_EXTENSION + score.getId()) : "";
+                    final Path target = bookPathSansExt.resolveSibling(
+                            bookPathSansExt.getFileName().toString() + suffix + ext);
+                    try {
+                        new MidiExporter(score).export(target);
+                        logger.info("MIDI exported to {}", target);
+                    } catch (Exception ex) {
+                        logger.warn("Could not export MIDI for movement {}: {}",
+                                    score.getId(), ex.toString(), ex);
+                    }
+                }
+            } catch (Throwable ex) {
+                logger.warn("Error in ExportBookMidiTask {}", ex.toString(), ex);
+            } finally {
+                LogUtil.stopBook();
+            }
+
+            return null;
+        }
+    }
+
+    //---------------------//
+    // ExportSheetMidiTask //
+    //---------------------//
+    private static class ExportSheetMidiTask
+            extends VoidTask
+    {
+        final Sheet sheet;
+
+        final Path sheetExportPath;
+
+        ExportSheetMidiTask (Sheet sheet, Path sheetExportPath)
+        {
+            this.sheet = sheet;
+            this.sheetExportPath = sheetExportPath;
+        }
+
+        @Override
+        protected Void doInBackground ()
+            throws InterruptedException
+        {
+            try {
+                LogUtil.start(sheet.getStub());
+
+                if (!checkParameters(sheet)) {
+                    return null;
+                }
+                sheet.getStub().reachStep(OmrStep.PAGE, false);
+
+                final SheetStub stub = sheet.getStub();
+                final Book book = stub.getBook();
+                final List<PageRef> pageRefs = stub.getPageRefs();
+                if (pageRefs.isEmpty()) {
+                    logger.warn("Sheet has no pages; nothing to export");
+                    return null;
+                }
+
+                final Path folder = sheetExportPath.getParent();
+                if (folder != null && !Files.exists(folder)) {
+                    Files.createDirectories(folder);
+                }
+
+                final String ext = MidiAbstractions.MIDI_EXTENSION;
+                final String baseName = stripExtension(
+                        sheetExportPath.getFileName().toString(), ext);
+
+                if (pageRefs.size() > 1) {
+                    for (PageRef pageRef : pageRefs) {
+                        final Score score = new Score();
+                        score.setBook(book);
+                        score.addPageNumber(stub.getNumber(), pageRef);
+                        new ScoreReduction(score).reduce(Arrays.asList(stub));
+
+                        final String movementName = baseName
+                                + OMR.MOVEMENT_EXTENSION + pageRef.getId();
+                        final Path target = sheetExportPath.resolveSibling(movementName + ext);
+                        new MidiExporter(score).export(target);
+                        logger.info("MIDI exported to {}", target);
+                    }
+                } else {
+                    final Score score = new Score();
+                    score.setBook(book);
+                    score.addPageNumber(stub.getNumber(), stub.getFirstPageRef());
+                    new ScoreReduction(score).reduce(Arrays.asList(stub));
+
+                    final Path target = sheetExportPath.resolveSibling(baseName + ext);
+                    new MidiExporter(score).export(target);
+                    logger.info("MIDI exported to {}", target);
+                }
+            } catch (StepPause sp) {
+                logger.info("ExportSheetMidiTask stopped by user.");
+            } catch (Exception ex) {
+                logger.warn("Error in ExportSheetMidiTask {}", ex.toString(), ex);
+            } finally {
+                LogUtil.stopStub();
+            }
+
+            return null;
+        }
+
+        private static String stripExtension (String name, String ext)
+        {
+            return name.toLowerCase().endsWith(ext)
+                    ? name.substring(0, name.length() - ext.length()) : name;
+        }
+    }
+
+    //--------------//
+    // ExportFormat //
+    //--------------//
+    private enum ExportFormat
+    {
+        MUSIC_XML,
+        MIDI
+    }
+
+    //--------------//
+    // ExportTarget //
+    //--------------//
+    private static final class ExportTarget
+    {
+        final Path path;
+
+        final ExportFormat format;
+
+        ExportTarget (Path path, ExportFormat format)
+        {
+            this.path = path;
+            this.format = format;
         }
     }
 
