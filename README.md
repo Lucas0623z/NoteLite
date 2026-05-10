@@ -2,244 +2,244 @@
 
 <div align="center">
 
-**基于 OMR 的乐谱轻量化结构化、纠错与音乐教育评测平台**
+**An OMR-based platform for lightweight score structuring, error detection, and music-education evaluation**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/badge/release-v5.11.0-brightgreen.svg)](https://github.com/Lucas0623z/NoteLite/releases/latest)
 [![Status](https://img.shields.io/badge/status-In%20Development-yellow.svg)]()
 [![GitHub](https://img.shields.io/badge/GitHub-Lucas0623z-blue?logo=github)](https://github.com/Lucas0623z)
 
-[功能特性](#功能特性) • [技术架构](#技术架构) • [安装部署](#安装部署) • [开发路线](#开发路线) • [联系方式](#联系方式)
+[Features](#features) • [Architecture](#architecture) • [Installation](#installation) • [Roadmap](#roadmap) • [Contact](#contact)
 
 </div>
 
 ---
 
-## 项目简介
+## Overview
 
-NoteLite 是一个面向音乐教育场景的智能乐谱处理平台。基于光学乐谱识别(OMR)技术,结合轻量化编码、曲谱比对与错误检测,构建从"扫描识谱"到"数据库管理"再到"教学反馈"的完整闭环。
+NoteLite is a smart score-processing platform aimed at music-education scenarios. Built on Optical Music Recognition (OMR), combined with lightweight encoding, score matching, and error detection, it forms a complete loop from "scan recognition" to "database management" to "teaching feedback".
 
-### 背景与动机
+### Background & Motivation
 
-现有 OMR 工具(如 Audiveris、oemer、homr)已能将乐谱图像转换为 MusicXML 等机器可读格式,但在音乐教育平台的实际需求上仍存在空白:
+Existing OMR tools (Audiveris, oemer, homr, etc.) can already convert score images into machine-readable formats such as MusicXML, but several gaps remain for real music-education platforms:
 
-- 缺乏适合数据库存储的轻量化结构数据
-- 缺乏与标准曲谱的自动匹配与差异比对
-- 缺乏扫描谱面的疑似错误检测
-- 缺乏基于音频的演奏正确性评估
+- No lightweight structured representation suitable for database storage
+- No automatic matching and diffing against canonical scores
+- No suspected-error detection on scanned scores
+- No audio-based assessment of performance correctness
 
-NoteLite 正是为填补这些空白而设计,**不是重复造一个 OMR 引擎**,而是以成熟开源方案为基础,向上构建教育应用层。
-
----
-
-## 最新发行版 (v5.11.0, 2026-04-29)
-
-NoteLite 当前以 Audiveris OMR 引擎为基础进行二次开发,已发布的桌面版本包含:
-
-- **完整 OMR 流程**: PDF / 图像 → 转写 → MusicXML 导出
-- **MIDI 导出**(本版本新增): 文件类型下拉支持 `.mxl` / `.xml` / `.mid`,无需安装 MuseScore 等外部软件
-- **中文界面**: 菜单 / 对话框 / 工具栏全量汉化 (zh_CN)
-- **JDK 21 构建**: 解压即用,无需自行编译
-
-下载: [`NoteLite-5.11.0.zip`](https://github.com/Lucas0623z/NoteLite/releases/latest)
-
-> MIDI 导出仅供试听校对,首版固定 velocity 80,鼓组 / 反复记号 / 转调乐器等高级表现暂不支持。详见 release notes。
+NoteLite is designed to fill these gaps. **It is not another OMR engine** — it builds an education-oriented application layer on top of mature open-source OMR.
 
 ---
 
-## 功能特性
+## Latest Release (v5.11.0, 2026-04-29)
 
-### 核心功能
+NoteLite is currently a fork of the Audiveris OMR engine. The released desktop build includes:
 
-| 功能模块 | 描述 | 状态 |
-|---------|------|------|
-| **乐谱识别** | 支持扫描图、拍照图、PDF 乐谱的自动识别 | 开发中 |
-| **轻量编码** | 将乐谱转为极小结构化数据,优化存储与检索 | 开发中 |
-| **曲谱匹配** | 自动匹配标准谱,进行序列级差异分析 | 计划中 |
-| **智能纠错** | 检测漏音、错音、节奏异常、升降号错误等 | 计划中 |
-| **演奏评测** | 基于音频识别,粗粒度评估演奏正确性 | 计划中 |
+- **Full OMR pipeline**: PDF / image → transcription → MusicXML export
+- **MIDI export** (new in this release): file-type dropdown supports `.mxl` / `.xml` / `.mid`, with no need for MuseScore or other external tools
+- **Chinese UI**: full zh_CN localization of menus / dialogs / toolbars
+- **JDK 21 build**: extract and run, no compilation needed
 
-### 创新点
+Download: [`NoteLite-5.11.0.zip`](https://github.com/Lucas0623z/NoteLite/releases/latest)
 
-1. **乐谱轻量化编码**
-   设计适合数据库的压缩表示格式,相比完整 MusicXML 大幅减小存储体积
-
-2. **标准谱驱动的差异检测**
-   新扫描谱不仅被识别,还会与数据库中的标准版本自动校验
-
-3. **教育应用闭环**
-   从纸质谱面到在线教学反馈的一体化流程
+> MIDI export is intended for proof-listening only. The first version uses a fixed velocity of 80; advanced features such as drum kits, repeat marks, and transposing instruments are not yet supported. See the release notes for details.
 
 ---
 
-## 技术架构
+## Features
 
-### 系统分层
+### Core Modules
+
+| Module | Description | Status |
+|--------|-------------|--------|
+| **Score Recognition** | Recognize scanned, photographed, and PDF scores | In progress |
+| **Lightweight Encoding** | Convert scores into compact structured data optimized for storage and retrieval | In progress |
+| **Score Matching** | Auto-match against canonical scores with sequence-level diffing | Planned |
+| **Smart Correction** | Detect missing/wrong notes, rhythm anomalies, accidental errors, etc. | Planned |
+| **Performance Assessment** | Coarse-grained performance evaluation based on audio recognition | Planned |
+
+### Highlights
+
+1. **Lightweight score encoding**
+   A compressed representation designed for databases — far smaller than full MusicXML.
+
+2. **Canonical-score-driven diffing**
+   New scans are not just recognized; they are also automatically validated against the canonical version in the database.
+
+3. **Education-oriented closed loop**
+   An end-to-end flow from paper score to online teaching feedback.
+
+---
+
+## Architecture
+
+### System Layers
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              应用层 (Application)                │
-│  乐谱上传 | 曲谱匹配 | 扫描纠错 | 演奏评测       │
+│                Application Layer                 │
+│   Upload | Matching | Correction | Assessment   │
 └─────────────────────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────┐
-│          数据库与检索层 (Database)               │
-│  标准曲谱 | 用户上传 | 版本管理 | 片段索引       │
+│            Database & Retrieval Layer           │
+│   Canonical | User Uploads | Versions | Index   │
 └─────────────────────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────┐
-│          轻量编码层 (Encoding)                   │
-│  相对音高 | Token化 | 哈希指纹 | 压缩算法       │
+│              Lightweight Encoding               │
+│   Relative pitch | Tokenize | Hash | Compress   │
 └─────────────────────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────┐
-│        乐谱结构化层 (Structuring)                │
-│  谱号 | 调号 | 拍号 | 音符 | 时值 | 演奏标记    │
+│             Score Structuring Layer             │
+│  Clef | Key | Time | Notes | Duration | Marks   │
 └─────────────────────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────┐
-│          OMR 识别层 (Recognition)                │
-│  图像预处理 | 五线谱检测 | 符号识别 | 音高恢复  │
+│               OMR Recognition Layer             │
+│  Preprocess | Staff detection | Symbols | Pitch │
 └─────────────────────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────┐
-│            输入层 (Input)                        │
-│  扫描图 | 拍照图 | PDF | 演奏录音               │
+│                   Input Layer                   │
+│   Scanned image | Photo | PDF | Audio recording │
 └─────────────────────────────────────────────────┘
 ```
 
-### 技术栈
+### Tech Stack
 
-- **OMR 引擎**: Audiveris / oemer / homr (可选方案)
-- **数据格式**: MusicXML, JSON, 自定义压缩格式
-- **匹配算法**: 编辑距离, 动态规划, 哈希指纹
-- **音频识别**: (待定,用于演奏评测)
+- **OMR engine**: Audiveris / oemer / homr (alternative options)
+- **Data formats**: MusicXML, JSON, custom compressed format
+- **Matching algorithms**: edit distance, dynamic programming, hash fingerprints
+- **Audio recognition**: TBD (for performance assessment)
 
 ---
 
-## 安装部署
+## Installation
 
-### 方式一: 直接下载 (推荐)
+### Option 1: Direct Download (Recommended)
 
-适用于普通用户,无需自行编译:
+For end users — no compilation required:
 
-1. 从 [Releases](https://github.com/Lucas0623z/NoteLite/releases/latest) 下载 `NoteLite-5.11.0.zip`
-2. 解压到任意目录
-3. 运行 `bin/NoteLite.bat` (Windows) 或 `bin/NoteLite` (Linux/macOS)
-4. 需要本机有 **Java 21** 运行时
+1. Download `NoteLite-5.11.0.zip` from [Releases](https://github.com/Lucas0623z/NoteLite/releases/latest)
+2. Extract anywhere
+3. Run `bin/NoteLite.bat` (Windows) or `bin/NoteLite` (Linux/macOS)
+4. Requires **Java 21** runtime on the machine
 
-### 方式二: 从源码构建
+### Option 2: Build from Source
 
-适用于二次开发或贡献代码:
+For development or contribution:
 
 ```bash
-# 克隆仓库
+# Clone the repo
 git clone https://github.com/Lucas0623z/NoteLite.git
 cd NoteLite
 
-# 设置 JDK 21 (确保 java -version 显示 21.x)
+# Use JDK 21 (verify with `java -version` showing 21.x)
 export JAVA_HOME=/path/to/jdk-21
 
-# 运行
+# Run
 ./gradlew :app:run --no-daemon
 
-# 打包发行版
+# Build a distribution
 ./gradlew :app:distZip --no-daemon
-# 产物在 app/build/distributions/app-<version>.zip
+# Artifact at app/build/distributions/app-<version>.zip
 ```
 
-Windows 下用 `.\gradlew` 替代 `./gradlew`。
+On Windows, use `.\gradlew` instead of `./gradlew`.
 
-### 长期规划 (教育平台层)
+### Long-Term Plan (Education-Platform Layer)
 
-教育应用层 (轻量编码 / 标准谱匹配 / 演奏评测) 仍在设计阶段,届时会引入:
+The education layer (lightweight encoding / canonical matching / performance assessment) is still in design. It will eventually introduce:
 
-- Python 3.8+ (匹配算法 / 数据处理)
-- Node.js 16+ (前端)
-- PostgreSQL / MySQL (数据库)
-
----
-
-## 数据库设计
-
-### 核心表结构
-
-#### 1. 曲谱主表 (scores)
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| score_id | INT | 主键 |
-| title | VARCHAR | 曲目名称 |
-| composer | VARCHAR | 作曲家 |
-| key_signature | VARCHAR | 调号 |
-| time_signature | VARCHAR | 拍号 |
-| measure_count | INT | 小节数 |
-| canonical_version_id | INT | 标准版本ID |
-
-#### 2. 曲谱内容表 (score_content)
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| score_id | INT | 外键 |
-| raw_musicxml | TEXT | 原始 MusicXML |
-| structured_json | JSON | 结构化数据 |
-| compressed_code | VARCHAR | 轻量编码 |
-| midi_url | VARCHAR | MIDI 文件路径 |
-
-#### 3. 比对结果表 (comparisons)
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| compare_id | INT | 主键 |
-| uploaded_score_id | INT | 上传谱ID |
-| matched_standard_id | INT | 匹配标准谱ID |
-| similarity_score | FLOAT | 相似度 |
-| error_positions | JSON | 错误位置 |
+- Python 3.8+ (matching algorithms / data processing)
+- Node.js 16+ (frontend)
+- PostgreSQL / MySQL (database)
 
 ---
 
-## 开发路线
+## Database Design
 
-### Phase 1: MVP (当前阶段)
+### Core Tables
 
-- [x] 项目架构设计
-- [x] OMR 引擎集成 (基于 Audiveris fork, v5.10.x)
-- [x] 结构化数据输出 (MusicXML / MIDI)
-- [x] 中文界面汉化 (v5.10.0+)
-- [x] 自带 MIDI 导出 (v5.11.0)
-- [ ] 轻量编码实现
-- [ ] 基础数据库搭建
+#### 1. Score Master Table (`scores`)
 
-### Phase 2: 标准谱匹配与纠错
+| Column | Type | Description |
+|--------|------|-------------|
+| score_id | INT | Primary key |
+| title | VARCHAR | Title |
+| composer | VARCHAR | Composer |
+| key_signature | VARCHAR | Key signature |
+| time_signature | VARCHAR | Time signature |
+| measure_count | INT | Number of measures |
+| canonical_version_id | INT | Canonical version ID |
 
-- [ ] 标准谱数据库建立
-- [ ] 曲谱指纹索引
-- [ ] 差异分析算法
-- [ ] 错误高亮界面
+#### 2. Score Content Table (`score_content`)
 
-### Phase 3: 识别层优化
+| Column | Type | Description |
+|--------|------|-------------|
+| score_id | INT | Foreign key |
+| raw_musicxml | TEXT | Original MusicXML |
+| structured_json | JSON | Structured data |
+| compressed_code | VARCHAR | Lightweight encoding |
+| midi_url | VARCHAR | MIDI file path |
 
-- [ ] 手机拍照场景优化
-- [ ] 教学谱例微调
-- [ ] 误识别规则修正
+#### 3. Comparison Result Table (`comparisons`)
 
-### Phase 4: 演奏评测
-
-- [ ] 音频上传功能
-- [ ] 音高/节奏提取
-- [ ] 与标准谱比对
-- [ ] 学习报告生成
+| Column | Type | Description |
+|--------|------|-------------|
+| compare_id | INT | Primary key |
+| uploaded_score_id | INT | Uploaded score ID |
+| matched_standard_id | INT | Matched canonical score ID |
+| similarity_score | FLOAT | Similarity score |
+| error_positions | JSON | Error positions |
 
 ---
 
-## 轻量编码示例
+## Roadmap
 
-### 设计思路
+### Phase 1: MVP (Current)
 
-传统 MusicXML 体积大,不适合大规模数据库存储。NoteLite 设计了自定义轻量格式:
+- [x] Project architecture design
+- [x] OMR engine integration (Audiveris fork, v5.10.x)
+- [x] Structured-data output (MusicXML / MIDI)
+- [x] Chinese UI localization (v5.10.0+)
+- [x] Bundled MIDI export (v5.11.0)
+- [ ] Lightweight-encoding implementation
+- [ ] Initial database setup
+
+### Phase 2: Canonical Matching & Correction
+
+- [ ] Build canonical-score database
+- [ ] Score-fingerprint index
+- [ ] Diff-analysis algorithms
+- [ ] Error-highlight UI
+
+### Phase 3: Recognition Improvements
+
+- [ ] Phone-photo scenario tuning
+- [ ] Fine-tuning on teaching-score samples
+- [ ] Misrecognition-rule fixes
+
+### Phase 4: Performance Assessment
+
+- [ ] Audio upload
+- [ ] Pitch / rhythm extraction
+- [ ] Comparison against canonical scores
+- [ ] Learning-report generation
+
+---
+
+## Lightweight Encoding Example
+
+### Design Idea
+
+MusicXML is verbose and ill-suited for large-scale database storage. NoteLite uses a custom lightweight format:
 
 ```
-# MusicXML (数百行)
+# MusicXML (hundreds of lines)
 <score-partwise>
   <part id="P1">
     <measure number="1">
@@ -253,98 +253,98 @@ Windows 下用 `.\gradlew` 替代 `./gradlew`。
   </part>
 </score-partwise>
 
-# NoteLite 编码 (一行)
+# NoteLite encoding (single line)
 TS:4/4;KS:G;M1:G4/q,A4/q,B4/h|M2:C5/q,B4/q,A4/h
 
-# Token 形式 (相对音高)
+# Token form (relative pitch)
 4/4|G|+0:q,+2:q,+4:h|+5:q,+4:q,+2:h
 ```
 
-**优势**:
-- 存储体积减少 90%+
-- 数据库索引简单
-- 相似谱匹配高效
-- 易于版本管理
+**Benefits**:
+- 90%+ reduction in storage size
+- Simple database indexing
+- Efficient similar-score matching
+- Friendly to version management
 
 ---
 
-## 技术细节
+## Technical Notes
 
-### 曲谱匹配算法
+### Score-Matching Algorithm
 
-采用多层检索策略:
+A multi-stage retrieval strategy:
 
-1. **粗筛**: 调号 + 拍号 + 小节数
-2. **中筛**: 旋律指纹哈希
-3. **精筛**: 序列级编辑距离
+1. **Coarse filter**: key signature + time signature + measure count
+2. **Mid filter**: melody fingerprint hash
+3. **Fine filter**: sequence-level edit distance
 
-### 差异检测能力
+### Diff-Detection Capabilities
 
-| 错误类型 | 检测方法 | 示例 |
-|---------|---------|------|
-| 漏音/多音 | 序列长度比对 | 标准谱8音符,扫描谱7音符 |
-| 音高错误 | 逐符号比对 | 标准C5,扫描D5 |
-| 时值错误 | 节奏模式匹配 | 标准四分音符,扫描八分音符 |
-| 升降号遗漏 | 调性分析 | 标准F#,扫描F |
-| 小节拍数异常 | 拍数累加 | 4/4拍小节内时值总和≠4拍 |
-
----
-
-## 开发规范
-
-本项目目前由作者一人维护,不接受外部 PR。如有问题或建议,请通过下方联系方式反馈。
-
-- 代码风格: 沿用 Audiveris 既有 Java 规范 (参见 `dev/jalopy/java-convention.xml`)
-- 构建: JDK 21 + Gradle
-- 提交信息: [Conventional Commits](https://www.conventionalcommits.org/)
-- 文档: 公共 API 需要 Javadoc
+| Error Type | Method | Example |
+|------------|--------|---------|
+| Missing/extra notes | Sequence-length comparison | Canonical 8 notes, scan 7 notes |
+| Wrong pitch | Per-symbol comparison | Canonical C5, scan D5 |
+| Wrong duration | Rhythm-pattern matching | Canonical quarter note, scan eighth |
+| Missing accidentals | Tonality analysis | Canonical F#, scan F |
+| Measure-beat anomaly | Beat accumulation | Sum of durations in 4/4 measure ≠ 4 beats |
 
 ---
 
-## 许可证
+## Development Conventions
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+This project is currently maintained solely by the author and does not accept external pull requests. For issues or suggestions, please use the contact info below.
+
+- Code style: existing Audiveris Java conventions (see `dev/jalopy/java-convention.xml`)
+- Build: JDK 21 + Gradle
+- Commit messages: [Conventional Commits](https://www.conventionalcommits.org/)
+- Docs: Javadoc required for public APIs
 
 ---
 
-## 作者
+## License
 
-**张悦轩 (Yuexuan Zhang)**
+This project is released under the MIT License — see the [LICENSE](LICENSE) file for details.
 
-伊利诺伊大学厄巴纳-香槟分校(UIUC)本科生
-研究兴趣: 计算机科学、智能系统、教育技术、音乐信息处理
+---
 
-### 联系方式
+## Author
+
+**Yuexuan Zhang**
+
+Undergraduate, University of Illinois Urbana-Champaign (UIUC)
+Research interests: computer science, intelligent systems, education technology, music information processing
+
+### Contact
 
 - **Email**: Lucas.z0623@outlook.com
 - **GitHub**: [@Lucas0623z](https://github.com/Lucas0623z)
-- **个人网站**: [https://personal-website-tau-lake.vercel.app/](https://personal-website-tau-lake.vercel.app/)
+- **Personal site**: [https://personal-website-tau-lake.vercel.app/](https://personal-website-tau-lake.vercel.app/)
 
 ---
 
-## 致谢
+## Acknowledgements
 
-感谢以下开源项目和社区:
+Thanks to the following open-source projects and communities:
 
-- [Audiveris](https://github.com/Audiveris/audiveris) - 传统 OMR 框架
-- [oemer](https://github.com/BreezeWhite/oemer) - 现代深度学习 OMR
-- [homr](https://github.com/TimeEscaper/homr) - 端到端 OMR 模型
-- GitHub 开源社区在音乐信息检索领域的长期积累
+- [Audiveris](https://github.com/Audiveris/audiveris) — classic OMR framework
+- [oemer](https://github.com/BreezeWhite/oemer) — modern deep-learning OMR
+- [homr](https://github.com/TimeEscaper/homr) — end-to-end OMR model
+- The broader GitHub open-source community for years of work in music information retrieval
 
 ---
 
-## 项目状态
+## Project Status
 
-- **当前版本**: v5.11.0 (桌面端 OMR + MIDI 导出)
-- **开发状态**: 积极开发中
-- **最后更新**: 2026-04-29
+- **Current version**: v5.11.0 (desktop OMR + MIDI export)
+- **Status**: actively developed
+- **Last updated**: 2026-04-29
 
 ---
 
 <div align="center">
 
-**如果这个项目对你有帮助,欢迎 Star**
+**If this project helps you, please consider giving it a Star**
 
-Made by [张悦轩](https://github.com/Lucas0623z)
+Made by [Yuexuan Zhang](https://github.com/Lucas0623z)
 
 </div>
