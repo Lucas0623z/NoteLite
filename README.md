@@ -290,23 +290,14 @@ TS:4/4;KS:G;M1:G4/q,A4/q,B4/h|M2:C5/q,B4/q,A4/h
 
 ---
 
-## 贡献指南
+## 开发规范
 
-欢迎贡献代码、报告问题或提出建议!
+本项目目前由作者一人维护,不接受外部 PR。如有问题或建议,请通过下方联系方式反馈。
 
-### 如何贡献
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-### 开发规范
-
-- 代码风格: PEP 8 (Python)
+- 代码风格: 沿用 Audiveris 既有 Java 规范 (参见 `dev/jalopy/java-convention.xml`)
+- 构建: JDK 21 + Gradle
 - 提交信息: [Conventional Commits](https://www.conventionalcommits.org/)
-- 文档: 所有公共 API 需要 docstring
+- 文档: 公共 API 需要 Javadoc
 
 ---
 
