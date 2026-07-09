@@ -78,6 +78,7 @@ tasks.withType(JavaExec).configureEach {
     jvmArgs += ['--enable-preview',
                 '-Dfile.encoding=UTF-8',
                 '-Djava.util.PropertyResourceBundle.encoding=UTF-8',
+                '-Dflatlaf.useWindowDecorations=false',
                 '--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED',
                 '--enable-native-access=ALL-UNNAMED']
 }
@@ -135,6 +136,8 @@ dependencies {
         'com.itextpdf:itextpdf:5.5.13.2',
         'com.jgoodies:jgoodies-forms:1.9.0',
         'com.jgoodies:jgoodies-looks:2.7.0',
+        'com.formdev:flatlaf:3.5.4',
+        'com.formdev:flatlaf-extras:3.5.4',
         'com.sun.xml.bind:jaxb-core:2.3.0.1',
         'com.sun.xml.bind:jaxb-impl:2.3.1',
         'gov.nist.math:jama:1.0.3',
@@ -196,7 +199,7 @@ sourceSets {
             include '**/*.properties'   // For BSAF use of properties files at runtime
             include '**/icon-*.png'     // For NoteLite specific icons in resources
         }
-        resources {            
+        resources {
             srcDir 'dev/icons'          // Crystal icons needed at runtime (in build/resources/main)
             include '**/*.png'
         }

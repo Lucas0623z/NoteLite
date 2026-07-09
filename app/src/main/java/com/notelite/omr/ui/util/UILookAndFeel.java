@@ -133,7 +133,7 @@ public class UILookAndFeel
             extends ConstantSet
     {
         private final Constant.String lookAndFeel = new Constant.String(
-                "com.jgoodies.looks.plastic.Plastic3DLookAndFeel",
+                "com.formdev.flatlaf.themes.FlatMacLightLaf",
                 "Full class path to the desired UI Look & Feel");
     }
 }

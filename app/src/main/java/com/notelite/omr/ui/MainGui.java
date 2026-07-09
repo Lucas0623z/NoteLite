@@ -64,6 +64,7 @@ import org.slf4j.LoggerFactory;
 import org.bushe.swing.event.EventSubscriber;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.GridLayout;
@@ -196,6 +197,18 @@ public class MainGui
         mainPane.setOneTouchExpandable(true);
         mainPane.setResizeWeight(0.9d); // Give bulk space to upper part
         mainPane.setMinimumSize(new Dimension(500, 500)); // To make sure it is always visible
+        mainPane.setDividerSize(8);
+
+        // DIAGNOSTIC: forcing JTabbedPane opaque + WHITE on top of FlatMacLightLaf
+        // caused an EDT paint-loop hang ("overlapping layers", no clickable area).
+        // Disabled pending a non-painter-coupled fix.
+        // java.awt.Component top = stubsController.getComponent();
+        // if (top instanceof javax.swing.JComponent jc) {
+        //     jc.setOpaque(true);
+        //     jc.setBackground(java.awt.Color.WHITE);
+        // }
+        // mainPane.setBackground(new Color(0xD0, 0xD0, 0xD0));
+
         content.add(mainPane, BorderLayout.CENTER);
         mainPane.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY, this);
 
