@@ -202,6 +202,7 @@ sourceSets {
         resources {
             srcDir 'dev/icons'          // Crystal icons needed at runtime (in build/resources/main)
             include '**/*.png'
+            include '**/*.svg'          // SVG replacements for Crystal icons (see VectorIcons)
         }
     }
 

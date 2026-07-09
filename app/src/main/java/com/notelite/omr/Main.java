@@ -33,6 +33,7 @@ import com.notelite.omr.text.tesseract.TesseractOCR;
 import com.notelite.omr.ui.MainGui;
 import com.notelite.omr.ui.symbol.MusicFont;
 import com.notelite.omr.ui.util.UIUtil;
+import com.notelite.omr.ui.util.VectorIcons;
 import com.notelite.omr.util.OmrExecutors;
 
 import org.jdesktop.application.Application;
@@ -242,6 +243,9 @@ public class Main
 
             // Select proper fonts names and sizes
             UIUtil.adjustDefaultFonts();
+
+            // Substitute scalable SVG icons for the legacy Crystal PNG icons
+            VectorIcons.install();
 
             logger.debug("Main. Launching MainGui");
             Application.launch(MainGui.class, args);

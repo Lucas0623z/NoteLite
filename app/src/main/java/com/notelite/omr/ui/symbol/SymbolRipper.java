@@ -30,6 +30,7 @@ import com.notelite.omr.ui.field.LSpinner;
 import com.notelite.omr.ui.field.SpinnerUtil;
 import com.notelite.omr.ui.util.Panel;
 import com.notelite.omr.ui.util.UILookAndFeel;
+import com.notelite.omr.ui.util.VectorIcons;
 
 import org.jdesktop.application.Application;
 import org.jdesktop.application.ResourceMap;
@@ -470,6 +471,9 @@ public class SymbolRipper
         // Set UI Look and Feel
         UILookAndFeel.setUI(null);
         Locale.setDefault(Locale.ENGLISH);
+
+        // Substitute scalable SVG icons for the legacy Crystal PNG icons
+        VectorIcons.install();
 
         // Off we go...
         Application.launch(SymbolRipper.class, args);

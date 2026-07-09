@@ -29,6 +29,7 @@ import com.notelite.omr.ui.OmrGui;
 import com.notelite.omr.ui.util.Panel;
 import com.notelite.omr.ui.util.UILookAndFeel;
 import com.notelite.omr.ui.util.UIUtil;
+import com.notelite.omr.ui.util.VectorIcons;
 
 import org.jdesktop.application.Application;
 import org.jdesktop.application.ResourceMap;
@@ -303,6 +304,9 @@ public class Trainer
         // Set UI Look and Feel
         UILookAndFeel.setUI(null);
         Locale.setDefault(Locale.ENGLISH);
+
+        // Substitute scalable SVG icons for the legacy Crystal PNG icons
+        VectorIcons.install();
 
         // Off we go...
         Application.launch(Trainer.class, args);

@@ -50,6 +50,7 @@ import com.notelite.omr.ui.symbol.ShapeSymbol;
 import com.notelite.omr.ui.util.FixedWidthIcon;
 import com.notelite.omr.ui.util.Panel;
 import com.notelite.omr.ui.util.UIUtil;
+import com.notelite.omr.ui.util.VectorIcons;
 import com.notelite.omr.ui.util.WaitingTask;
 
 import org.jdesktop.application.Action;
@@ -971,6 +972,9 @@ public class SampleBrowser
         standAlone = true;
 
         Locale.setDefault(Locale.US);
+
+        // Substitute scalable SVG icons for the legacy Crystal PNG icons
+        VectorIcons.install();
 
         // Off we go...
         Application.launch(SampleBrowser.class, args);
