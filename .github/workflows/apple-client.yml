@@ -2,6 +2,7 @@ name: Apple mobile client
 
 on:
   push:
+    branches: [main, master]
     paths:
       - "apple/**"
       - ".github/workflows/apple-client.yml"
@@ -57,6 +58,8 @@ jobs:
               -destination "platform=iOS Simulator,id=$device_id" \
               -parallel-testing-enabled NO -resultBundlePath "TestResults-$family.xcresult" \
               CODE_SIGNING_ALLOWED=NO
+            # Release the first simulator's memory before booting the other device family.
+            xcrun simctl shutdown "$device_id" || true
           done
       - uses: actions/upload-artifact@v4
         if: always()

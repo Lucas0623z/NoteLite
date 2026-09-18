@@ -38,7 +38,8 @@ NoteLite's language settings and is not embedded in the installer.
 [macos-desktop.yml](../.github/workflows/macos-desktop.yml) runs on `macos-15`
 (Apple Silicon) and `macos-15-intel`. It compiles the app, tests shortcut conversion,
 builds a DMG, mounts it, verifies the launcher's architecture and runs the bundled
-Java runtime and `NoteLite -help`. Download the two unsigned DMGs from the workflow's
+Java runtime and `NoteLite -help`, then recognizes the bundled `chula.png` score using
+the packaged launcher and checks its MusicXML and MIDI output. Download the two unsigned DMGs from the workflow's
 artifacts. The workflow does not publish a release or upload to an app store.
 
 The following still need an interactive check on each Mac architecture before a release:
@@ -48,7 +49,7 @@ The following still need an interactive check on each Mac architecture before a 
 - Opening an `.omr` project from Finder, opening a PDF/image, and actual OCR recognition.
 - Retina display rendering and external monitors.
 
-The CLI smoke test does not replace these GUI/native OCR checks.
+The packaged recognition smoke test does not replace interactive GUI or recognition-quality checks.
 
 ## Developer ID distribution
 

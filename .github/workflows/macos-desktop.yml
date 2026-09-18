@@ -6,6 +6,7 @@ on:
     paths:
       - 'app/**'
       - 'packaging/**'
+      - 'data/examples/chula.png'
       - 'gradle/**'
       - '*.gradle'
       - 'gradle.properties'
@@ -15,6 +16,7 @@ on:
     paths:
       - 'app/**'
       - 'packaging/**'
+      - 'data/examples/chula.png'
       - 'gradle/**'
       - '*.gradle'
       - 'gradle.properties'
@@ -50,7 +52,7 @@ jobs:
         run: bash ./gradlew --no-daemon :app:test --tests com.notelite.omr.ui.MacApplicationTest
       - name: Create self-contained DMG
         run: bash ./gradlew --no-daemon :packaging:jpackage -PinstallerType=DMG
-      - name: Validate the packaged launcher and runtime
+      - name: Validate packaged launcher, runtime and recognition
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
         run: |
@@ -59,12 +61,24 @@ jobs:
           test -n "$image"
           mountpoint="$RUNNER_TEMP/notelite-dmg"
           mkdir -p "$mountpoint"
-          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mountpoint"
+          # jpackage embeds this repository's LICENSE in the DMG; hdiutil prompts before mounting.
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mountpoint" <<< "Y"
           trap 'hdiutil detach "$mountpoint"' EXIT
           bundle="$mountpoint/NoteLite.app"
           lipo -verify_arch "$EXPECTED_ARCH" "$bundle/Contents/MacOS/NoteLite"
           "$bundle/Contents/runtime/Contents/Home/bin/java" -version
           "$bundle/Contents/MacOS/NoteLite" -help
+          export TESSDATA_PREFIX="$RUNNER_TEMP/notelite-tessdata"
+          mkdir -p "$TESSDATA_PREFIX"
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/tesseract-ocr/tessdata/4.1.0/eng.traineddata \
+            --output "$TESSDATA_PREFIX/eng.traineddata"
+          smoke_output="$RUNNER_TEMP/notelite-recognition"
+          mkdir -p "$smoke_output"
+          "$bundle/Contents/MacOS/NoteLite" -batch -transcribe -export -export-midi \
+            -output "$smoke_output" -- "$GITHUB_WORKSPACE/data/examples/chula.png"
+          test -n "$(find "$smoke_output" -name '*.mxl' -size +0c -print -quit)"
+          test -n "$(find "$smoke_output" -name '*.mid' -size +0c -print -quit)"
       - name: Upload unsigned installer
         uses: actions/upload-artifact@v4
         with:
