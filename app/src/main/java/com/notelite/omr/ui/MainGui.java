@@ -130,6 +130,9 @@ public class MainGui
     /** Map of class resources. */
     private ResourceMap resources;
 
+    /** Status widgets remain in the window when macOS owns the screen menu bar. */
+    private JPanel macGauges;
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -188,7 +191,14 @@ public class MainGui
         content.setLayout(new BorderLayout());
 
         // Top: ToolBar
-        content.add(ActionManager.getInstance().getToolBar(), BorderLayout.NORTH);
+        if (macGauges != null) {
+            JPanel top = new JPanel(new BorderLayout());
+            top.add(ActionManager.getInstance().getToolBar(), BorderLayout.NORTH);
+            top.add(macGauges, BorderLayout.SOUTH);
+            content.add(top, BorderLayout.NORTH);
+        } else {
+            content.add(ActionManager.getInstance().getToolBar(), BorderLayout.NORTH);
+        }
 
         // Center: stubsPane on top and Log on bottom
         mainPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, stubsController.getComponent(), null);
@@ -299,13 +309,15 @@ public class MainGui
         innerBar.setBorder(null);
         outerBar.setBorder(null);
 
-        frame.setJMenuBar(outerBar);
-
-        //        // Mac Application menu
-        //        if (WellKnowns.MAC_OS_X) {
-        //            MacApplication.setupMacMenus();
-        //            MacApplication.setupMacDockIcon();
-        //        }
+        if (WellKnowns.MAC_OS_X) {
+            // Screen menus require JMenu children directly on the installed bar.
+            // A nested bar and gauges cannot be exported to the macOS menu bar.
+            MacApplication.adaptMenuShortcuts(innerBar);
+            frame.setJMenuBar(innerBar);
+            macGauges = gauges;
+        } else {
+            frame.setJMenuBar(outerBar);
+        }
     }
 
     //---------------------//
@@ -547,6 +559,11 @@ public class MainGui
 
         // Set application exit listener
         addExitListener(new GuiExitListener());
+
+        if (WellKnowns.MAC_OS_X) {
+            MacApplication.setupMacMenus();
+            MacApplication.setupMacDockIcon();
+        }
 
         // Weakly listen to OmrGui Actions parameters
         PropertyChangeListener weak = new WeakPropertyChangeListener(this);

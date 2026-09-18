@@ -1,0 +1,43 @@
+name: Recognition bridge
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'bridge/**'
+      - 'app/**'
+      - '*.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/recognition-bridge.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'bridge/**'
+      - 'app/**'
+      - '*.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/recognition-bridge.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Test HTTP lifecycle and request limits
+        run: python -m unittest discover -s bridge/tests -v
+      - name: Build engine and test MIDI export contract
+        run: bash ./gradlew --no-daemon :app:installDist :app:test --tests com.notelite.omr.MobileExportCliTest --tests com.notelite.omr.score.MidiExporterTest
+      - name: Recognize a real score through HTTP and validate downloads
+        run: python bridge/smoke_real_engine.py

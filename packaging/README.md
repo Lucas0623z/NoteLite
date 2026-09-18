@@ -3,6 +3,10 @@
 The `packaging` sub-project is in charge of building the OS-dependent NoteLite installer
 for the OS the project is being run upon.
 
+For the current Apple Silicon / Intel desktop build and CI workflow, see
+[macOS build and signing](MACOS.md). The release automation described below is legacy
+documentation; `macos-desktop.yml` builds reviewable macOS artifacts without publishing them.
+
 The GitHub workflow named `draft-release.yml` drives the building of installers for various OSes,
 collects all the installers, adds a PDF version of NoteLite handbook,
 and creates a draft release with all these assets.
@@ -54,8 +58,8 @@ with its specific `window`, `mac` and `linux` blocks, as follows:
  - for `Linux`: The installer type is `DEB` by default. 
  The installer name conveys the Ubuntu version, that is either `20.04` or `22.04` as of this writing.
  - for `macOS`: The installer type is `DMG` by default. 
- The `macConvertIcons` task uses `imagemagick` and `iconutil` utilities
- to generate a set of NoteLite icons with differents sizes.
+ The `macConvertIcons` task uses macOS's built-in `sips` and `iconutil` utilities
+ to generate a set of NoteLite icons with different sizes.
 4. Finally, rename the resulting installer file according to:
  - the NoteLite version,
  - the OS name,
