@@ -1,6 +1,7 @@
 import SwiftUI
 
 @main
+@MainActor
 struct NoteLiteApp: App {
     @StateObject private var library = LibraryStore()
 

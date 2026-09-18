@@ -57,6 +57,8 @@ final class NoteLiteAPI {
         guard size <= FileRules.maximumUploadBytes else { throw NoteLiteError.fileTooLarge }
         var components = URLComponents(url: configuration.endpoint(["v1", "jobs"]), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "filename", value: filename)]
+        // Python's query parser treats a literal '+' as a space.
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         var request = try authenticatedRequest(components.url!)
         request.httpMethod = "POST"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")

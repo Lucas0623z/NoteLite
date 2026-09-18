@@ -1,6 +1,7 @@
 import Foundation
 
 /// Files in Application Support are owned by the app, so Files-provider bookmarks are unnecessary.
+/// Immutable paths and FileManager are safe across threads; each import owns a unique UUID directory.
 final class DocumentStorage: @unchecked Sendable {
     let root: URL
     private let fileManager: FileManager
