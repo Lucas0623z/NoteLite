@@ -1,0 +1,56 @@
+name: NoteLite
+options:
+  minimumXcodeGenVersion: 2.42.0
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  NoteLite:
+    type: application
+    platform: iOS
+    sources:
+      - NoteLite
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mobile
+        PRODUCT_NAME: NoteLite
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: NoteLite/Info.plist
+        SUPPORTS_MACCATALYST: NO
+    dependencies:
+      - sdk: SwiftUI.framework
+      - sdk: QuickLook.framework
+      - sdk: Security.framework
+  NoteLiteTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - NoteLiteTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: NoteLite
+schemes:
+  NoteLite:
+    build:
+      targets:
+        NoteLite: all
+        NoteLiteTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - NoteLiteTests
+    archive:
+      config: Release

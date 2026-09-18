@@ -1,0 +1,73 @@
+name: macOS desktop
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'packaging/**'
+      - 'gradle/**'
+      - '*.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/macos-desktop.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'app/**'
+      - 'packaging/**'
+      - 'gradle/**'
+      - '*.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/macos-desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.architecture }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            java_architecture: aarch64
+          - runner: macos-15-intel
+            architecture: x86_64
+            java_architecture: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: ${{ matrix.java_architecture }}
+          cache: gradle
+      - name: Build and test Mac integration
+        run: bash ./gradlew --no-daemon :app:test --tests com.notelite.omr.ui.MacApplicationTest
+      - name: Create self-contained DMG
+        run: bash ./gradlew --no-daemon :packaging:jpackage -PinstallerType=DMG
+      - name: Validate the packaged launcher and runtime
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          image=$(find packaging/build/dist -maxdepth 1 -name '*.dmg' -print -quit)
+          test -n "$image"
+          mountpoint="$RUNNER_TEMP/notelite-dmg"
+          mkdir -p "$mountpoint"
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mountpoint"
+          trap 'hdiutil detach "$mountpoint"' EXIT
+          bundle="$mountpoint/NoteLite.app"
+          lipo -verify_arch "$EXPECTED_ARCH" "$bundle/Contents/MacOS/NoteLite"
+          "$bundle/Contents/runtime/Contents/Home/bin/java" -version
+          "$bundle/Contents/MacOS/NoteLite" -help
+      - name: Upload unsigned installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoteLite-macos-${{ matrix.architecture }}-unsigned
+          path: packaging/build/dist/*.dmg
+          if-no-files-found: error

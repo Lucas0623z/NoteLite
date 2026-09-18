@@ -24,6 +24,7 @@ package com.notelite.omr;
 import com.notelite.omr.classifier.SampleRepository;
 import com.notelite.omr.log.LogUtil;
 import com.notelite.omr.score.Score;
+import com.notelite.omr.score.MidiExporter;
 import com.notelite.omr.sheet.Book;
 import com.notelite.omr.sheet.BookManager;
 import com.notelite.omr.sheet.PlayList;
@@ -655,6 +656,10 @@ public class CLI
         @Option(name = "-export", usage = "Export MusicXML")
         boolean export;
 
+        /** Export MIDI alongside or instead of MusicXML for remote clients. */
+        @Option(name = "-export-midi", usage = "Export MIDI (proof-listening)")
+        boolean exportMidi;
+
         /** Force step re-processing. */
         @Option(name = "-force", usage = "Force step/transcribe re-processing")
         boolean force;
@@ -928,6 +933,25 @@ public class CLI
 
                     if (!ok && (OMR.gui == null)) {
                         throw new Exception("Error in export");
+                    }
+                }
+
+                // MIDI export uses the same transcription as the desktop export action.
+                if (params.exportMidi) {
+                    if (!book.transcribe(validStubs, scores, swap) || scores.isEmpty()) {
+                        throw new Exception("No transcribed scores available for MIDI export");
+                    }
+
+                    final Path base = BookManager.getActualPath(
+                            book.getExportPathSansExt(),
+                            BookManager.getDefaultExportPathSansExt(book));
+                    Files.createDirectories(base.toAbsolutePath().getParent());
+                    for (Score score : scores) {
+                        final String suffix = scores.size() > 1
+                                ? OMR.MOVEMENT_EXTENSION + score.getId() : "";
+                        final Path target = base.resolveSibling(
+                                base.getFileName().toString() + suffix + ".mid");
+                        new MidiExporter(score).export(target);
                     }
                 }
 

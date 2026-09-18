@@ -46,8 +46,12 @@ println "hostOSVersion: ${ext.hostOSVersion}"
 ext.hostOSArch   = ["i386":"x86", "i486":"x86", "i586":"x86", "i686":"x86", "x86":"x86",
                     "amd64":"x86_64", "x86-64":"x86_64", "x86_64":"x86_64", 
                     "arm":"armhf",
-                    "aarch64":"arm64"]\
+                    "aarch64":"arm64", "arm64":"arm64"]\
                    [System.getProperty('os.arch').toLowerCase()]
+
+if (ext.hostOSArch == null) {
+    throw new GradleException("Unsupported host architecture: ${System.getProperty('os.arch')}")
+}
 
 // Full host OS identification as "name-arch"
 ext.hostOS       = "${ext.hostOSName}-${ext.hostOSArch}"
@@ -74,13 +78,24 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ['--enable-preview']
 }
 
+// Keep Gradle launches, generated start scripts and packaged applications consistent.
+ext.runtimeJvmArgs = ['--enable-preview',
+                      '-Dfile.encoding=UTF-8',
+                      '-Djava.util.PropertyResourceBundle.encoding=UTF-8',
+                      '-Dflatlaf.useWindowDecorations=false',
+                      '--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED',
+                      '--enable-native-access=ALL-UNNAMED']
+if (ext.targetOS.startsWith('macosx-')) {
+    ext.runtimeJvmArgs += ['-Dapple.laf.useScreenMenuBar=true',
+                          '-Dapple.awt.application.name=NoteLite']
+}
+
 tasks.withType(JavaExec).configureEach {
-    jvmArgs += ['--enable-preview',
-                '-Dfile.encoding=UTF-8',
-                '-Djava.util.PropertyResourceBundle.encoding=UTF-8',
-                '-Dflatlaf.useWindowDecorations=false',
-                '--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED',
-                '--enable-native-access=ALL-UNNAMED']
+    jvmArgs += app.ext.runtimeJvmArgs
+}
+
+tasks.withType(Test).configureEach {
+    jvmArgs += app.ext.runtimeJvmArgs
 }
 
 // No longer needed, but kept for potential future use (like batch integration test)
@@ -236,8 +251,7 @@ application {
     // WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
     // WARNING: Restricted methods will be blocked in a future release unless native access is enabled
     //
-    applicationDefaultJvmArgs = ["--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
-                                 "--enable-native-access=ALL-UNNAMED"]
+    applicationDefaultJvmArgs = app.ext.runtimeJvmArgs
 }
 
 // Perhaps no longer needed?

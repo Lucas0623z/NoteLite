@@ -23,235 +23,157 @@ package com.notelite.omr.ui;
 
 import com.notelite.omr.OMR;
 import com.notelite.omr.WellKnowns;
-import com.notelite.omr.sheet.Book;
-import com.notelite.omr.sheet.ui.StubsController;
+import com.notelite.omr.sheet.ui.BookActions.LoadBookTask;
+import com.notelite.omr.sheet.ui.BookActions.LoadImageTask;
 import com.notelite.omr.util.UriUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.awt.Image;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
+import java.awt.Desktop;
+import java.awt.Taskbar;
+import java.awt.event.InputEvent;
+import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URI;
-import java.nio.file.Paths;
+import java.util.Locale;
 
+import javax.swing.Action;
 import javax.swing.ImageIcon;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 
-/**
- * Class <code>MacApplication</code> provides dynamic hooks into the
- * OSX-only eawt package, registering NoteLite actions for the
- * Preferences, About, and Quit menu items.
- *
- * @author Brenton Partridge
- */
-public class MacApplication
-        implements InvocationHandler
+/** macOS integration using the supported Java desktop APIs (Java 9 and later). */
+public final class MacApplication
 {
-    //~ Static fields/initializers -----------------------------------------------------------------
-
     private static final Logger logger = LoggerFactory.getLogger(MacApplication.class);
 
-    /** Cached ApplicationEvent class */
-    private static Class<?> eventClass;
-
-    static {
-        try {
-            eventClass = Class.forName("com.apple.eawt.ApplicationEvent");
-        } catch (ClassNotFoundException e) {
-            eventClass = null;
-        }
-    }
-
-    //~ Methods ------------------------------------------------------------------------------------
-
-    /**
-     * Invocation handler for
-     * <code>
-     * com.apple.eawt.ApplicationListener</code>.
-     * This method should not be manually called;
-     * it is used by the proxy to forward calls.
-     *
-     * @throws Throwable if something goes wrong
-     */
-    @Override
-    public Object invoke (Object proxy,
-                          Method method,
-                          Object[] args)
-        throws Throwable
+    private MacApplication ()
     {
-        String name = method.getName();
-        String filename = null;
-
-        Object event = getEvent(args);
-
-        if (event != null) {
-            setHandled(event);
-            filename = getFilename(event);
-        }
-
-        logger.debug(name);
-
-        switch (name) {
-            case "handlePreferences" -> GuiActions.getInstance().definePreferences(null);
-            case "handleQuit" -> GuiActions.getInstance().exit(null);
-            case "handleAbout" -> GuiActions.getInstance().showAbout(null);
-            case "handleOpenFile" -> {
-                logger.debug(filename);
-
-                // Actually load the book
-                final Book book = OMR.engine.loadInput(Paths.get(filename));
-                book.createStubs();
-                if (OMR.gui != null) {
-                    StubsController.getInstance().displayStubs(book, null);
-                }
-            }
-            default -> {}
-        }
-
-        return null;
     }
 
-    //~ Static Methods -----------------------------------------------------------------------------
-
-    private static Object getEvent (Object[] args)
-    {
-        if (args.length > 0) {
-            Object arg = args[0];
-
-            if (arg != null) {
-                try {
-                    if ((eventClass != null) && eventClass.isAssignableFrom(arg.getClass())) {
-                        return arg;
-                    }
-                } catch (Exception e) {}
-            }
-        }
-
-        return null;
-    }
-
-    private static String getFilename (Object event)
-    {
-        try {
-            Method filename = eventClass.getMethod("getFilename");
-            Object rval = filename.invoke(event);
-
-            if (rval == null) {
-                return null;
-            } else {
-                return (String) rval;
-            }
-        } catch (IllegalAccessException | IllegalArgumentException | NoSuchMethodException
-                | SecurityException | InvocationTargetException e) {
-            return null;
-        }
-    }
-
-    private static void setHandled (Object event)
-    {
-        try {
-            Method handled = eventClass.getMethod("setHandled", boolean.class);
-            handled.invoke(event, true);
-        } catch (IllegalAccessException | IllegalArgumentException | NoSuchMethodException
-                | SecurityException | InvocationTargetException e) {}
-    }
-
-    /**
-     * Registers actions for preferences, about, and quit.
-     *
-     * @return true if successful, false if platform is not
-     *         Mac OS X or if an error occurs
-     */
-    @SuppressWarnings("unchecked")
+    /** Register native application-menu and Finder file-opening handlers. */
     public static boolean setupMacMenus ()
     {
-        if (!WellKnowns.MAC_OS_X) {
+        if (!WellKnowns.MAC_OS_X || !Desktop.isDesktopSupported()) {
             return false;
         }
 
         try {
-            //The class used to register hooks
-            Class<?> appClass = getMacAppClass();
-            Object app = getMacAppInstance();
+            final Desktop desktop = Desktop.getDesktop();
 
-            //Enable the about menu item and the preferences menu item
-            for (String methodName : new String[] { "setEnabledAboutMenu",
-                    "setEnabledPreferencesMenu" }) {
-                Method method = appClass.getMethod(methodName, boolean.class);
-                method.invoke(app, true);
+            if (desktop.isSupported(Desktop.Action.APP_ABOUT)) {
+                desktop.setAboutHandler(event -> onEventThread(
+                        () -> GuiActions.getInstance().showAbout(null)));
             }
-
-            //The interface used to register hooks
-            Class<?> listenerClass = Class.forName("com.apple.eawt.ApplicationListener");
-
-            //Using the current class loader,
-            //generate, load, and instantiate a class implementing listenerClass,
-            //providing an instance of this class as a callback for any method invocation
-            Object listenerProxy = Proxy.newProxyInstance(
-                    MacApplication.class.getClassLoader(),
-                    new Class<?>[] { listenerClass },
-                    new MacApplication());
-
-            //Add the generated class as a hook
-            Method addListener = appClass.getMethod("addApplicationListener", listenerClass);
-            addListener.invoke(app, listenerProxy);
-
+            if (desktop.isSupported(Desktop.Action.APP_PREFERENCES)) {
+                desktop.setPreferencesHandler(event -> onEventThread(
+                        () -> GuiActions.getInstance().definePreferences(null)));
+            }
+            if (desktop.isSupported(Desktop.Action.APP_QUIT_HANDLER)) {
+                desktop.setQuitHandler((event, response) -> {
+                    // BSAF owns shutdown and asks to save each modified book. Cancel the
+                    // native automatic exit so declining that dialog keeps the app alive.
+                    response.cancelQuit();
+                    onEventThread(() -> GuiActions.getInstance().exit(null));
+                });
+            }
+            if (desktop.isSupported(Desktop.Action.APP_OPEN_FILE)) {
+                desktop.setOpenFileHandler(event -> onEventThread(() -> {
+                    for (File file : event.getFiles()) {
+                        if (!file.isFile()) {
+                            logger.warn("Cannot open file from Finder: {}", file);
+                            continue;
+                        }
+                        // Use the same background tasks as Open and drag-and-drop.
+                        // Saved OMR projects must not be passed to the image reader.
+                        if (file.getName().toLowerCase(Locale.ROOT).endsWith(OMR.BOOK_EXTENSION)) {
+                            new LoadBookTask(file.toPath()).execute();
+                        } else {
+                            new LoadImageTask(file.toPath()).execute();
+                        }
+                    }
+                }));
+            }
             return true;
-        } catch (ClassNotFoundException | IllegalAccessException | IllegalArgumentException
-                | InstantiationException | NoSuchMethodException | SecurityException
-                | InvocationTargetException ex) {
-            logger.warn("Unable to setup Mac OS X menu integration, {}", ex.getMessage(), ex);
-
+        } catch (UnsupportedOperationException | SecurityException ex) {
+            logger.warn("Unable to set up macOS application integration", ex);
             return false;
         }
     }
 
+    /** Set the Dock icon when launched using Gradle or a generated start script. */
     public static boolean setupMacDockIcon ()
     {
-        if (!WellKnowns.MAC_OS_X) {
+        if (!WellKnowns.MAC_OS_X || !Taskbar.isTaskbarSupported()) {
             return false;
         }
 
         try {
-            Class<?> appClass = getMacAppClass();
-            Object app = getMacAppInstance();
-
-            Method getApplication = appClass.getMethod("getApplication");
-            Object application = getApplication.invoke(app);
-
+            final Taskbar taskbar = Taskbar.getTaskbar();
+            if (!taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
+                return false;
+            }
             URI uri = UriUtil.toURI(WellKnowns.RES_URI, "icon-256.png");
-            Image icon = new ImageIcon(uri.toURL()).getImage();
-
-            Method setDockImage = application.getClass().getMethod("setDockIconImage", Image.class);
-            setDockImage.invoke(application, icon);
-
+            taskbar.setIconImage(new ImageIcon(uri.toURL()).getImage());
             return true;
-        } catch (NoSuchMethodException | InstantiationException | ClassNotFoundException
-                | IllegalAccessException | InvocationTargetException | MalformedURLException ex) {
-            logger.warn("Unable to setup Mac OS X dock icon", ex);
+        } catch (UnsupportedOperationException | SecurityException | MalformedURLException ex) {
+            logger.warn("Unable to set up macOS Dock icon", ex);
             return false;
         }
     }
 
-    static Class<?> getMacAppClass ()
-        throws ClassNotFoundException
+    /** Translate application menu shortcuts to the macOS Command convention. */
+    public static void adaptMenuShortcuts (JMenuBar menuBar)
     {
-        return Class.forName("com.apple.eawt.Application");
+        for (int i = 0; i < menuBar.getMenuCount(); i++) {
+            final JMenu menu = menuBar.getMenu(i);
+            if (menu != null) {
+                adaptMenu(menu);
+            }
+        }
     }
 
-    static private Object app;
-
-    static Object getMacAppInstance ()
-        throws NoSuchMethodException, InstantiationException, ClassNotFoundException,
-        IllegalAccessException, InvocationTargetException
+    private static void adaptMenu (JMenu menu)
     {
-        if (app == null) {
-            app = getMacAppClass().getDeclaredConstructor().newInstance();
+        for (int i = 0; i < menu.getItemCount(); i++) {
+            final JMenuItem item = menu.getItem(i);
+            if (item instanceof JMenu child) {
+                adaptMenu(child);
+            } else if (item != null) {
+                final KeyStroke shortcut = commandShortcut(item.getAccelerator());
+                item.setAccelerator(shortcut);
+                final Action action = item.getAction();
+                if (action != null && shortcut != null) {
+                    action.putValue(Action.ACCELERATOR_KEY, shortcut);
+                }
+            }
         }
-        return app;
+    }
+
+    @SuppressWarnings("deprecation") // KeyStroke includes both legacy and extended modifier bits.
+    static KeyStroke commandShortcut (KeyStroke shortcut)
+    {
+        if (shortcut == null) {
+            return null;
+        }
+        final int controlMask = InputEvent.CTRL_MASK | InputEvent.CTRL_DOWN_MASK;
+        if ((shortcut.getModifiers() & controlMask) == 0) {
+            return shortcut;
+        }
+        final int modifiers = (shortcut.getModifiers() & ~controlMask) | InputEvent.META_DOWN_MASK;
+        return KeyStroke.getKeyStroke(shortcut.getKeyCode(), modifiers, shortcut.isOnKeyRelease());
+    }
+
+    private static void onEventThread (Runnable action)
+    {
+        if (SwingUtilities.isEventDispatchThread()) {
+            action.run();
+        } else {
+            SwingUtilities.invokeLater(action);
+        }
     }
 }
