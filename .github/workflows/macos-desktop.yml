@@ -1,0 +1,87 @@
+name: macOS desktop
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'packaging/**'
+      - 'data/examples/chula.png'
+      - 'gradle/**'
+      - '*.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/macos-desktop.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'app/**'
+      - 'packaging/**'
+      - 'data/examples/chula.png'
+      - 'gradle/**'
+      - '*.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/macos-desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.architecture }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            java_architecture: aarch64
+          - runner: macos-15-intel
+            architecture: x86_64
+            java_architecture: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: ${{ matrix.java_architecture }}
+          cache: gradle
+      - name: Build and test Mac integration
+        run: bash ./gradlew --no-daemon :app:test --tests com.notelite.omr.ui.MacApplicationTest
+      - name: Create self-contained DMG
+        run: bash ./gradlew --no-daemon :packaging:jpackage -PinstallerType=DMG
+      - name: Validate packaged launcher, runtime and recognition
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          image=$(find packaging/build/dist -maxdepth 1 -name '*.dmg' -print -quit)
+          test -n "$image"
+          mountpoint="$RUNNER_TEMP/notelite-dmg"
+          mkdir -p "$mountpoint"
+          # jpackage embeds this repository's LICENSE in the DMG; hdiutil prompts before mounting.
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mountpoint" <<< "Y"
+          trap 'hdiutil detach "$mountpoint"' EXIT
+          bundle="$mountpoint/NoteLite.app"
+          lipo "$bundle/Contents/MacOS/NoteLite" -verify_arch "$EXPECTED_ARCH"
+          "$bundle/Contents/runtime/Contents/Home/bin/java" -version
+          "$bundle/Contents/MacOS/NoteLite" -help
+          export TESSDATA_PREFIX="$RUNNER_TEMP/notelite-tessdata"
+          mkdir -p "$TESSDATA_PREFIX"
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/tesseract-ocr/tessdata/4.1.0/eng.traineddata \
+            --output "$TESSDATA_PREFIX/eng.traineddata"
+          smoke_output="$RUNNER_TEMP/notelite-recognition"
+          mkdir -p "$smoke_output"
+          "$bundle/Contents/MacOS/NoteLite" -batch -transcribe -export -export-midi \
+            -output "$smoke_output" -- "$GITHUB_WORKSPACE/data/examples/chula.png"
+          test -n "$(find "$smoke_output" -name '*.mxl' -size +0c -print -quit)"
+          test -n "$(find "$smoke_output" -name '*.mid' -size +0c -print -quit)"
+      - name: Upload unsigned installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoteLite-macos-${{ matrix.architecture }}-unsigned
+          path: packaging/build/dist/*.dmg
+          if-no-files-found: error

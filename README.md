@@ -13,6 +13,22 @@
 
 </div>
 
+## Apple platforms / 苹果端
+
+- **macOS desktop:** the full Java editor, with modern macOS menu/Finder integration,
+  Command shortcuts, and separate Apple Silicon / Intel DMG builds with bundled Java.
+  See [macOS build instructions](packaging/MACOS.md).
+- **iPhone and iPad:** a new SwiftUI client for importing and previewing scores,
+  submitting recognition jobs, and downloading/sharing MusicXML and MIDI. Recognition
+  runs on your own computer/server through the [recognition bridge](bridge/README.md).
+  See [Apple client setup](apple/README.md).
+
+The mobile client does **not** run the Java/Swing engine on-device or provide the full
+desktop score-correction editor. Apple builds must be compiled and checked on a Mac;
+the included GitHub Actions workflows provide unsigned build checks, not App Store releases.
+
+中文环境准备与适配范围见 [苹果端适配说明](docs/APPLE_PLATFORMS.md)。
+
 ---
 
 ## Overview

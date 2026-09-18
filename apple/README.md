@@ -1,0 +1,60 @@
+# NoteLite for iPhone / iPad
+
+原生 SwiftUI 客户端，最低支持 **iOS 16 / iPadOS 16**，同一个应用同时覆盖 iPhone 与 iPad。识谱继续使用仓库现有的 Java 引擎，通过 [桥接服务](../bridge/README.md) 调用。macOS 桌面端仍使用现有 NoteLite Java 应用，参见 [macOS 打包说明](../packaging/README.md)。
+
+## 已实现
+
+- iPhone 单栏导航；iPad 自适应侧栏与详情，支持旋转、分屏和可调整窗口、动态字体。
+- 从“文件”导入 PDF / PNG / JPEG / TIFF，单文件上限 25 MiB。离开 Files 提供者前复制到应用自己的存储，原稿和列表重启后仍在；iCloud 文件协调与复制在后台线程进行。
+- Quick Look 预览原稿、系统分享原稿；不要求连接服务器。
+- HTTPS 服务器设置，按服务器分别把 bearer token 存入 Keychain。健康检查不验证令牌；正式请求会显示认证错误。不关闭 ATS，不跟随 HTTP 重定向。
+- 真正的文件上传和上传进度、服务端任务状态轮询、失败重试、下载 MusicXML / MIDI / 引擎其他结果，通过系统分享菜单保存到“文件”或发送其他应用。
+- 本地保存任务 ID、原服务器地址和已下载结果；后台停止跟踪，返回前台或重启后恢复已有任务。中断的上传需要手动重试，并明确提示服务器可能已接收导致重复任务。
+- “暂停跟踪”只停止客户端网络活动，**不会取消服务器识谱**。服务器 API 没有取消运行中任务的接口。
+- 可单独清理已完成的服务器任务并保留本地结果。本地删除、重新提交均先清理旧任务；运行中、离线或清理失败时保留原任务记录。服务器返回 404 视为已清理，409 要等待终态。
+
+此版本不包含设备离线 OMR、相机扫描、手动校谱、MIDI 播放器、账户体系或跨设备同步。识谱结果取决于现有桌面引擎；移动版不提供完整桌面编辑功能。没有占位演示任务或模拟识谱结果。
+
+## 是否需要苹果编译工具
+
+**编译、模拟器运行及签名 iPhone / iPad 应用，需要 Mac 上的完整 Xcode 和 iOS SDK。** Windows 可以编辑代码和运行桥接服务；安装 Windows Swift 编译器不能获得 iOS SDK，也不能代替 Xcode 完成 iOS 构建。仓库 CI 使用 GitHub 的 macOS runner 构建并运行模拟器单元测试。
+
+macOS Java 桌面版不需要重写为 Swift，主要构建依赖仍是 JDK 21 和 Gradle；打包、签名等要求看桌面打包说明。
+
+## 在 Mac 上运行
+
+1. 安装完整 Xcode，打开一次完成 SDK / 模拟器安装及许可确认。在 Xcode Settings → Locations 中选中对应 Command Line Tools。
+2. 安装 [XcodeGen](https://github.com/yonaskolb/XcodeGen)，在仓库执行：
+
+```sh
+brew install xcodegen
+cd apple
+xcodegen generate --spec project.yml
+open NoteLite.xcodeproj
+```
+
+工程来自 `project.yml`，生成的 `.xcodeproj` 不纳入版本控制。选中 `NoteLite` scheme 和 iPhone / iPad 模拟器即可运行，不需要配置签名。真机运行时在 Signing & Capabilities 中选择自己的 Team，并按需要修改唯一的 Bundle Identifier。对外分发还需要签名配置、应用图标、隐私声明和发布资料；本改动不包含已签名安装包或商店发布。
+
+3. 按 [桥接服务说明](../bridge/README.md) 在电脑或服务器启动真实引擎，并配置手机可访问、证书受信任的 HTTPS 入口。应用内保存该地址和同一个访问令牌，再导入原稿并点“开始识别”。`localhost` 在手机上指手机本身。
+
+不提供通用明文 HTTP 开关。内网开发也请使用受信任的 HTTPS 代理 / 网关；无需更改应用的系统网络安全设置。上传内容发送到用户配置的服务器，服务端保留策略由该服务器控制。桥接服务当前是单个共享令牌，适合自己的服务，不提供多用户数据隔离。
+
+## 验证
+
+```sh
+cd apple
+xcodegen generate --spec project.yml
+xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
+  -configuration Release -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO
+xcodebuild -showdestinations -project NoteLite.xcodeproj -scheme NoteLite
+# 将下面的 ID 替换为上一条列出的 iPhone 或 iPad 模拟器 ID。
+xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
+  -destination 'platform=iOS Simulator,id=SIMULATOR_ID' CODE_SIGNING_ALLOWED=NO
+```
+
+`NoteLiteTests` 覆盖 HTTPS 地址与凭据边界、真实 API JSON 解码、路径遍历拒绝、导入副本和待办任务持久化、损坏清单保护、25 MiB 限制、HTTP 错误，以及清理远端后重新识别不得复用旧结果的回归。CI 分别在 iPhone、iPad 模拟器执行。Windows 开发环境不能执行 Xcode；静态检查不能替代首次 macOS CI 构建。
+
+真机验收需检查：iCloud 导入、iPad 分屏与旋转、后台恢复、无效令牌、失败重试、真实服务器识谱后分别分享 `.mxl` 和 `.mid`、清理服务器任务以及删除本地文件。单元测试不覆盖 OMR 准确率或完整触摸交互。
+
+API 契约：`GET /v1/health`；带认证的 `POST /v1/jobs?filename=...`（原始文件字节）、`GET /v1/jobs/{id}`、`GET /v1/jobs/{id}/artifacts/{name}`、`DELETE /v1/jobs/{id}`。结果下载始终在原服务器上根据校验过的文件名构造地址，不信任服务端返回的任意 URL。
