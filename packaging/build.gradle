@@ -18,7 +18,7 @@
 // For all OSes, 'jlink' and 'jpackage' are required
 // Windows requires 'WiX' 3 or higher
 // Linux requires 'fakeroot'
-// macOS requires '[image]magick', 'iconutil'
+// macOS uses the system-provided 'sips' and 'iconutil' tools
 //
 // The outputs are in the 'build' folder:
 // - build/jars:            NoteLite.jar, plus all the dependencies .jar files
@@ -71,42 +71,54 @@ tasks.register('linuxGetVersion', Exec) {
     }
 }
 
-tasks.register('collectJars', Copy) {
+tasks.register('collectJars', Sync) {
     description = "Copies the application jar and all external jars it depends upon"
-    dependsOn ':app:classes'
-    onlyIf('jars folder does not exist yet') {
-        !file('build/jars').exists()
-    }
-    doFirst {
-        mkdir('build/jars')
-    }
+    dependsOn ':app:jar'
 
     into 'build/jars'
     from app.tasks.jar
-    from app.sourceSets.main.runtimeClasspath
+    from app.configurations.runtimeClasspath
+}
+
+tasks.register('validatePackagingHost') {
+    description = "Checks that the bundled JRE and native libraries target the same platform"
+    doLast {
+        if (app.ext.targetOS != app.ext.hostOS) {
+            throw new GradleException("Installers must be built on their target architecture: " +
+                    "host=${app.ext.hostOS}, target=${app.ext.targetOS}. " +
+                    "Use a matching Mac and JDK for Apple Silicon or Intel builds.")
+        }
+        if (app.ext.hostOSName == 'macosx' && !(app.ext.hostOSArch in ['arm64', 'x86_64'])) {
+            throw new GradleException("macOS packaging supports arm64 and x86_64 only")
+        }
+    }
 }
 
 tasks.register('customJre', Exec) {
     description = "Assembles a custom JRE"
-    onlyIf('custom-jre folder does not exist yet') {
-        !file('build/custom-jre').exists()
+    dependsOn 'validatePackagingHost'
+    def jdkHome = file(System.getProperty('java.home'))
+    def runtimeDir = layout.buildDirectory.dir('custom-jre')
+    def runtimeModules = 'java.base,java.datatransfer,java.desktop,java.xml,java.naming,jdk.zipfs,jdk.crypto.ec,jdk.unsupported'
+    inputs.file(new File(jdkHome, 'release'))
+    inputs.property('jdkHome', jdkHome.absolutePath)
+    inputs.property('architecture', app.ext.hostOSArch)
+    inputs.property('modules', runtimeModules)
+    outputs.dir(runtimeDir)
+    doFirst {
+        // jlink requires an absent output directory. Rebuild when the JDK or inputs change.
+        delete runtimeDir.get().asFile
     }
 
     // module jdk.zipfs provides the implementation of the zip file system provider
     // module jdk.crypto.ec fixes javax.net.ssl.SSLHandshakeException
     // module jdk.unsupported is needed by pdfbox which calls jdk.internal.ref.Cleaner
-    commandLine "jlink",\
+    commandLine new File(jdkHome, "bin/jlink${app.ext.hostOSName == 'windows' ? '.exe' : ''}"),\
         "--output", "build/custom-jre",\
         "--no-header-files",\
         "--no-man-pages",\
         "--strip-debug",\
-        "--add-modules", "java.base,java.datatransfer,java.desktop,java.xml,java.naming,jdk.zipfs,jdk.crypto.ec,jdk.unsupported"
-}
-
-tasks.register('macImagemagick', Exec) {
-    description = "Install imagemagick"
-
-    commandLine "brew", "install", "imagemagick"
+        "--add-modules", runtimeModules
 }
 
 tasks.register('macCreateFolder') {
@@ -120,7 +132,7 @@ tasks.register('macCreateFolder') {
     }
 }
 
-def src = "$appDir/src/main/java/org/notelite/omr/ui/resources/icon-256.png"
+def src = "$appDir/res/icon-256.png"
 
 tasks.register('macSimples') {
     description = "Generate icons in simple size"
@@ -132,25 +144,25 @@ tasks.register('macDoubles') {
 
 // Generate different icon sizes
 // Including retina displays (@2x)
-[16, 32, 64, 128, 256, 512].each {size ->
+[16, 32, 128, 256, 512].each {size ->
     tasks.register("macSimple$size", Exec) {
-        dependsOn('macImagemagick')
         dependsOn('macCreateFolder')
-        inputs.dir("build/macos.iconset")
+        inputs.file(src)
+        outputs.file("build/macos.iconset/icon_${size}x${size}.png")
 
-        commandLine "magick", src, "-resize", "${size}x${size}",\
-        "build/macos.iconset/icon_${size}x${size}.png"
+        commandLine "/usr/bin/sips", "--resampleHeightWidth", "$size", "$size", src,\
+        "--out", "build/macos.iconset/icon_${size}x${size}.png"
     }
     macSimples.dependsOn("macSimple$size")
    
     def dbl = size * 2
     tasks.register("macDouble$size", Exec) {
-        dependsOn('macImagemagick')
         dependsOn('macCreateFolder')
-        inputs.dir("build/macos.iconset")
+        inputs.file(src)
+        outputs.file("build/macos.iconset/icon_${size}x${size}@2x.png")
 
-        commandLine "magick", src, "-resize", "${dbl}x${dbl}",\
-        "build/macos.iconset/icon_${size}x${size}@2x.png"
+        commandLine "/usr/bin/sips", "--resampleHeightWidth", "$dbl", "$dbl", src,\
+        "--out", "build/macos.iconset/icon_${size}x${size}@2x.png"
     }
     macDoubles.dependsOn("macDouble$size")
 }
@@ -168,9 +180,10 @@ tasks.register('macConvertIcons', Exec) {
     description = "Convert macos.iconset to icns"
     dependsOn('macSimples')
     dependsOn('macDoubles')
-    dependsOn('macListIcons')
+    inputs.dir("build/macos.iconset")
+    outputs.file("build/NoteLite.icns")
 
-    commandLine "iconutil",\
+    commandLine "/usr/bin/iconutil",\
             "--convert", "icns",\
             "--output", "build/NoteLite.icns",\
             "build/macos.iconset"
@@ -198,12 +211,7 @@ tasks.jpackage {
 
     fileAssociations    = files(layout.projectDirectory.file("dev/omr.properties"))
 
-    // REMINDER: Check consistency with "applicationDefaultJvmArgs" in file app/build.gradle
-    javaOptions         = ["--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
-                           "--enable-native-access=ALL-UNNAMED",
-                           "-Dfile.encoding=UTF-8",
-                           "-Xms512m",
-                           "-Xmx8G"]
+    javaOptions         = app.ext.runtimeJvmArgs + ["-Xms512m", "-Xmx8G"]
 
     // Chosen installer type, if any
     ImageType installerType = null
@@ -247,6 +255,16 @@ tasks.jpackage {
 
         macPackageIdentifier = "com.notelite.app"
         macPackageName = app.ext.programName
+        macAppCategory = "public.app-category.music"
+
+        // Developer ID signing is opt-in; CI can build reviewable unsigned artifacts.
+        if (project.hasProperty('macSigningIdentity')) {
+            macSign = true
+            macSigningKeyUserName = project.property('macSigningIdentity')
+            if (project.hasProperty('macSigningKeychain')) {
+                macSigningKeychain = project.property('macSigningKeychain')
+            }
+        }
 
         // Check validity of installerType for macOS
         if (installerType != null) {
@@ -254,6 +272,8 @@ tasks.jpackage {
                 throw new RuntimeException("Error: Illegal installerType for macOS: " + installerType)
             }
             type = installerType
+        } else {
+            type = ImageType.DMG
         }
     }
 
@@ -276,7 +296,9 @@ tasks.jpackage {
         // Rename artifact as: program name + version + host name + option? + architecture + .ext
         def dest = destination.get().asFile
         
-        fileTree(destination).each { file ->
+        fileTree(destination).matching {
+            include '*.dmg', '*.pkg', '*.msi', '*.exe', '*.deb', '*.rpm'
+        }.each { file ->
             println "oldFile: ${file}"
 
             // Retrieve suffix

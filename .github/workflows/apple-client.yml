@@ -1,0 +1,69 @@
+name: Apple mobile client
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple-client.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple-client.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        working-directory: apple
+        run: |
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate --spec project.yml
+      - name: Build universal iOS app without signing
+        working-directory: apple
+        run: |
+          xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Test on iPhone and iPad simulators
+        working-directory: apple
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/notelite-simulators.json"
+          for family in iPhone iPad; do
+            device_id=$(python3 - "$RUNNER_TEMP/notelite-simulators.json" "$family" <<'PY'
+          import json, sys
+          devices = json.load(open(sys.argv[1]))["devices"]
+          found = [d["udid"] for runtime, rows in devices.items() if "iOS" in runtime
+                   for d in rows if d.get("isAvailable") and sys.argv[2] in d["name"]]
+          if not found:
+              raise SystemExit("No available " + sys.argv[2] + " simulator")
+          print(found[0])
+          PY
+            )
+            xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
+              -destination "platform=iOS Simulator,id=$device_id" \
+              -parallel-testing-enabled NO -resultBundlePath "TestResults-$family.xcresult" \
+              CODE_SIGNING_ALLOWED=NO
+            # Release the first simulator's memory before booting the other device family.
+            xcrun simctl shutdown "$device_id" || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apple-simulator-test-results
+          path: apple/TestResults-*.xcresult
+          if-no-files-found: ignore
