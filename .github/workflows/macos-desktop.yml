@@ -65,7 +65,7 @@ jobs:
           hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mountpoint" <<< "Y"
           trap 'hdiutil detach "$mountpoint"' EXIT
           bundle="$mountpoint/NoteLite.app"
-          lipo -verify_arch "$EXPECTED_ARCH" "$bundle/Contents/MacOS/NoteLite"
+          lipo "$bundle/Contents/MacOS/NoteLite" -verify_arch "$EXPECTED_ARCH"
           "$bundle/Contents/runtime/Contents/Home/bin/java" -version
           "$bundle/Contents/MacOS/NoteLite" -help
           export TESSDATA_PREFIX="$RUNNER_TEMP/notelite-tessdata"
