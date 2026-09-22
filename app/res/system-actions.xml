@@ -35,6 +35,12 @@
     <action domain="BOOK" section="30" class="com.notelite.omr.sheet.ui.BookActions" method="printBookAs"/>
     <action domain="BOOK" section="40" class="com.notelite.omr.sheet.ui.BookActions" method="exportBook"/>
     <action domain="BOOK" section="40" class="com.notelite.omr.sheet.ui.BookActions" method="exportBookAs"/>
+    <action domain="BOOK" section="42" class="com.notelite.omr.sheet.ui.BookActions" method="openPracticeStudio" button="javax.swing.JButton"/>
+    <action domain="BOOK" section="42" class="com.notelite.omr.sheet.ui.BookActions" method="openPianoBooster"/>
+    <action domain="BOOK" section="42" class="com.notelite.omr.sheet.ui.BookActions" method="configurePianoBooster"/>
+    <action domain="BOOK" section="43" class="com.notelite.omr.sheet.ui.BookActions" method="importPracticeScore"/>
+    <action domain="BOOK" section="43" class="com.notelite.omr.sheet.ui.BookActions" method="importPianoBoosterMidi"/>
+    <action domain="BOOK" section="43" class="com.notelite.omr.sheet.ui.BookActions" method="openExternalScoreTools"/>
     <action domain="BOOK" section="45" class="com.notelite.omr.sheet.ui.BookActions" method="sampleBook"         topic="SAMPLES"/>
     <action domain="BOOK" section="45" class="com.notelite.omr.sheet.ui.BookActions" method="browseBookSamples"  topic="SAMPLES"/>
     <action domain="BOOK" section="45" class="com.notelite.omr.sheet.ui.BookActions" method="saveBookRepository" topic="SAMPLES"/>

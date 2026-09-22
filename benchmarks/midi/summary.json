@@ -1,0 +1,41 @@
+{
+  "scope": "Written MIDI serialization from hand-authored MusicXML; NOT image recognition.",
+  "matching": "Exact pitch, channel, onset and note-off in quarter-note beats, rounded to 6 decimals.",
+  "limits": "15 deliberately selected notation scenarios, 44 expected sounding notes and 1 tempo event; not a random score corpus or general accuracy estimate.",
+  "phases": {
+    "before": {
+      "source_sha256": "ef0564a195fb2342f930a960090b170f7ea4c7b2f04024e02394bc5169b4174f",
+      "passed_scenarios": 5,
+      "scenarios": 15,
+      "reference_notes": 44,
+      "predicted_note_ons": 40,
+      "exact_notes": 30,
+      "exact_note_precision": 0.75,
+      "exact_note_recall": 0.6818181818181818,
+      "exact_note_f1": 0.7142857142857143,
+      "reference_events": 89,
+      "predicted_events": 80,
+      "exact_events": 63,
+      "exact_event_precision": 0.7875,
+      "exact_event_recall": 0.7078651685393258,
+      "exact_event_f1": 0.7455621301775148
+    },
+    "after": {
+      "source_sha256": "41fdc14d7dc58bf822f8ef45522dffc652d785f398186d1235ebae8a62af5036",
+      "passed_scenarios": 15,
+      "scenarios": 15,
+      "reference_notes": 44,
+      "predicted_note_ons": 44,
+      "exact_notes": 44,
+      "exact_note_precision": 1.0,
+      "exact_note_recall": 1.0,
+      "exact_note_f1": 1.0,
+      "reference_events": 89,
+      "predicted_events": 89,
+      "exact_events": 89,
+      "exact_event_precision": 1.0,
+      "exact_event_recall": 1.0,
+      "exact_event_f1": 1.0
+    }
+  }
+}

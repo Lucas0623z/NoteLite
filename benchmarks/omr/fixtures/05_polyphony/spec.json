@@ -1,0 +1,173 @@
+{
+  "id": "05_polyphony",
+  "description": "4 measures, two simultaneous voices on one treble staff",
+  "parts": [
+    {
+      "clefs": [
+        "G"
+      ],
+      "voice_staves": [
+        1,
+        1
+      ],
+      "measures": [
+        [
+          [
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F5"
+              ],
+              "duration": "1"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "G5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D5"
+              ],
+              "duration": "1"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "B3"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "E5"
+              ],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [
+                "F5"
+              ],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [
+                "G5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "2"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "2"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "G3"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

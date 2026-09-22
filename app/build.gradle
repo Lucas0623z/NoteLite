@@ -288,6 +288,26 @@ tasks.run {
 }
 
 // Generate application.jar
+tasks.named('processResources') {
+    // The local practice server must work from Gradle run/tests as well as the packaged JAR.
+    from(file('res/practice')) {
+        into 'res/practice'
+    }
+}
+
+// Optional direct entry into the bundled practice studio, including when no book is open.
+distributions {
+    main {
+        contents {
+            from('dev/scripts/PracticeStudio.bat') { into 'bin' }
+            from('dev/scripts/PracticeStudio') {
+                into 'bin'
+                filePermissions { unix('rwxr-xr-x') }
+            }
+        }
+    }
+}
+
 jar {
     // override default output archive name
     archiveFileName = "${programId}.jar"
@@ -298,6 +318,7 @@ jar {
 
     // copy resources into the destination jar
     from(file('res')) {
+        exclude 'practice/**'
         into 'res'
     }
 

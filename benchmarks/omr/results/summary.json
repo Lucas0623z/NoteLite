@@ -1,0 +1,1224 @@
+{
+  "baseline-synthetic": {
+    "jar_sha256": "e06272fbc9dd0a1e52c4bcd4b519be9989e28c3a5aff90128723ca1221db9953",
+    "aggregate": {
+      "pitch_onset": {
+        "tp": 158,
+        "fp": 0,
+        "fn": 21,
+        "precision": 1.0,
+        "recall": 0.88268156424581,
+        "f1": 0.9376854599406528
+      },
+      "pitch_onset_offset": {
+        "tp": 158,
+        "fp": 0,
+        "fn": 21,
+        "precision": 1.0,
+        "recall": 0.88268156424581,
+        "f1": 0.9376854599406528
+      },
+      "pitch_inventory_diagnostic": {
+        "tp": 158,
+        "fp": 0,
+        "fn": 21,
+        "precision": 1.0,
+        "recall": 0.88268156424581,
+        "f1": 0.9376854599406528
+      }
+    },
+    "cases": [
+      {
+        "id": "01_diatonic",
+        "status": "ok",
+        "seconds": 3.446,
+        "metrics": {
+          "reference_notes": 25,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 25,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          }
+        }
+      },
+      {
+        "id": "02_accidentals",
+        "status": "ok",
+        "seconds": 3.906,
+        "metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 20,
+          "pitch_onset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_onset_offset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 20,
+          "pitch_onset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_onset_offset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          }
+        }
+      },
+      {
+        "id": "03_rhythm_ties",
+        "status": "ok",
+        "seconds": 3.195,
+        "metrics": {
+          "reference_notes": 11,
+          "predicted_notes": 11,
+          "pitch_onset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 11,
+          "predicted_notes": 11,
+          "pitch_onset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "04_piano",
+        "status": "ok",
+        "seconds": 4.351,
+        "metrics": {
+          "reference_notes": 46,
+          "predicted_notes": 46,
+          "pitch_onset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 46,
+          "predicted_notes": 46,
+          "pitch_onset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "05_polyphony",
+        "status": "ok",
+        "seconds": 3.367,
+        "metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "06_tuplets",
+        "status": "ok",
+        "seconds": 3.143,
+        "metrics": {
+          "reference_notes": 21,
+          "predicted_notes": 21,
+          "pitch_onset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 21,
+          "predicted_notes": 21,
+          "pitch_onset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "07_repeats",
+        "status": "ok",
+        "seconds": 3.037,
+        "metrics": {
+          "reference_notes": 32,
+          "predicted_notes": 16,
+          "pitch_onset": {
+            "tp": 16,
+            "fp": 0,
+            "fn": 16,
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666
+          },
+          "pitch_onset_offset": {
+            "tp": 16,
+            "fp": 0,
+            "fn": 16,
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 16,
+            "fp": 0,
+            "fn": 16,
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 32,
+          "predicted_notes": 16,
+          "pitch_onset": {
+            "tp": 16,
+            "fp": 0,
+            "fn": 16,
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666
+          },
+          "pitch_onset_offset": {
+            "tp": 16,
+            "fp": 0,
+            "fn": 16,
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 16,
+            "fp": 0,
+            "fn": 16,
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666
+          }
+        }
+      }
+    ]
+  },
+  "baseline-external": {
+    "jar_sha256": "e06272fbc9dd0a1e52c4bcd4b519be9989e28c3a5aff90128723ca1221db9953",
+    "aggregate": {
+      "pitch_onset": {
+        "tp": 420,
+        "fp": 1062,
+        "fn": 2566,
+        "precision": 0.2834008097165992,
+        "recall": 0.1406563965170797,
+        "f1": 0.18800358102059087
+      },
+      "pitch_onset_offset": {
+        "tp": 343,
+        "fp": 1139,
+        "fn": 2643,
+        "precision": 0.23144399460188933,
+        "recall": 0.11486939048894843,
+        "f1": 0.15353625783348254
+      },
+      "pitch_inventory_diagnostic": {
+        "tp": 1459,
+        "fp": 23,
+        "fn": 1527,
+        "precision": 0.9844804318488529,
+        "recall": 0.4886135298057602,
+        "f1": 0.653088630259624
+      }
+    },
+    "cases": [
+      {
+        "id": "08_mutopia_minuet",
+        "status": "ok",
+        "seconds": 11.018,
+        "metrics": {
+          "reference_notes": 408,
+          "predicted_notes": 203,
+          "pitch_onset": {
+            "tp": 118,
+            "fp": 85,
+            "fn": 290,
+            "precision": 0.5812807881773399,
+            "recall": 0.28921568627450983,
+            "f1": 0.3862520458265139
+          },
+          "pitch_onset_offset": {
+            "tp": 111,
+            "fp": 92,
+            "fn": 297,
+            "precision": 0.5467980295566502,
+            "recall": 0.27205882352941174,
+            "f1": 0.36333878887070375
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 203,
+            "fp": 0,
+            "fn": 205,
+            "precision": 1.0,
+            "recall": 0.49754901960784315,
+            "f1": 0.6644844517184942
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 204,
+          "predicted_notes": 203,
+          "pitch_onset": {
+            "tp": 203,
+            "fp": 0,
+            "fn": 1,
+            "precision": 1.0,
+            "recall": 0.9950980392156863,
+            "f1": 0.9975429975429976
+          },
+          "pitch_onset_offset": {
+            "tp": 202,
+            "fp": 1,
+            "fn": 2,
+            "precision": 0.9950738916256158,
+            "recall": 0.9901960784313726,
+            "f1": 0.9926289926289926
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 203,
+            "fp": 0,
+            "fn": 1,
+            "precision": 1.0,
+            "recall": 0.9950980392156863,
+            "f1": 0.9975429975429976
+          }
+        }
+      },
+      {
+        "id": "09_mutopia_mozart",
+        "status": "ok",
+        "seconds": 37.923,
+        "metrics": {
+          "reference_notes": 2578,
+          "predicted_notes": 1279,
+          "pitch_onset": {
+            "tp": 302,
+            "fp": 977,
+            "fn": 2276,
+            "precision": 0.2361219702892885,
+            "recall": 0.11714507370054306,
+            "f1": 0.15659839253305677
+          },
+          "pitch_onset_offset": {
+            "tp": 232,
+            "fp": 1047,
+            "fn": 2346,
+            "precision": 0.181391712275215,
+            "recall": 0.0899922420480993,
+            "f1": 0.12030075187969924
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 1256,
+            "fp": 23,
+            "fn": 1322,
+            "precision": 0.982017200938233,
+            "recall": 0.48719937936384794,
+            "f1": 0.651283380865958
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 1289,
+          "predicted_notes": 1279,
+          "pitch_onset": {
+            "tp": 258,
+            "fp": 1021,
+            "fn": 1031,
+            "precision": 0.20172009382329945,
+            "recall": 0.20015515903801395,
+            "f1": 0.20093457943925233
+          },
+          "pitch_onset_offset": {
+            "tp": 236,
+            "fp": 1043,
+            "fn": 1053,
+            "precision": 0.18451915559030493,
+            "recall": 0.1830876648564779,
+            "f1": 0.1838006230529595
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 1228,
+            "fp": 51,
+            "fn": 61,
+            "precision": 0.9601250977326036,
+            "recall": 0.9526764934057409,
+            "f1": 0.956386292834891
+          }
+        }
+      }
+    ]
+  },
+  "fixed-synthetic": {
+    "jar_sha256": "a5592b790c8401454e46039e8a4246eefe9d25bf09d82e82a792583086f1089e",
+    "aggregate": {
+      "pitch_onset": {
+        "tp": 174,
+        "fp": 0,
+        "fn": 5,
+        "precision": 1.0,
+        "recall": 0.9720670391061452,
+        "f1": 0.9858356940509915
+      },
+      "pitch_onset_offset": {
+        "tp": 174,
+        "fp": 0,
+        "fn": 5,
+        "precision": 1.0,
+        "recall": 0.9720670391061452,
+        "f1": 0.9858356940509915
+      },
+      "pitch_inventory_diagnostic": {
+        "tp": 174,
+        "fp": 0,
+        "fn": 5,
+        "precision": 1.0,
+        "recall": 0.9720670391061452,
+        "f1": 0.9858356940509915
+      }
+    },
+    "cases": [
+      {
+        "id": "01_diatonic",
+        "status": "ok",
+        "seconds": 3.71,
+        "metrics": {
+          "reference_notes": 25,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 25,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 3,
+            "precision": 1.0,
+            "recall": 0.88,
+            "f1": 0.9361702127659575
+          }
+        }
+      },
+      {
+        "id": "02_accidentals",
+        "status": "ok",
+        "seconds": 3.704,
+        "metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 20,
+          "pitch_onset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_onset_offset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 20,
+          "pitch_onset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_onset_offset": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 20,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9090909090909091,
+            "f1": 0.9523809523809523
+          }
+        }
+      },
+      {
+        "id": "03_rhythm_ties",
+        "status": "ok",
+        "seconds": 3.339,
+        "metrics": {
+          "reference_notes": 11,
+          "predicted_notes": 11,
+          "pitch_onset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 11,
+          "predicted_notes": 11,
+          "pitch_onset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "04_piano",
+        "status": "ok",
+        "seconds": 4.175,
+        "metrics": {
+          "reference_notes": 46,
+          "predicted_notes": 46,
+          "pitch_onset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 46,
+          "predicted_notes": 46,
+          "pitch_onset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 46,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "05_polyphony",
+        "status": "ok",
+        "seconds": 3.156,
+        "metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 22,
+          "predicted_notes": 22,
+          "pitch_onset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 22,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "06_tuplets",
+        "status": "ok",
+        "seconds": 3.101,
+        "metrics": {
+          "reference_notes": 21,
+          "predicted_notes": 21,
+          "pitch_onset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 21,
+          "predicted_notes": 21,
+          "pitch_onset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 21,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      },
+      {
+        "id": "07_repeats",
+        "status": "ok",
+        "seconds": 3.255,
+        "metrics": {
+          "reference_notes": 32,
+          "predicted_notes": 32,
+          "pitch_onset": {
+            "tp": 32,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 32,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 32,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 32,
+          "predicted_notes": 32,
+          "pitch_onset": {
+            "tp": 32,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_onset_offset": {
+            "tp": 32,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 32,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0
+          }
+        }
+      }
+    ]
+  },
+  "fixed-external": {
+    "jar_sha256": "a5592b790c8401454e46039e8a4246eefe9d25bf09d82e82a792583086f1089e",
+    "aggregate": {
+      "pitch_onset": {
+        "tp": 2790,
+        "fp": 174,
+        "fn": 196,
+        "precision": 0.9412955465587044,
+        "recall": 0.9343603482920295,
+        "f1": 0.9378151260504202
+      },
+      "pitch_onset_offset": {
+        "tp": 2770,
+        "fp": 194,
+        "fn": 216,
+        "precision": 0.9345479082321188,
+        "recall": 0.927662424648359,
+        "f1": 0.9310924369747899
+      },
+      "pitch_inventory_diagnostic": {
+        "tp": 2862,
+        "fp": 102,
+        "fn": 124,
+        "precision": 0.9655870445344129,
+        "recall": 0.9584728734092431,
+        "f1": 0.9620168067226891
+      }
+    },
+    "cases": [
+      {
+        "id": "08_mutopia_minuet",
+        "status": "ok",
+        "seconds": 8.995,
+        "metrics": {
+          "reference_notes": 408,
+          "predicted_notes": 406,
+          "pitch_onset": {
+            "tp": 406,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9950980392156863,
+            "f1": 0.9975429975429976
+          },
+          "pitch_onset_offset": {
+            "tp": 404,
+            "fp": 2,
+            "fn": 4,
+            "precision": 0.9950738916256158,
+            "recall": 0.9901960784313726,
+            "f1": 0.9926289926289926
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 406,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9950980392156863,
+            "f1": 0.9975429975429976
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 408,
+          "predicted_notes": 406,
+          "pitch_onset": {
+            "tp": 406,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9950980392156863,
+            "f1": 0.9975429975429976
+          },
+          "pitch_onset_offset": {
+            "tp": 404,
+            "fp": 2,
+            "fn": 4,
+            "precision": 0.9950738916256158,
+            "recall": 0.9901960784313726,
+            "f1": 0.9926289926289926
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 406,
+            "fp": 0,
+            "fn": 2,
+            "precision": 1.0,
+            "recall": 0.9950980392156863,
+            "f1": 0.9975429975429976
+          }
+        }
+      },
+      {
+        "id": "09_mutopia_mozart",
+        "status": "ok",
+        "seconds": 36.155,
+        "metrics": {
+          "reference_notes": 2578,
+          "predicted_notes": 2558,
+          "pitch_onset": {
+            "tp": 2384,
+            "fp": 174,
+            "fn": 194,
+            "precision": 0.9319781078967944,
+            "recall": 0.9247478665632273,
+            "f1": 0.9283489096573209
+          },
+          "pitch_onset_offset": {
+            "tp": 2366,
+            "fp": 192,
+            "fn": 212,
+            "precision": 0.924941360437842,
+            "recall": 0.9177657098525989,
+            "f1": 0.9213395638629284
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 2456,
+            "fp": 102,
+            "fn": 122,
+            "precision": 0.9601250977326036,
+            "recall": 0.9526764934057409,
+            "f1": 0.956386292834891
+          }
+        },
+        "original_run_metrics": {
+          "reference_notes": 2578,
+          "predicted_notes": 2558,
+          "pitch_onset": {
+            "tp": 2384,
+            "fp": 174,
+            "fn": 194,
+            "precision": 0.9319781078967944,
+            "recall": 0.9247478665632273,
+            "f1": 0.9283489096573209
+          },
+          "pitch_onset_offset": {
+            "tp": 2366,
+            "fp": 192,
+            "fn": 212,
+            "precision": 0.924941360437842,
+            "recall": 0.9177657098525989,
+            "f1": 0.9213395638629284
+          },
+          "pitch_inventory_diagnostic": {
+            "tp": 2456,
+            "fp": 102,
+            "fn": 122,
+            "precision": 0.9601250977326036,
+            "recall": 0.9526764934057409,
+            "f1": 0.956386292834891
+          }
+        }
+      }
+    ]
+  }
+}

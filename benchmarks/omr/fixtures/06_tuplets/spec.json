@@ -1,0 +1,155 @@
+{
+  "id": "06_tuplets",
+  "description": "4 measures, triplet eighths mixed with quarter notes",
+  "parts": [
+    {
+      "clefs": [
+        "G"
+      ],
+      "measures": [
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "D5"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1/3"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

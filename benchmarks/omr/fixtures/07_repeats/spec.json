@@ -1,0 +1,126 @@
+{
+  "id": "07_repeats",
+  "description": "4 written measures with repeat barlines; truth is expanded playback (8 measures)",
+  "repeat": true,
+  "parts": [
+    {
+      "clefs": [
+        "G"
+      ],
+      "measures": [
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

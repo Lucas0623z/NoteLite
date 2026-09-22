@@ -1,0 +1,195 @@
+{
+  "id": "01_diatonic",
+  "description": "8 measures, monophonic treble, quarter and half notes",
+  "parts": [
+    {
+      "clefs": [
+        "G"
+      ],
+      "measures": [
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "D5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "4"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

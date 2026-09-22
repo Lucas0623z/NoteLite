@@ -1,0 +1,263 @@
+{
+  "id": "04_piano",
+  "description": "8 measures, piano grand staff, triads, broken chords and bass whole notes",
+  "parts": [
+    {
+      "clefs": [
+        "G",
+        "F"
+      ],
+      "measures": [
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "C3"
+              ],
+              "duration": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "D4",
+                "F4",
+                "A4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "G4",
+                "B4",
+                "D5"
+              ],
+              "duration": "2"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "G2"
+              ],
+              "duration": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E5"
+              ],
+              "duration": "1"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "C3"
+              ],
+              "duration": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "F4",
+                "A4",
+                "C5"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "E4",
+                "G4",
+                "C5"
+              ],
+              "duration": "2"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "F2"
+              ],
+              "duration": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D5"
+              ],
+              "duration": "1"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "D3"
+              ],
+              "duration": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "E4",
+                "G4",
+                "B4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "F4",
+                "A4",
+                "D5"
+              ],
+              "duration": "2"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "G2"
+              ],
+              "duration": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F5"
+              ],
+              "duration": "1"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "G2"
+              ],
+              "duration": "4"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "C4",
+                "E4",
+                "G4",
+                "C5"
+              ],
+              "duration": "4"
+            }
+          ],
+          [
+            {
+              "pitches": [
+                "C3"
+              ],
+              "duration": "4"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

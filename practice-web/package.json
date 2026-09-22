@@ -1,0 +1,19 @@
+{
+  "name": "notelite-practice",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "fflate": "0.8.2",
+    "opensheetmusicdisplay": "2.1.3",
+    "pitchy": "4.1.0"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "0.9.12",
+    "esbuild": "0.25.10"
+  }
+}

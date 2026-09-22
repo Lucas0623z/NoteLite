@@ -1,0 +1,115 @@
+{
+  "id": "03_rhythm_ties",
+  "description": "4 measures, rests, dotted notes, eighths and tied notes",
+  "parts": [
+    {
+      "clefs": [
+        "G"
+      ],
+      "measures": [
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "3/2"
+            },
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1",
+              "tie": "start"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1",
+              "tie": "stop"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "3/2"
+            },
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1/2"
+            },
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "3"
+            },
+            {
+              "pitches": [],
+              "duration": "1"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+Bundled license information:
+
+opensheetmusicdisplay/build/opensheetmusicdisplay.min.js:
+  /*! For license information please see opensheetmusicdisplay.min.js.LICENSE.txt */

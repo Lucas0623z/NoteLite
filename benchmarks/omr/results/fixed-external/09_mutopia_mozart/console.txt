@@ -1,0 +1,373 @@
+INFO  []                      Main 254  | Running in batch mode
+INFO  []                 Languages 138  | Installed OCR languages: chi_sim,eng
+INFO  []             AliasPatterns 146  | Alias patterns: [(IMSLP[0-9]*)-.*]
+INFO  []                      Main 194  | Submitting 1 task(s) in sequence:
+    Input "D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf"
+INFO  [score]                      Book 560  | 6 sheets in D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf
+INFO  []                      Book 2565 | Stored /book.xml
+INFO  []                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.omr
+INFO  []                      Book 1929 | Book reaching PAGE on sheets:[#1#2#3#4#5#6]
+INFO  [score#1]            StepMonitoring 98   | LOAD
+INFO  [score#1]                 SheetStub 1278 | Loaded image #1 2480x3507 from D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf
+INFO  [score#1]            StepMonitoring 98   | BINARY
+INFO  [score#1]            StepMonitoring 98   | SCALE
+INFO  [score#1]              ScaleBuilder 255  | Beam  guessed height: 13 -- mid of [6..20]
+INFO  [score#1]              ScaleBuilder 271  | Beam measured height: 10 -- 0.29 of [6..20] range at 645% of needed quorum
+INFO  [score#1]              ScaleBuilder 401  | Normalized black jitter: 4.76 %
+INFO  [score#1]                 ScaleStep 65   | Scale{ interline(20,21,21) line(2,2,3) beam(10)}
+INFO  [score#1]            StepMonitoring 98   | GRID
+INFO  [score#1]            LinesRetriever 1500 | Global slope: 0.00000
+INFO  [score#1]         ClustersRetriever 326  | Retrieved raw line clusters: 10 of sizes [5] with interline(20,21,21)
+INFO  [score#1]                 PeakGraph 310  | Systems: #1[1, 2] #2[3, 4] #3[5, 6] #4[7, 8] #5[9, 10]
+INFO  [score#1]             SystemManager 134  | Indentation detected for system #1
+INFO  [score#1]             SystemManager 779  | 1 part along 5 systems
+INFO  [score#1]                      Book 543  | Created scores: [{Score 1}]
+INFO  [score#1]            StepMonitoring 98   | HEADERS
+INFO  [score#1]            StepMonitoring 98   | STEM_SEEDS
+INFO  [score#1]             StemSeedsStep 86   | stem(3 max:4)
+INFO  [score#1]            StepMonitoring 98   | BEAMS
+INFO  [score#1]            StepMonitoring 98   | LEDGERS
+INFO  [score#1]            StepMonitoring 98   | HEADS
+INFO  [score#1]             HeadSeedTally 235  | Scale information: HeadSeeds{NOTEHEAD_BLACK[L:0.5,R:-0.3]}
+INFO  [score#1]            StepMonitoring 98   | STEMS
+INFO  [score#1]            StepMonitoring 98   | REDUCTION
+INFO  [score#1]             ReductionStep 105  | Stems free length median value: 73 pixels, 3.5 interlines
+INFO  [score#1]            StepMonitoring 98   | CUE_BEAMS
+INFO  [score#1]              CueBeamsStep 81   | Step CUE_BEAMS is skipped because small heads switch is off
+INFO  [score#1]            StepMonitoring 98   | TEXTS
+INFO  [score#1]            StepMonitoring 98   | MEASURES
+INFO  [score#1]                      Page 307  | 14 raw measures: [3 in system#1, 3 in system#2, 3 in system#3, 3 in system#4, 2 in system#5]
+INFO  [score#1]            StepMonitoring 98   | CHORDS
+INFO  [score#1]            StepMonitoring 98   | CURVES
+INFO  [score#1]              SlursBuilder 240  | Slurs: 11
+INFO  [score#1]           SegmentsBuilder 155  | Segments: 61
+INFO  [score#1]            StepMonitoring 98   | SYMBOLS
+INFO  [score#1]            StepMonitoring 98   | LINKS
+INFO  [score#1]                  KeyInter 1189 | No effective key before AlterInter#5547{(0.800) staff:7 NATURAL pitch:-1.0}
+INFO  [score#1]            StepMonitoring 98   | RHYTHMS
+INFO  [score#1]            StepMonitoring 98   | PAGE
+INFO  [score#1]                      Book 2584 | Book{score} storing
+INFO  [score#1]                      Book 2565 | Stored /book.xml
+INFO  [score#1]                DataHolder 348  | Stored /sheet#1/BINARY.png
+INFO  [score#1]                     Sheet 1583 | Stored /sheet#1/sheet#1.xml
+INFO  [score#1]                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.omr
+INFO  [score#1]                 SheetStub 1655 | Sheet#1 disposed
+INFO  [score#1]                      Book 2050 | End of Stub#1
+INFO  [score#2]            StepMonitoring 98   | LOAD
+INFO  [score#2]                 SheetStub 1278 | Loaded image #2 2480x3507 from D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf
+INFO  [score#2]            StepMonitoring 98   | BINARY
+INFO  [score#2]            StepMonitoring 98   | SCALE
+INFO  [score#2]              ScaleBuilder 255  | Beam  guessed height: 13 -- mid of [6..20]
+INFO  [score#2]              ScaleBuilder 271  | Beam measured height: 10 -- 0.29 of [6..20] range at 805% of needed quorum
+INFO  [score#2]              ScaleBuilder 401  | Normalized black jitter: 4.76 %
+INFO  [score#2]                 ScaleStep 65   | Scale{ small_interline(16,17,18) interline(20,21,21) line(2,2,3) beam(10)}
+INFO  [score#2]            StepMonitoring 98   | GRID
+INFO  [score#2]            LinesRetriever 1500 | Global slope: 0.00000
+INFO  [score#2]         ClustersRetriever 326  | Retrieved raw line clusters: 10 of sizes [5] with interline(20,21,21)
+INFO  [score#2]            LinesRetriever 1516 | Searching clusters with smallInterline: 17
+INFO  [score#2]         ClustersRetriever 326  | Retrieved raw line clusters: 0 of sizes [5] with interline(16,17,18)
+INFO  [score#2]                 PeakGraph 310  | Systems: #1[1, 2] #2[3, 4] #3[5, 6] #4[7, 8] #5[9, 10]
+INFO  [score#2]             SystemManager 779  | 1 part along 5 systems
+INFO  [score#2]            StepMonitoring 98   | HEADERS
+INFO  [score#2]            StepMonitoring 98   | STEM_SEEDS
+INFO  [score#2]             StemSeedsStep 86   | stem(3 max:4)
+INFO  [score#2]            StepMonitoring 98   | BEAMS
+INFO  [score#2]            StepMonitoring 98   | LEDGERS
+INFO  [score#2]            StepMonitoring 98   | HEADS
+INFO  [score#2]             HeadSeedTally 235  | Scale information: HeadSeeds{NOTEHEAD_BLACK[L:0.5,R:-0.3]}
+INFO  [score#2]            StepMonitoring 98   | STEMS
+INFO  [score#2]            StepMonitoring 98   | REDUCTION
+INFO  [score#2]             ReductionStep 105  | Stems free length median value: 73 pixels, 3.5 interlines
+INFO  [score#2]            StepMonitoring 98   | CUE_BEAMS
+INFO  [score#2]              CueBeamsStep 81   | Step CUE_BEAMS is skipped because small heads switch is off
+INFO  [score#2]            StepMonitoring 98   | TEXTS
+INFO  [score#2]            StepMonitoring 98   | MEASURES
+INFO  [score#2]                      Page 307  | 11 raw measures: [2 in system#1, 2 in system#2, 2 in system#3, 3 in system#4, 2 in system#5]
+INFO  [score#2]            StepMonitoring 98   | CHORDS
+INFO  [score#2]            StepMonitoring 98   | CURVES
+INFO  [score#2]              SlursBuilder 240  | Slurs: 27
+INFO  [score#2]           SegmentsBuilder 155  | Segments: 34
+INFO  [score#2]            StepMonitoring 98   | SYMBOLS
+INFO  [score#2]            StepMonitoring 98   | LINKS
+INFO  [score#2]                  KeyInter 1322 | Key built KeyInter#5567{(0.800) staff:7 KEY_SHARP_1 pitch:-1.8 fifths:1}
+INFO  [score#2]            StepMonitoring 98   | RHYTHMS
+INFO  [score#2]                PageRhythm 199  | {Page#2.1} Time value reused from sheet#1
+INFO  [score#2]                     Voice 257  | Measure{#7} Voice{#1 excess:1/32} too long
+INFO  [score#2]               StackRhythm 224  | S4 MeasureStack#7 no correct rhythm
+INFO  [score#2]             MeasureRhythm 1044 | Measure{#11} No timeOffset for HeadChordInter#4786{(0.969/0.969) staff:10 slot#14 dur:1/16}
+INFO  [score#2]                     Voice 257  | Measure{#11} Voice{#2 excess:1/4} too long
+INFO  [score#2]               StackRhythm 224  | S5 MeasureStack#11 no correct rhythm
+INFO  [score#2]            StepMonitoring 98   | PAGE
+INFO  [score#2]                     Voice 257  | Measure{#7} Voice{#1 excess:1/32} too long
+INFO  [score#2]                     Voice 257  | Measure{#11} Voice{#2 excess:1/4} too long
+INFO  [score#2]                      Book 2584 | Book{score} storing
+INFO  [score#2]                      Book 2565 | Stored /book.xml
+INFO  [score#2]                DataHolder 348  | Stored /sheet#2/BINARY.png
+INFO  [score#2]                     Sheet 1583 | Stored /sheet#2/sheet#2.xml
+INFO  [score#2]                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.omr
+INFO  [score#2]                 SheetStub 1655 | Sheet#2 disposed
+INFO  [score#2]                      Book 2050 | End of Stub#2
+INFO  [score#3]            StepMonitoring 98   | LOAD
+INFO  [score#3]                 SheetStub 1278 | Loaded image #3 2480x3507 from D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf
+INFO  [score#3]            StepMonitoring 98   | BINARY
+INFO  [score#3]            StepMonitoring 98   | SCALE
+INFO  [score#3]              ScaleBuilder 255  | Beam  guessed height: 13 -- mid of [6..20]
+INFO  [score#3]              ScaleBuilder 271  | Beam measured height: 10 -- 0.29 of [6..20] range at 544% of needed quorum
+INFO  [score#3]              ScaleBuilder 401  | Normalized black jitter: 4.76 %
+INFO  [score#3]                 ScaleStep 65   | Scale{ interline(20,21,21) line(2,2,3) beam(10)}
+INFO  [score#3]            StepMonitoring 98   | GRID
+INFO  [score#3]            LinesRetriever 1500 | Global slope: 0.00000
+INFO  [score#3]         ClustersRetriever 326  | Retrieved raw line clusters: 10 of sizes [5] with interline(20,21,21)
+INFO  [score#3]                 PeakGraph 310  | Systems: #1[1, 2] #2[3, 4] #3[5, 6] #4[7, 8] #5[9, 10]
+INFO  [score#3]             SystemManager 779  | 1 part along 5 systems
+INFO  [score#3]            StepMonitoring 98   | HEADERS
+INFO  [score#3]            StepMonitoring 98   | STEM_SEEDS
+INFO  [score#3]             StemSeedsStep 86   | stem(3 max:4)
+INFO  [score#3]            StepMonitoring 98   | BEAMS
+INFO  [score#3]            StepMonitoring 98   | LEDGERS
+INFO  [score#3]            StepMonitoring 98   | HEADS
+INFO  [score#3]             HeadSeedTally 235  | Scale information: HeadSeeds{NOTEHEAD_BLACK[L:0.4,R:-0.3]}
+INFO  [score#3]            StepMonitoring 98   | STEMS
+INFO  [score#3]            StepMonitoring 98   | REDUCTION
+INFO  [score#3]             ReductionStep 105  | Stems free length median value: 73 pixels, 3.5 interlines
+INFO  [score#3]            StepMonitoring 98   | CUE_BEAMS
+INFO  [score#3]              CueBeamsStep 81   | Step CUE_BEAMS is skipped because small heads switch is off
+INFO  [score#3]            StepMonitoring 98   | TEXTS
+INFO  [score#3]            StepMonitoring 98   | MEASURES
+INFO  [score#3]                      Page 307  | 16 raw measures: [3 in system#1, 4 in system#2, 3 in system#3, 3 in system#4, 3 in system#5]
+INFO  [score#3]            StepMonitoring 98   | CHORDS
+INFO  [score#3]            StepMonitoring 98   | CURVES
+INFO  [score#3]              SlursBuilder 240  | Slurs: 18
+INFO  [score#3]           SegmentsBuilder 155  | Segments: 31
+INFO  [score#3]            StepMonitoring 98   | SYMBOLS
+INFO  [score#3]            StepMonitoring 98   | LINKS
+INFO  [score#3]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#6552{(0.166) staff:1 VENTIDUESIMA} at java.awt.Point[x=114,y=298]
+INFO  [score#3]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#6556{(0.515) staff:2 VENTIDUESIMA} at java.awt.Point[x=114,y=940]
+INFO  [score#3]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#6623{(0.515) staff:3 VENTIDUESIMA} at java.awt.Point[x=114,y=940]
+INFO  [score#3]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#6825{(0.180) staff:7 OTTAVA ALTA} at java.awt.Point[x=635,y=1989]
+INFO  [score#3]                  KeyInter 1189 | No effective key before AlterInter#6848{(0.800) staff:8 NATURAL pitch:-3.0}
+INFO  [score#3]                  KeyInter 1189 | No effective key before AlterInter#6948{(0.800) staff:10 NATURAL pitch:-3.0}
+INFO  [score#3]            StepMonitoring 98   | RHYTHMS
+INFO  [score#3]                PageRhythm 199  | {Page#3.1} Time value reused from sheet#1
+INFO  [score#3]                     Voice 257  | Measure{#9} Voice{#1 excess:1/32} too long
+INFO  [score#3]               StackRhythm 224  | S3 MeasureStack#9 no correct rhythm
+INFO  [score#3]            StepMonitoring 98   | PAGE
+INFO  [score#3]                     Voice 257  | Measure{#9} Voice{#1 excess:1/32} too long
+INFO  [score#3]                      Book 2584 | Book{score} storing
+INFO  [score#3]                      Book 2565 | Stored /book.xml
+INFO  [score#3]                DataHolder 348  | Stored /sheet#3/BINARY.png
+INFO  [score#3]                     Sheet 1583 | Stored /sheet#3/sheet#3.xml
+INFO  [score#3]                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.omr
+INFO  [score#3]                 SheetStub 1655 | Sheet#3 disposed
+INFO  [score#3]                      Book 2050 | End of Stub#3
+INFO  [score#4]            StepMonitoring 98   | LOAD
+INFO  [score#4]                 SheetStub 1278 | Loaded image #4 2480x3507 from D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf
+INFO  [score#4]            StepMonitoring 98   | BINARY
+INFO  [score#4]            StepMonitoring 98   | SCALE
+INFO  [score#4]              ScaleBuilder 255  | Beam  guessed height: 13 -- mid of [6..20]
+INFO  [score#4]              ScaleBuilder 271  | Beam measured height: 10 -- 0.29 of [6..20] range at 511% of needed quorum
+INFO  [score#4]              ScaleBuilder 401  | Normalized black jitter: 4.76 %
+INFO  [score#4]                 ScaleStep 65   | Scale{ interline(20,21,21) line(2,2,3) beam(10)}
+INFO  [score#4]            StepMonitoring 98   | GRID
+INFO  [score#4]            LinesRetriever 1500 | Global slope: 0.00000
+INFO  [score#4]         ClustersRetriever 326  | Retrieved raw line clusters: 10 of sizes [5] with interline(20,21,21)
+INFO  [score#4]                 PeakGraph 310  | Systems: #1[1, 2] #2[3, 4] #3[5, 6] #4[7, 8] #5[9, 10]
+INFO  [score#4]             SystemManager 779  | 1 part along 5 systems
+INFO  [score#4]            StepMonitoring 98   | HEADERS
+INFO  [score#4]            StepMonitoring 98   | STEM_SEEDS
+INFO  [score#4]             StemSeedsStep 86   | stem(3 max:4)
+INFO  [score#4]            StepMonitoring 98   | BEAMS
+INFO  [score#4]            StepMonitoring 98   | LEDGERS
+INFO  [score#4]            StepMonitoring 98   | HEADS
+INFO  [score#4]             HeadSeedTally 235  | Scale information: HeadSeeds{NOTEHEAD_BLACK[L:0.5,R:-0.1]}
+INFO  [score#4]            StepMonitoring 98   | STEMS
+INFO  [score#4]            StepMonitoring 98   | REDUCTION
+INFO  [score#4]             ReductionStep 105  | Stems free length median value: 73 pixels, 3.5 interlines
+INFO  [score#4]            StepMonitoring 98   | CUE_BEAMS
+INFO  [score#4]              CueBeamsStep 81   | Step CUE_BEAMS is skipped because small heads switch is off
+INFO  [score#4]            StepMonitoring 98   | TEXTS
+INFO  [score#4]            StepMonitoring 98   | MEASURES
+INFO  [score#4]                      Page 307  | 15 raw measures: [3 in system#1, 3 in system#2, 3 in system#3, 3 in system#4, 3 in system#5]
+INFO  [score#4]            StepMonitoring 98   | CHORDS
+INFO  [score#4]            StepMonitoring 98   | CURVES
+INFO  [score#4]              SlursBuilder 240  | Slurs: 9
+INFO  [score#4]           SegmentsBuilder 155  | Segments: 70
+INFO  [score#4]            StepMonitoring 98   | SYMBOLS
+INFO  [score#4]            StepMonitoring 98   | LINKS
+INFO  [score#4]            StepMonitoring 98   | RHYTHMS
+INFO  [score#4]                PageRhythm 199  | {Page#4.1} Time value reused from sheet#1
+INFO  [score#4]            StepMonitoring 98   | PAGE
+INFO  [score#4]                      Book 2584 | Book{score} storing
+INFO  [score#4]                      Book 2565 | Stored /book.xml
+INFO  [score#4]                DataHolder 348  | Stored /sheet#4/BINARY.png
+INFO  [score#4]                     Sheet 1583 | Stored /sheet#4/sheet#4.xml
+INFO  [score#4]                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.omr
+INFO  [score#4]                 SheetStub 1655 | Sheet#4 disposed
+INFO  [score#4]                      Book 2050 | End of Stub#4
+INFO  [score#5]            StepMonitoring 98   | LOAD
+INFO  [score#5]                 SheetStub 1278 | Loaded image #5 2480x3507 from D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf
+INFO  [score#5]            StepMonitoring 98   | BINARY
+INFO  [score#5]            StepMonitoring 98   | SCALE
+INFO  [score#5]              ScaleBuilder 255  | Beam  guessed height: 13 -- mid of [6..20]
+INFO  [score#5]              ScaleBuilder 271  | Beam measured height: 10 -- 0.29 of [6..20] range at 793% of needed quorum
+INFO  [score#5]              ScaleBuilder 401  | Normalized black jitter: 4.76 %
+INFO  [score#5]                 ScaleStep 65   | Scale{ small_interline(16,17,18) interline(20,21,21) line(2,2,3) beam(10)}
+INFO  [score#5]            StepMonitoring 98   | GRID
+INFO  [score#5]            LinesRetriever 1500 | Global slope: 0.00000
+INFO  [score#5]         ClustersRetriever 326  | Retrieved raw line clusters: 10 of sizes [5] with interline(20,21,21)
+INFO  [score#5]            LinesRetriever 1516 | Searching clusters with smallInterline: 17
+INFO  [score#5]         ClustersRetriever 326  | Retrieved raw line clusters: 0 of sizes [5] with interline(16,17,18)
+INFO  [score#5]                 PeakGraph 310  | Systems: #1[1, 2] #2[3, 4] #3[5, 6] #4[7, 8] #5[9, 10]
+INFO  [score#5]             SystemManager 779  | 1 part along 5 systems
+INFO  [score#5]            StepMonitoring 98   | HEADERS
+INFO  [score#5]            StepMonitoring 98   | STEM_SEEDS
+INFO  [score#5]             StemSeedsStep 86   | stem(3 max:4)
+INFO  [score#5]            StepMonitoring 98   | BEAMS
+INFO  [score#5]            StepMonitoring 98   | LEDGERS
+INFO  [score#5]            StepMonitoring 98   | HEADS
+INFO  [score#5]             HeadSeedTally 235  | Scale information: HeadSeeds{NOTEHEAD_BLACK[L:0.4,R:-0.2]}
+INFO  [score#5]            StepMonitoring 98   | STEMS
+INFO  [score#5]            StepMonitoring 98   | REDUCTION
+INFO  [score#5]             ReductionStep 105  | Stems free length median value: 73 pixels, 3.5 interlines
+INFO  [score#5]            StepMonitoring 98   | CUE_BEAMS
+INFO  [score#5]              CueBeamsStep 81   | Step CUE_BEAMS is skipped because small heads switch is off
+INFO  [score#5]            StepMonitoring 98   | TEXTS
+INFO  [score#5]            StepMonitoring 98   | MEASURES
+INFO  [score#5]                      Page 307  | 15 raw measures: [3 in system#1, 3 in system#2, 3 in system#3, 3 in system#4, 3 in system#5]
+INFO  [score#5]            StepMonitoring 98   | CHORDS
+INFO  [score#5]            StepMonitoring 98   | CURVES
+INFO  [score#5]              SlursBuilder 240  | Slurs: 26
+INFO  [score#5]           SegmentsBuilder 155  | Segments: 49
+INFO  [score#5]            StepMonitoring 98   | SYMBOLS
+WARN  [score#5]            SymbolsBuilder 231  | Error in glyph evaluation java.lang.NullPointerException: Cannot invoke "com.notelite.omr.sheet.Staff.getPart()" because "this.staff" is null
+java.lang.NullPointerException: Cannot invoke "com.notelite.omr.sheet.Staff.getPart()" because "this.staff" is null
+	at com.notelite.omr.sig.inter.SmallChordInter.lookupLink(SmallChordInter.java:164)
+	at com.notelite.omr.sig.inter.GraceChordInter.createValidAdded(GraceChordInter.java:299)
+	at com.notelite.omr.sheet.symbol.InterFactory.doCreate(InterFactory.java:464)
+	at com.notelite.omr.sheet.symbol.InterFactory.create(InterFactory.java:213)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder.evaluateGlyph(SymbolsBuilder.java:220)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder$SymbolAdapter.evaluateGlyph(SymbolsBuilder.java:479)
+	at com.notelite.omr.glyph.GlyphCluster.process(GlyphCluster.java:161)
+	at com.notelite.omr.glyph.GlyphCluster.decompose(GlyphCluster.java:102)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder.processClusters(SymbolsBuilder.java:346)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder.buildSymbols(SymbolsBuilder.java:173)
+	at com.notelite.omr.sheet.symbol.SymbolsStep.doSystem(SymbolsStep.java:124)
+	at com.notelite.omr.sheet.symbol.SymbolsStep.doSystem(SymbolsStep.java:51)
+	at com.notelite.omr.step.AbstractSystemStep.lambda$doitPerSystem$0(AbstractSystemStep.java:158)
+	at com.notelite.omr.step.AbstractSystemStep.doitPerSystem(AbstractSystemStep.java:178)
+	at com.notelite.omr.step.AbstractSystemStep.doit(AbstractSystemStep.java:125)
+	at com.notelite.omr.step.OmrStep.doit(OmrStep.java:138)
+	at com.notelite.omr.sheet.SheetStub.lambda$doOneStep$2(SheetStub.java:503)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+WARN  [score#5]            SymbolsBuilder 231  | Error in glyph evaluation java.lang.NullPointerException: Cannot invoke "com.notelite.omr.sheet.Staff.getPart()" because "this.staff" is null
+java.lang.NullPointerException: Cannot invoke "com.notelite.omr.sheet.Staff.getPart()" because "this.staff" is null
+	at com.notelite.omr.sig.inter.SmallChordInter.lookupLink(SmallChordInter.java:164)
+	at com.notelite.omr.sig.inter.GraceChordInter.createValidAdded(GraceChordInter.java:299)
+	at com.notelite.omr.sheet.symbol.InterFactory.doCreate(InterFactory.java:464)
+	at com.notelite.omr.sheet.symbol.InterFactory.create(InterFactory.java:213)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder.evaluateGlyph(SymbolsBuilder.java:220)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder$SymbolAdapter.evaluateGlyph(SymbolsBuilder.java:479)
+	at com.notelite.omr.glyph.GlyphCluster.process(GlyphCluster.java:161)
+	at com.notelite.omr.glyph.GlyphCluster.decompose(GlyphCluster.java:102)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder.processClusters(SymbolsBuilder.java:346)
+	at com.notelite.omr.sheet.symbol.SymbolsBuilder.buildSymbols(SymbolsBuilder.java:173)
+	at com.notelite.omr.sheet.symbol.SymbolsStep.doSystem(SymbolsStep.java:124)
+	at com.notelite.omr.sheet.symbol.SymbolsStep.doSystem(SymbolsStep.java:51)
+	at com.notelite.omr.step.AbstractSystemStep.lambda$doitPerSystem$0(AbstractSystemStep.java:158)
+	at com.notelite.omr.step.AbstractSystemStep.doitPerSystem(AbstractSystemStep.java:178)
+	at com.notelite.omr.step.AbstractSystemStep.doit(AbstractSystemStep.java:125)
+	at com.notelite.omr.step.OmrStep.doit(OmrStep.java:138)
+	at com.notelite.omr.sheet.SheetStub.lambda$doOneStep$2(SheetStub.java:503)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+INFO  [score#5]            StepMonitoring 98   | LINKS
+INFO  [score#5]                  KeyInter 1189 | No effective key before AlterInter#6896{(0.800) staff:2 NATURAL pitch:3.0}
+INFO  [score#5]                  KeyInter 1189 | No effective key before AlterInter#7062{(0.649) staff:5 NATURAL pitch:-1.0}
+INFO  [score#5]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#7084{(0.470) staff:8 OTTAVA BASSA} at java.awt.Point[x=124,y=2974]
+INFO  [score#5]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#7177{(0.470) staff:9 OTTAVA ALTA} at java.awt.Point[x=124,y=2974]
+INFO  [score#5]            StepMonitoring 98   | RHYTHMS
+INFO  [score#5]                PageRhythm 199  | {Page#5.1} Time value reused from sheet#1
+INFO  [score#5]             MeasureRhythm 1276 | Measure{#1} Time inconsistency in {7/24=[HeadChordInter#5957{(0.945/0.945) staff:1 slot#7 off:7/24 dur:1/12}], 1/3=[HeadChordInter#5971{(0.941/0.941) staff:2 slot#7 off:1/3 dur:1/16}]}
+INFO  [score#5]             MeasureRhythm 1044 | Measure{#15} No timeOffset for HeadChordInter#6177{(0.597/0.597) staff:9 slot#16 dur:1/2}
+INFO  [score#5]               StackRhythm 224  | S5 MeasureStack#15 no correct rhythm
+INFO  [score#5]            StepMonitoring 98   | PAGE
+INFO  [score#5]            SheetReduction 154  | Gutter. Different glyphs 2/3 BreathMarkInter#6951{(0.296/0.619) staff:4 BREATH_MARK} vs ArticulationInter#7033{(0.510/0.732) STACCATO}
+INFO  [score#5]                      Book 2584 | Book{score} storing
+INFO  [score#5]                      Book 2565 | Stored /book.xml
+INFO  [score#5]                DataHolder 348  | Stored /sheet#5/BINARY.png
+INFO  [score#5]                     Sheet 1583 | Stored /sheet#5/sheet#5.xml
+INFO  [score#5]                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.omr
+INFO  [score#5]                 SheetStub 1655 | Sheet#5 disposed
+INFO  [score#5]                      Book 2050 | End of Stub#5
+INFO  [score#6]            StepMonitoring 98   | LOAD
+INFO  [score#6]                 SheetStub 1278 | Loaded image #6 2480x3507 from D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\09_mutopia_mozart\score.pdf
+INFO  [score#6]            StepMonitoring 98   | BINARY
+INFO  [score#6]            StepMonitoring 98   | SCALE
+INFO  [score#6]              ScaleBuilder 255  | Beam  guessed height: 13 -- mid of [6..20]
+INFO  [score#6]              ScaleBuilder 271  | Beam measured height: 10 -- 0.29 of [6..20] range at 294% of needed quorum
+INFO  [score#6]              ScaleBuilder 401  | Normalized black jitter: 14.29 %
+INFO  [score#6]                 ScaleStep 65   | Scale{ interline(20,21,21) line(1,2,4) beam(10)}
+INFO  [score#6]            StepMonitoring 98   | GRID
+INFO  [score#6]            LinesRetriever 1500 | Global slope: 0.00000
+INFO  [score#6]         ClustersRetriever 326  | Retrieved raw line clusters: 2 of sizes [5] with interline(20,21,21)
+INFO  [score#6]                 PeakGraph 310  | Systems: #1[1, 2]
+INFO  [score#6]             SystemManager 779  | 1 part along 1 system
+INFO  [score#6]            StepMonitoring 98   | HEADERS
+INFO  [score#6]            StepMonitoring 98   | STEM_SEEDS
+INFO  [score#6]             StemSeedsStep 86   | stem(3 max:5)
+INFO  [score#6]            StepMonitoring 98   | BEAMS
+INFO  [score#6]            StepMonitoring 98   | LEDGERS
+INFO  [score#6]            StepMonitoring 98   | HEADS
+INFO  [score#6]             HeadSeedTally 235  | Scale information: HeadSeeds{NOTEHEAD_BLACK[L:0.3,R:-0.2]}
+INFO  [score#6]            StepMonitoring 98   | STEMS
+INFO  [score#6]            StepMonitoring 98   | REDUCTION
+INFO  [score#6]             ReductionStep 105  | Stems free length median value: 73 pixels, 3.5 interlines
+INFO  [score#6]            StepMonitoring 98   | CUE_BEAMS
+INFO  [score#6]              CueBeamsStep 81   | Step CUE_BEAMS is skipped because small heads switch is off
+INFO  [score#6]            StepMonitoring 98   | TEXTS
+INFO  [score#6]            StepMonitoring 98   | MEASURES
+INFO  [score#6]                      Page 307  | 3 raw measures: [3 in system#1]
+INFO  [score#6]            StepMonitoring 98   | CHORDS
+INFO  [score#6]            StepMonitoring 98   | CURVES
+INFO  [score#6]              SlursBuilder 240  | Slurs: 4
+INFO  [score#6]           SegmentsBuilder 155  | Segments: 10
+INFO  [score#6]            StepMonitoring 98   | SYMBOLS
+INFO  [score#6]            StepMonitoring 98   | LINKS
+INFO  [score#6]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#1711{(0.382) staff:2 QUINDICESIMA BASSA} at java.awt.Point[x=1457,y=3212]
+INFO  [score#6]             SymbolsLinker 258  | No chord linked to OctaveShiftInter#1744{(0.175) staff:2 QUINDICESIMA BASSA} at java.awt.Point[x=1510,y=3212]
+INFO  [score#6]            StepMonitoring 98   | RHYTHMS
+INFO  [score#6]                PageRhythm 199  | {Page#6.1} Time value reused from sheet#1
+INFO  [score#6]            StepMonitoring 98   | PAGE
+INFO  [score#6]                      Book 2584 | Book{score} storing
+INFO  [score#6]                      Book 2565 | Stored /book.xml
+INFO  [score#6]                DataHolder 348  | Stored /sheet#6/BINARY.png
+INFO  [score#6]                     Sheet 1583 | Stored /sheet#6/sheet#6.xml
+INFO  [score#6]                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.omr
+INFO  [score#6]                 SheetStub 1655 | Sheet#6 disposed
+INFO  [score#6]                      Book 2050 | End of Stub#6
+INFO  [score]                      Book 2057 | End of Book{score}
+INFO  [score]                 SheetStub 1000 | Loaded /sheet#1/sheet#1.xml
+INFO  [score]                 SheetStub 1000 | Loaded /sheet#2/sheet#2.xml
+INFO  [score]                 SheetStub 1000 | Loaded /sheet#3/sheet#3.xml
+INFO  [score]                 SheetStub 1000 | Loaded /sheet#4/sheet#4.xml
+INFO  [score]                 SheetStub 1000 | Loaded /sheet#5/sheet#5.xml
+INFO  [score]                 SheetStub 1000 | Loaded /sheet#6/sheet#6.xml
+INFO  [score]           PartwiseBuilder 2706 | Exporting sheet(s): [#1#2#3#4#5#6]
+INFO  [score]             ScoreExporter 164  | Score score exported to D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\09_mutopia_mozart\score.mxl
+INFO  [score]           PartwiseBuilder 2706 | Exporting sheet(s): [#1#2#3#4#5#6]
+WARN  [score]              MidiExporter 184  | Measure 21 spans 1980 MIDI ticks; using its notated 1920-tick boundary
+WARN  [score]              MidiExporter 184  | Measure 25 spans 2400 MIDI ticks; using its notated 1920-tick boundary
+WARN  [score]              MidiExporter 184  | Measure 33 spans 1980 MIDI ticks; using its notated 1920-tick boundary
+WARN  [score]              MidiExporter 184  | Measure 56 spans 1840 MIDI ticks; using its notated 1920-tick boundary
+INFO  [score]                     Score 181  | Closing {Score 1}
+Estimating resolution as 420
+Estimating resolution as 354
+Estimating resolution as 445
+Estimating resolution as 323
+Estimating resolution as 336
+Estimating resolution as 327

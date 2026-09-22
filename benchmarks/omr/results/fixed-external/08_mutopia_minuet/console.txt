@@ -1,0 +1,61 @@
+INFO  []                      Main 254  | Running in batch mode
+INFO  []                 Languages 138  | Installed OCR languages: chi_sim,eng
+INFO  []             AliasPatterns 146  | Alias patterns: [(IMSLP[0-9]*)-.*]
+INFO  []                      Main 194  | Submitting 1 task(s) in sequence:
+    Input "D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\08_mutopia_minuet\score.pdf"
+INFO  [score]                      Book 560  | 1 sheet in D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\08_mutopia_minuet\score.pdf
+INFO  []                      Book 2565 | Stored /book.xml
+INFO  []                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\08_mutopia_minuet\score.omr
+INFO  []                      Book 1929 | Book reaching PAGE on sheets:[#1]
+INFO  [score]            StepMonitoring 98   | LOAD
+INFO  [score]                 SheetStub 1278 | Loaded image #1 2480x3507 from D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\NoteLite\benchmarks\omr\external-fixtures\08_mutopia_minuet\score.pdf
+INFO  [score]            StepMonitoring 98   | BINARY
+INFO  [score]            StepMonitoring 98   | SCALE
+INFO  [score]              ScaleBuilder 255  | Beam  guessed height: 13 -- mid of [6..21]
+INFO  [score]              ScaleBuilder 271  | Beam measured height: 10 -- 0.27 of [6..21] range at 153% of needed quorum
+INFO  [score]              ScaleBuilder 401  | Normalized black jitter: 0.00 %
+INFO  [score]                 ScaleStep 65   | Scale{ interline(21,22,22) line(2,2,2) beam(10)}
+INFO  [score]            StepMonitoring 98   | GRID
+INFO  [score]            LinesRetriever 1500 | Global slope: 0.00000
+INFO  [score]         ClustersRetriever 326  | Retrieved raw line clusters: 12 of sizes [5] with interline(21,22,22)
+INFO  [score]                 PeakGraph 310  | Systems: #1[1, 2] #2[3, 4] #3[5, 6] #4[7, 8] #5[9, 10] #6[11, 12]
+INFO  [score]             SystemManager 134  | Indentation detected for system #1
+INFO  [score]             SystemManager 779  | 1 part along 6 systems
+INFO  [score]                      Book 543  | Created scores: [{Score 1}]
+INFO  [score]            StepMonitoring 98   | HEADERS
+INFO  [score]            StepMonitoring 98   | STEM_SEEDS
+INFO  [score]             StemSeedsStep 86   | stem(3 max:4)
+INFO  [score]            StepMonitoring 98   | BEAMS
+INFO  [score]            StepMonitoring 98   | LEDGERS
+INFO  [score]            StepMonitoring 98   | HEADS
+INFO  [score]             HeadSeedTally 235  | Scale information: HeadSeeds{NOTEHEAD_VOID[L:0.4] NOTEHEAD_BLACK[L:0.5,R:0.3]}
+INFO  [score]            StepMonitoring 98   | STEMS
+INFO  [score]            StepMonitoring 98   | REDUCTION
+INFO  [score]             ReductionStep 105  | Stems free length median value: 77 pixels, 3.5 interlines
+INFO  [score]            StepMonitoring 98   | CUE_BEAMS
+INFO  [score]              CueBeamsStep 81   | Step CUE_BEAMS is skipped because small heads switch is off
+INFO  [score]            StepMonitoring 98   | TEXTS
+INFO  [score]            StepMonitoring 98   | MEASURES
+INFO  [score]                      Page 307  | 33 raw measures: [5 in system#1, 5 in system#2, 6 in system#3, 6 in system#4, 5 in system#5, 6 in system#6]
+INFO  [score]            StepMonitoring 98   | CHORDS
+INFO  [score]            StepMonitoring 98   | CURVES
+INFO  [score]              SlursBuilder 240  | Slurs: 0
+INFO  [score]           SegmentsBuilder 155  | Segments: 26
+INFO  [score]            StepMonitoring 98   | SYMBOLS
+INFO  [score]            StepMonitoring 98   | LINKS
+INFO  [score]            StepMonitoring 98   | RHYTHMS
+INFO  [score]            StepMonitoring 98   | PAGE
+INFO  [score]                      Book 2584 | Book{score} storing
+INFO  [score]                      Book 2565 | Stored /book.xml
+INFO  [score]                DataHolder 348  | Stored /sheet#1/BINARY.png
+INFO  [score]                     Sheet 1583 | Stored /sheet#1/sheet#1.xml
+INFO  [score]                      Book 2525 | Book stored as D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\08_mutopia_minuet\score.omr
+INFO  [score]                 SheetStub 1655 | Sheet disposed
+INFO  [score]                      Book 2050 | End of Stub#1
+INFO  [score]                      Book 2057 | End of Book{score}
+INFO  [score]                 SheetStub 1000 | Loaded /sheet#1/sheet#1.xml
+INFO  [score]           PartwiseBuilder 2706 | Exporting sheet(s): [#1]
+INFO  [score]             ScoreExporter 164  | Score score exported to D:\Chatgpt\2026-09-22\https-github-com-lucas0623z-notelite\work\omr-final-external\08_mutopia_minuet\score.mxl
+INFO  [score]           PartwiseBuilder 2706 | Exporting sheet(s): [#1]
+INFO  [score]                     Score 181  | Closing {Score 1}
+Estimating resolution as 407
