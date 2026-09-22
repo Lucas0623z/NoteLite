@@ -41,6 +41,17 @@ enum NoteLiteTheme {
 }
 
 extension View {
+    /// A sheet's native title and action bars are outside its SwiftUI content frame.
+    /// Size against the parent window's screen so those controls stay above the Dock.
+    @MainActor @ViewBuilder func noteLiteSheetSize(idealWidth: CGFloat, idealHeight: CGFloat) -> some View {
+        #if os(macOS)
+        let size = NoteLiteSheetSizing.contentSize(idealWidth: idealWidth, idealHeight: idealHeight)
+        frame(width: size.width, height: size.height)
+        #else
+        self
+        #endif
+    }
+
     /// `navigationBarTitleDisplayMode` is unavailable on native macOS.
     @ViewBuilder func noteLiteInlineTitle() -> some View {
         #if os(iOS)
@@ -50,3 +61,24 @@ extension View {
         #endif
     }
 }
+
+#if os(macOS)
+private enum NoteLiteSheetSizing {
+    @MainActor
+    static func contentSize(idealWidth: CGFloat, idealHeight: CGFloat) -> CGSize {
+        let keyWindow = NSApp.keyWindow ?? NSApp.mainWindow
+        let parent = keyWindow?.sheetParent ?? keyWindow
+        let screen = parent?.screen ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else {
+            return CGSize(width: min(idealWidth, 840), height: min(idealHeight, 480))
+        }
+        // AppKit attaches a sheet below the parent toolbar, not at the screen's top.
+        let attachmentTop = parent.map { $0.convertToScreen($0.contentLayoutRect).maxY }
+            ?? visibleFrame.maxY
+        let availableHeight = min(attachmentTop, visibleFrame.maxY) - visibleFrame.minY
+        let chromeAndMargin: CGFloat = 88
+        return CGSize(width: max(1, min(idealWidth, visibleFrame.width - 64)),
+                      height: max(1, min(idealHeight, availableHeight - chromeAndMargin)))
+    }
+}
+#endif

@@ -100,7 +100,7 @@ struct LibraryView: View {
         .sheet(isPresented: $showingSettings) {
             ServerSettingsView(address: library.serverAddress)
                 #if os(macOS)
-                .frame(width: 560, height: 590)
+                .noteLiteSheetSize(idealWidth: 560, idealHeight: 590)
                 #endif
         }
         .alert("无法完成操作", isPresented: Binding(
@@ -358,7 +358,7 @@ struct ScoreDetailView: View {
         .fullScreenCover(isPresented: $practicing) { PracticeView(record: record) }
         #else
         .sheet(isPresented: $practicing) {
-            PracticeView(record: record).frame(minWidth: 960, idealWidth: 1440, minHeight: 700, idealHeight: 900)
+            PracticeView(record: record).noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
         }
         #endif
         .sheet(isPresented: $showingOriginal) {
@@ -372,13 +372,13 @@ struct ScoreDetailView: View {
                 }
             }
             #if os(macOS)
-            .frame(minWidth: 720, minHeight: 720)
+            .noteLiteSheetSize(idealWidth: 900, idealHeight: 900)
             #endif
         }
         .sheet(isPresented: $showingSettings) {
             ServerSettingsView(address: library.serverAddress)
                 #if os(macOS)
-                .frame(width: 560, height: 590)
+                .noteLiteSheetSize(idealWidth: 560, idealHeight: 590)
                 #endif
         }
         .confirmationDialog("重新上传原稿并创建新的识谱任务？",
