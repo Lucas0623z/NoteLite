@@ -42,6 +42,7 @@ targets:
   NoteLiteMac:
     type: application
     platform: macOS
+    productName: NoteLite
     sources:
       - path: NoteLite
         excludes: ["**/*.plist", "**/*.entitlements"]
@@ -89,6 +90,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac.tests
         GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/NoteLite.app/Contents/MacOS/NoteLite"
+        BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: NoteLiteMac
   NoteLiteUITests:
@@ -111,6 +114,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac.uitests
         GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: NoteLiteMac
     dependencies:
       - target: NoteLiteMac
 schemes:
