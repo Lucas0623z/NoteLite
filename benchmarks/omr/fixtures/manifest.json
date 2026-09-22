@@ -1,0 +1,83 @@
+{
+  "kind": "authored synthetic engraving, not photographs or scans",
+  "verovio": "6.3.0[undefined]",
+  "fixtures": [
+    {
+      "id": "01_diatonic",
+      "description": "8 measures, monophonic treble, quarter and half notes",
+      "reference_notes": 25,
+      "png_size": [
+        2480,
+        598
+      ],
+      "png_sha256": "7f6277f57709cd15d12111a1b6eb07f4a10b3961f745e560c05f24eb2503bedc",
+      "musicxml_sha256": "cc5dd1e89bff9a96ef548838ef94f1f70ec06447284dbb6f2d6f4944465b9539"
+    },
+    {
+      "id": "02_accidentals",
+      "description": "6 measures, sharp and flat accidentals, chromatic notes",
+      "reference_notes": 22,
+      "png_size": [
+        2480,
+        598
+      ],
+      "png_sha256": "c333f995f78e711a431f956fd4d0c4cc9d3b366f20999be266478c00f19b2624",
+      "musicxml_sha256": "00f15b9d7d8f8cb535cf4fb0b387076671f0c1bfc2457d541c663e9e07dbbaec"
+    },
+    {
+      "id": "03_rhythm_ties",
+      "description": "4 measures, rests, dotted notes, eighths and tied notes",
+      "reference_notes": 11,
+      "png_size": [
+        2480,
+        343
+      ],
+      "png_sha256": "f8de92f10acec59989086633dd36b7f0197ba2c80f8be7c723f5e8d848456edd",
+      "musicxml_sha256": "424e5e3a64076fa2df666d89db938fb83d75fad310864f292a672c9399e5671c"
+    },
+    {
+      "id": "04_piano",
+      "description": "8 measures, piano grand staff, triads, broken chords and bass whole notes",
+      "reference_notes": 46,
+      "png_size": [
+        2480,
+        1023
+      ],
+      "png_sha256": "02391541a18d281bcbe20d72f65d28b77e391a85bcee329aaf2955b085f5b501",
+      "musicxml_sha256": "0f4a938395827ba7c2e569535077252cb587a67c0031bb93d9928e2b3762ff53"
+    },
+    {
+      "id": "05_polyphony",
+      "description": "4 measures, two simultaneous voices on one treble staff",
+      "reference_notes": 22,
+      "png_size": [
+        2480,
+        423
+      ],
+      "png_sha256": "cc567199d4ab9a82cd7d4dba3694e2349276e9d03c80f30320499098409a302f",
+      "musicxml_sha256": "4e2b0dd03a87e83d5afffdc049cab40501c54016912ce9cd650a557b424e91f3"
+    },
+    {
+      "id": "06_tuplets",
+      "description": "4 measures, triplet eighths mixed with quarter notes",
+      "reference_notes": 21,
+      "png_size": [
+        2480,
+        358
+      ],
+      "png_sha256": "d128063533d3f9ecb49a5a68c6d3300ad69d5b3aa73c05525698866bd1498f02",
+      "musicxml_sha256": "9eab90a75a7b8f5d39d81d9234b0c9d85d5090cf1fd46c39a749eaada549228a"
+    },
+    {
+      "id": "07_repeats",
+      "description": "4 written measures with repeat barlines; truth is expanded playback (8 measures)",
+      "reference_notes": 32,
+      "png_size": [
+        2480,
+        343
+      ],
+      "png_sha256": "fb43cef6e01e075942cd960f3d30668ccfcffc261e63fc53cbd9b47033d39981",
+      "musicxml_sha256": "e8f1703cc9ece7938043819afe8b423c6a5abb0bd50afac79bccc14a6bfd2e9b"
+    }
+  ]
+}

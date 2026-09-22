@@ -30,6 +30,8 @@ import com.notelite.omr.constant.ConstantSet;
 import com.notelite.omr.log.LogUtil;
 import com.notelite.omr.plugin.Plugin;
 import com.notelite.omr.plugin.PluginsManager;
+import com.notelite.omr.practice.PianoBooster;
+import com.notelite.omr.practice.PracticeStudio;
 import com.notelite.omr.score.MidiAbstractions;
 import com.notelite.omr.score.MidiExporter;
 import com.notelite.omr.score.PageRef;
@@ -59,6 +61,7 @@ import com.notelite.omr.ui.util.OmrFileFilter;
 import com.notelite.omr.ui.util.UIUtil;
 import com.notelite.omr.ui.util.UserOpt;
 import com.notelite.omr.ui.util.WaitingTask;
+import com.notelite.omr.ui.util.WebBrowser;
 import com.notelite.omr.ui.view.HistoryMenu;
 import com.notelite.omr.ui.view.ScrollView;
 import com.notelite.omr.util.FileUtil;
@@ -85,6 +88,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.beans.PropertyChangeEvent;
 import java.io.File;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -167,6 +171,65 @@ public class BookActions
     }
 
     //~ Methods ------------------------------------------------------------------------------------
+
+    /** Practice the current score with live instrument input in the local practice studio. */
+    @Action(enabledProperty = BOOK_IDLE)
+    public void openPracticeStudio (ActionEvent e)
+    {
+        PracticeStudio.open(StubsController.getCurrentBook());
+    }
+
+    /** Export the selected movement and open the mature MIDI-keyboard practice application. */
+    @Action(enabledProperty = BOOK_IDLE)
+    public void openPianoBooster (ActionEvent e)
+    {
+        PianoBooster.open(StubsController.getCurrentBook());
+    }
+
+    @Action
+    public void configurePianoBooster (ActionEvent e)
+    {
+        PianoBooster.configure();
+    }
+
+    /** Import a reviewed MusicXML result from another recognizer without opening a book first. */
+    @Action
+    public void importPracticeScore (ActionEvent e)
+    {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle(resources.getString("importPracticeScore.Action.text"));
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setFileFilter(new OmrFileFilter("MusicXML (*.xml, *.musicxml, *.mxl)",
+                new String[] { ".xml", ".musicxml", ".mxl" }));
+        if (chooser.showOpenDialog(OMR.gui.getFrame()) == JFileChooser.APPROVE_OPTION) {
+            PracticeStudio.openImported(chooser.getSelectedFile().toPath());
+        }
+    }
+
+    @Action
+    public void importPianoBoosterMidi (ActionEvent e)
+    {
+        PianoBooster.importMidi();
+    }
+
+    /** Explain the supported file interchange; external products remain independently licensed. */
+    @Action
+    public void openExternalScoreTools (ActionEvent e)
+    {
+        Object[] choices = { resources.getString("externalScores.import"),
+                resources.getString("externalScores.scanScoreHelp"),
+                resources.getString("externalScores.close") };
+        int choice = JOptionPane.showOptionDialog(OMR.gui.getFrame(),
+                resources.getString("externalScores.message"),
+                resources.getString("openExternalScoreTools.Action.text"),
+                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, choices, choices[0]);
+        if (choice == 0) {
+            importPracticeScore(e);
+        } else if (choice == 1) {
+            WebBrowser.getBrowser().launch(URI.create(
+                    "https://scanscore.zendesk.com/hc/en-us/articles/16769352622610-Export"));
+        }
+    }
 
     //--------------//
     // annotateBook //

@@ -23,17 +23,26 @@ package com.notelite.omr.score;
 
 import org.audiveris.proxymusic.Attributes;
 import org.audiveris.proxymusic.Backup;
+import org.audiveris.proxymusic.BackwardForward;
+import org.audiveris.proxymusic.Barline;
 import org.audiveris.proxymusic.Direction;
+import org.audiveris.proxymusic.Ending;
 import org.audiveris.proxymusic.Forward;
+import org.audiveris.proxymusic.Key;
 import org.audiveris.proxymusic.MidiInstrument;
 import org.audiveris.proxymusic.Note;
 import org.audiveris.proxymusic.Pitch;
+import org.audiveris.proxymusic.Repeat;
 import org.audiveris.proxymusic.ScorePart;
 import org.audiveris.proxymusic.ScorePartwise;
 import org.audiveris.proxymusic.Sound;
 import org.audiveris.proxymusic.StartStop;
+import org.audiveris.proxymusic.StartStopDiscontinue;
 import org.audiveris.proxymusic.Step;
 import org.audiveris.proxymusic.Tie;
+import org.audiveris.proxymusic.Time;
+import org.audiveris.proxymusic.Transpose;
+import org.audiveris.proxymusic.YesNo;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,11 +55,22 @@ import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Class <code>MidiExporter</code> converts a populated proxymusic
@@ -61,10 +81,10 @@ import java.util.Objects;
  * ({@link PartwiseBuilder#build(Score)}) and only replaces the serialization
  * stage. See {@code MIDI_EXPORT_PLAN.md} §4 for the full call chain.
  * <p>
- * First-version coverage: pitched notes, rests, chords, tied notes,
- * tempo directions, multi-part with per-part track and channel routing.
- * Out of scope (see plan §2): velocity dynamics, drum mapping, transpose,
- * repeats expansion, ornaments, articulation timing.
+ * Handles pitched notes, rests, chords, voice-specific ties, tempo directions,
+ * divisions changes, instrument transposition, and barline repeats with numbered endings.
+ * Velocity dynamics, drum mapping, D.C./D.S./coda jumps, ornaments and expressive
+ * articulation timing are not interpreted.
  *
  * @author NoteLite Contributors
  */
@@ -139,11 +159,34 @@ public class MidiExporter
     static Sequence buildSequence (ScorePartwise sp)
             throws InvalidMidiDataException
     {
-        int ppq = extractFirstDivisions(sp);
+        int ppq = extractResolution(sp);
         Sequence sequence = new Sequence(Sequence.PPQ, ppq);
 
         Track meta = sequence.createTrack();
         addCopyrightMeta(meta, "NoteLite");
+
+        List<List<MeasureData>> parts = new ArrayList<>();
+        List<Long> measureLengths = new ArrayList<>();
+        Map<Integer, Long> notatedLengths = new HashMap<>();
+        for (ScorePartwise.Part part : sp.getPart()) {
+            List<MeasureData> measures = readPart(part, ppq);
+            parts.add(measures);
+            for (int i = 0; i < measures.size(); i++) {
+                if (i == measureLengths.size()) measureLengths.add(0L);
+                measureLengths.set(i, Math.max(measureLengths.get(i), measures.get(i).length));
+                if (measures.get(i).notatedLength != null) notatedLengths.putIfAbsent(i, measures.get(i).notatedLength);
+            }
+        }
+        // OMR can misread a duration in one measure. Keep that error local instead of
+        // shifting every later note, while preserving actual lengths for implicit/pickup bars.
+        for (Map.Entry<Integer, Long> entry : notatedLengths.entrySet()) {
+            if (!measureLengths.get(entry.getKey()).equals(entry.getValue())) {
+                logger.warn("Measure {} spans {} MIDI ticks; using its notated {}-tick boundary",
+                        entry.getKey() + 1, measureLengths.get(entry.getKey()), entry.getValue());
+            }
+            measureLengths.set(entry.getKey(), entry.getValue());
+        }
+        List<Integer> order = playbackOrder(sp, measureLengths.size());
 
         int partIndex = 0;
         for (ScorePartwise.Part part : sp.getPart()) {
@@ -157,119 +200,247 @@ public class MidiExporter
             pc.setMessage(ShortMessage.PROGRAM_CHANGE, channel, program, 0);
             track.add(new MidiEvent(pc, 0));
 
-            walkPart(part, track, meta, channel);
+            writePart(parts.get(partIndex), order, measureLengths, track, meta, channel, partIndex == 0);
             partIndex++;
         }
 
         return sequence;
     }
 
-    private static void walkPart (ScorePartwise.Part part,
-                                  Track track,
-                                  Track meta,
-                                  int channel)
-            throws InvalidMidiDataException
-    {
-        long currentTick = 0;
-        long lastChordTick = 0;
-        Map<Integer, Long> pendingNoteOff = new HashMap<>();
+    private record TieKey(int pitch, String voice, BigInteger staff) {}
 
+    private record PlayedNote(TieKey key, long onset, long duration, boolean start, boolean stop) {}
+
+    private record Tempo(long onset, BigDecimal bpm) {}
+
+    private record Signature(long onset, int type, byte[] data) {}
+
+    private static class MeasureData
+    {
+        final List<PlayedNote> notes = new ArrayList<>();
+        final List<Tempo> tempos = new ArrayList<>();
+        final List<Signature> signatures = new ArrayList<>();
+        Map<Integer, byte[]> startingSignatures;
+        Long notatedLength;
+        BigDecimal startingTempo;
+        long length;
+    }
+
+    /** Parse notation once so repeating a measure restores its original divisions and transpose. */
+    private static List<MeasureData> readPart (ScorePartwise.Part part, int ppq)
+    {
+        List<MeasureData> result = new ArrayList<>();
+        BigDecimal divisions = BigDecimal.valueOf(DEFAULT_PPQ);
+        BigDecimal tempo = BigDecimal.valueOf(120);
+        Map<BigInteger, Integer> transpose = new HashMap<>();
+        Map<Integer, byte[]> signatures = new HashMap<>();
+        Long meterLength = null;
         for (ScorePartwise.Part.Measure measure : part.getMeasure()) {
+            MeasureData data = new MeasureData();
+            data.startingTempo = tempo;
+            data.startingSignatures = new HashMap<>(signatures);
+            long cursor = 0, chordOnset = 0;
             for (Object item : measure.getNoteOrBackupOrForward()) {
-                if (item instanceof Note) {
-                    Note note = (Note) item;
-                    handleNote(note, track, channel, currentTick, lastChordTick,
-                               pendingNoteOff);
-
-                    if (note.getChord() == null) {
-                        long dur = (note.getDuration() != null)
-                                ? note.getDuration().longValue() : 0;
-                        lastChordTick = currentTick;
-                        currentTick += dur;
+                if (item instanceof Attributes attributes) {
+                    if (attributes.getDivisions() != null) {
+                        if (attributes.getDivisions().signum() <= 0) {
+                            throw new IllegalArgumentException("MusicXML divisions must be positive");
+                        }
+                        divisions = attributes.getDivisions();
                     }
-                } else if (item instanceof Backup) {
-                    long dur = ((Backup) item).getDuration().longValue();
-                    currentTick -= dur;
-                } else if (item instanceof Forward) {
-                    long dur = ((Forward) item).getDuration().longValue();
-                    currentTick += dur;
-                } else if (item instanceof Direction) {
-                    handleDirection((Direction) item, meta, currentTick);
+                    for (Transpose t : attributes.getTranspose()) {
+                        int semitones = t.getChromatic() == null ? 0 : t.getChromatic().intValue();
+                        if (t.getOctaveChange() != null) semitones += 12 * t.getOctaveChange().intValue();
+                        if (t.getNumber() == null) transpose.clear();
+                        transpose.put(t.getNumber(), semitones);
+                    }
+                    if (!attributes.getTime().isEmpty()) {
+                        byte[] meter = timeSignature(attributes.getTime().get(0));
+                        meterLength = meter == null ? null : (meter[0] & 255) * 4L * ppq / (1 << meter[1]);
+                        if (meter != null) {
+                            data.signatures.add(new Signature(cursor, 0x58, meter));
+                            signatures.put(0x58, meter);
+                        }
+                    }
+                    if (!attributes.getKey().isEmpty()) {
+                        byte[] key = keySignature(attributes.getKey().get(0),
+                                transpose.getOrDefault(BigInteger.ONE, transpose.getOrDefault(null, 0)));
+                        if (key != null) {
+                            data.signatures.add(new Signature(cursor, 0x59, key));
+                            signatures.put(0x59, key);
+                        }
+                    }
+                } else if (item instanceof Note note) {
+                    long duration = ticks(note.getDuration(), divisions, ppq);
+                    long onset = note.getChord() == null ? cursor : chordOnset;
+                    if (note.getPitch() != null && note.getRest() == null) {
+                        BigInteger staff = note.getStaff() == null ? BigInteger.ONE : note.getStaff();
+                        int shift = transpose.getOrDefault(staff, transpose.getOrDefault(null, 0));
+                        int pitch = computeMidiPitch(note.getPitch()) + shift;
+                        if (pitch < 0 || pitch > 127) throw new IllegalArgumentException("Pitch outside MIDI range: " + pitch);
+                        boolean start = false, stop = false;
+                        for (Tie tie : note.getTie()) {
+                            start |= tie.getType() == StartStop.START;
+                            stop |= tie.getType() == StartStop.STOP;
+                        }
+                        TieKey key = new TieKey(pitch, Objects.requireNonNullElse(note.getVoice(), "1"), staff);
+                        data.notes.add(new PlayedNote(key, onset,
+                                note.getGrace() == null ? duration : Math.max(1, (long) ppq * GRACE_TICKS / DEFAULT_PPQ), start, stop));
+                    }
+                    if (note.getGrace() == null) data.length = Math.max(data.length, onset + duration);
+                    if (note.getChord() == null) {
+                        chordOnset = cursor;
+                        if (note.getGrace() == null) cursor += duration;
+                    }
+                } else if (item instanceof Backup backup) {
+                    cursor = Math.max(0, cursor - ticks(backup.getDuration(), divisions, ppq));
+                } else if (item instanceof Forward forward) {
+                    cursor += ticks(forward.getDuration(), divisions, ppq);
+                    data.length = Math.max(data.length, cursor);
+                } else if (item instanceof Direction direction) {
+                    Sound sound = direction.getSound();
+                    long offset = 0;
+                    if (direction.getOffset() != null && direction.getOffset().getSound() == YesNo.YES) {
+                        offset = ticks(direction.getOffset().getValue(), divisions, ppq);
+                    }
+                    if (sound != null && sound.getOffset() != null) offset = ticks(sound.getOffset().getValue(), divisions, ppq);
+                    if (sound != null && sound.getTempo() != null) data.tempos.add(new Tempo(cursor + offset, sound.getTempo()));
+                } else if (item instanceof Sound sound && sound.getTempo() != null) {
+                    long offset = sound.getOffset() == null ? 0 : ticks(sound.getOffset().getValue(), divisions, ppq);
+                    data.tempos.add(new Tempo(cursor + offset, sound.getTempo()));
                 }
-                // Attributes / Barline / Print → first version: no event needed
             }
+            data.tempos.sort((a, b) -> Long.compare(a.onset, b.onset));
+            if (measure.getImplicit() != YesNo.YES && measure.getNonControlling() != YesNo.YES) data.notatedLength = meterLength;
+            for (Tempo change : data.tempos) if (change.bpm.signum() > 0) tempo = change.bpm;
+            result.add(data);
         }
-
-        // Safety: any remaining open ties get closed at the very end.
-        for (Map.Entry<Integer, Long> e : pendingNoteOff.entrySet()) {
-            addNoteOff(track, channel, e.getKey(), e.getValue());
-        }
+        return result;
     }
 
-    private static void handleNote (Note note,
-                                    Track track,
-                                    int channel,
-                                    long currentTick,
-                                    long lastChordTick,
-                                    Map<Integer, Long> pendingNoteOff)
-            throws InvalidMidiDataException
+    private static long ticks (BigDecimal duration, BigDecimal divisions, int ppq)
     {
-        if (note.getRest() != null) {
-            return;
-        }
-
-        Pitch pitch = note.getPitch();
-        if (pitch == null) {
-            // unpitched (drum) — out of scope for first version
-            return;
-        }
-
-        long onsetTick = (note.getChord() != null) ? lastChordTick : currentTick;
-
-        long duration = (note.getDuration() != null) ? note.getDuration().longValue() : 0;
-        if (note.getGrace() != null) {
-            duration = GRACE_TICKS;
-        }
-
-        int midiPitch = computeMidiPitch(pitch);
-
-        boolean tieStart = false;
-        boolean tieStop = false;
-        for (Tie tie : note.getTie()) {
-            if (tie.getType() == StartStop.START) tieStart = true;
-            if (tie.getType() == StartStop.STOP) tieStop = true;
-        }
-
-        if (tieStop && pendingNoteOff.containsKey(midiPitch)) {
-            long newOff = onsetTick + duration;
-            if (tieStart) {
-                pendingNoteOff.put(midiPitch, newOff);
-            } else {
-                addNoteOff(track, channel, midiPitch, newOff);
-                pendingNoteOff.remove(midiPitch);
-            }
-        } else {
-            addNoteOn(track, channel, midiPitch, onsetTick);
-            if (tieStart) {
-                pendingNoteOff.put(midiPitch, onsetTick + duration);
-            } else {
-                addNoteOff(track, channel, midiPitch, onsetTick + duration);
-            }
-        }
+        return duration == null ? 0 : duration.multiply(BigDecimal.valueOf(ppq))
+                .divide(divisions, 0, RoundingMode.HALF_UP).longValueExact();
     }
 
-    private static void handleDirection (Direction direction, Track meta, long tick)
+    private static void writePart (List<MeasureData> measures, List<Integer> order,
+                                   List<Long> lengths, Track track, Track meta, int channel, boolean conductor)
             throws InvalidMidiDataException
     {
-        Sound sound = direction.getSound();
-        if (sound == null || sound.getTempo() == null) {
-            return;
+        long measureTick = 0;
+        int previous = -1;
+        BigDecimal currentTempo = BigDecimal.valueOf(120);
+        Map<TieKey, Long> pending = new HashMap<>();
+        Map<Integer, byte[]> currentSignatures = new HashMap<>();
+        for (int index : order) {
+            if (index != previous + 1) closeTies(pending, track, channel);
+            if (index < measures.size()) {
+                MeasureData data = measures.get(index);
+                if (index != previous + 1) {
+                    for (Map.Entry<Integer, byte[]> entry : data.startingSignatures.entrySet()) {
+                        if (!Arrays.equals(currentSignatures.get(entry.getKey()), entry.getValue())
+                                && data.signatures.stream().noneMatch(s -> s.onset == 0 && s.type == entry.getKey())) {
+                            if (entry.getKey() != 0x58 || conductor) addSignature(entry.getKey() == 0x58 ? meta : track,
+                                    measureTick, entry.getKey(), entry.getValue());
+                            currentSignatures.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                }
+                for (Signature signature : data.signatures) {
+                    if (signature.type != 0x58 || conductor) addSignature(signature.type == 0x58 ? meta : track,
+                            measureTick + signature.onset, signature.type, signature.data);
+                    currentSignatures.put(signature.type, signature.data);
+                }
+                if (index != previous + 1 && currentTempo.compareTo(data.startingTempo) != 0
+                        && data.tempos.stream().noneMatch(t -> t.onset == 0)) {
+                    addTempo(meta, measureTick, data.startingTempo);
+                    currentTempo = data.startingTempo;
+                }
+                for (Tempo tempo : data.tempos) {
+                    addTempo(meta, Math.max(0, measureTick + tempo.onset), tempo.bpm);
+                    if (tempo.bpm.signum() > 0) currentTempo = tempo.bpm;
+                }
+                for (PlayedNote note : data.notes) {
+                    long onset = measureTick + note.onset, off = onset + note.duration;
+                    if (!note.stop || !pending.containsKey(note.key)) {
+                        Long oldOff = pending.remove(note.key);
+                        if (oldOff != null) addNoteOff(track, channel, note.key.pitch, oldOff);
+                        addNoteOn(track, channel, note.key.pitch, onset);
+                    }
+                    if (note.start) pending.put(note.key, off);
+                    else {
+                        addNoteOff(track, channel, note.key.pitch, off);
+                        pending.remove(note.key);
+                    }
+                }
+            }
+            measureTick += lengths.get(index);
+            previous = index;
         }
-        int bpm = sound.getTempo().intValue();
-        if (bpm <= 0) {
-            return;
+        closeTies(pending, track, channel);
+        MetaMessage end = new MetaMessage();
+        end.setMessage(0x2f, new byte[0], 0);
+        track.add(new MidiEvent(end, measureTick));
+    }
+
+    private static void closeTies (Map<TieKey, Long> pending, Track track, int channel)
+            throws InvalidMidiDataException
+    {
+        for (Map.Entry<TieKey, Long> tie : pending.entrySet()) addNoteOff(track, channel, tie.getKey().pitch, tie.getValue());
+        pending.clear();
+    }
+
+    /** Standard MIDI can represent one denominator and major/minor key signatures. */
+    private static byte[] timeSignature (Time time)
+    {
+        int numerator = 0, denominator = 0, pairs = 0;
+        try {
+            for (var element : time.getTimeSignature()) {
+                if (element.getName().getLocalPart().equals("beats")) {
+                    pairs++;
+                    for (String group : element.getValue().split("\\+")) numerator += Integer.parseInt(group.trim());
+                } else if (element.getName().getLocalPart().equals("beat-type")) denominator = Integer.parseInt(element.getValue());
+            }
+        } catch (NumberFormatException ex) { return null; }
+        if (pairs != 1 || numerator < 1 || numerator > 255 || denominator < 1 || denominator > 128
+                || Integer.bitCount(denominator) != 1) return null;
+        int clocks = denominator == 8 && numerator % 3 == 0 ? 36 : Math.max(1, 96 / denominator);
+        return new byte[] {(byte) numerator, (byte) Integer.numberOfTrailingZeros(denominator), (byte) clocks, 8};
+    }
+
+    private static byte[] keySignature (Key key, int transpose)
+    {
+        if (key.getFifths() == null || key.getFifths().abs().compareTo(BigInteger.valueOf(7)) > 0) return null;
+        if (key.getMode() != null && !key.getMode().equals("major") && !key.getMode().equals("minor")) return null;
+        int fifths = key.getFifths().intValue();
+        if (Math.floorMod(transpose, 12) != 0) {
+            int target = Math.floorMod(7 * fifths + transpose, 12);
+            int best = 8;
+            for (int candidate = -7; candidate <= 7; candidate++)
+                if (Math.floorMod(7 * candidate, 12) == target && Math.abs(candidate) < Math.abs(best)) best = candidate;
+            fifths = best;
         }
-        int microsecondsPerQuarter = 60_000_000 / bpm;
+        return new byte[] {(byte) fifths, (byte) ("minor".equals(key.getMode()) ? 1 : 0)};
+    }
+
+    private static void addSignature (Track track, long tick, int type, byte[] data)
+            throws InvalidMidiDataException
+    {
+        MetaMessage message = new MetaMessage();
+        message.setMessage(type, data, data.length);
+        track.add(new MidiEvent(message, tick));
+    }
+
+    private static void addTempo (Track meta, long tick, BigDecimal bpm)
+            throws InvalidMidiDataException
+    {
+        if (bpm.signum() <= 0) return;
+        int microsecondsPerQuarter = BigDecimal.valueOf(60_000_000)
+                .divide(bpm, 0, RoundingMode.HALF_UP).intValueExact();
+        if (microsecondsPerQuarter < 1 || microsecondsPerQuarter > 0xffffff) {
+            throw new IllegalArgumentException("Tempo outside MIDI range: " + bpm);
+        }
         byte[] data = {
             (byte) ((microsecondsPerQuarter >> 16) & 0xFF),
             (byte) ((microsecondsPerQuarter >> 8) & 0xFF),
@@ -308,21 +479,129 @@ public class MidiExporter
         t.add(new MidiEvent(m, tick));
     }
 
-    private static int extractFirstDivisions (ScorePartwise sp)
+    private record RepeatRegion(int start, int end, int times) {}
+
+    private static class RepeatPass
     {
+        final RepeatRegion region;
+        int pass = 1;
+        RepeatPass (RepeatRegion region) { this.region = region; }
+    }
+
+    /** The score's repeat signs apply to all parts, even when printed in only one. */
+    private static List<Integer> playbackOrder (ScorePartwise sp, int count)
+    {
+        boolean[] forward = new boolean[count];
+        Map<Integer, Integer> backward = new HashMap<>();
+        Map<Integer, Set<Integer>> endings = new HashMap<>();
+        for (ScorePartwise.Part part : sp.getPart()) {
+            Set<Integer> activeEnding = Set.of();
+            for (int i = 0; i < part.getMeasure().size(); i++) {
+                boolean endingStops = false;
+                for (Object item : part.getMeasure().get(i).getNoteOrBackupOrForward()) {
+                    if (!(item instanceof Barline barline)) continue;
+                    Repeat repeat = barline.getRepeat();
+                    if (repeat != null) {
+                        if (repeat.getDirection() == BackwardForward.FORWARD) forward[i] = true;
+                        else if (repeat.getDirection() == BackwardForward.BACKWARD) {
+                            int times = repeat.getTimes() == null ? 2 : repeat.getTimes().intValueExact();
+                            if (times < 1 || times > 100) throw new IllegalArgumentException("Unsupported repeat count: " + times);
+                            backward.put(i, times);
+                        }
+                    }
+                    Ending ending = barline.getEnding();
+                    if (ending != null) {
+                        if (ending.getType() == StartStopDiscontinue.START) activeEnding = endingNumbers(ending.getNumber());
+                        else endingStops = true;
+                    }
+                }
+                if (!activeEnding.isEmpty()) endings.put(i, activeEnding);
+                if (endingStops) activeEnding = Set.of();
+            }
+        }
+
+        Deque<Integer> starts = new ArrayDeque<>();
+        Map<Integer, List<RepeatRegion>> regions = new HashMap<>();
+        int implicitStart = 0;
+        for (int i = 0; i < count; i++) {
+            if (forward[i]) starts.push(i);
+            if (backward.containsKey(i)) {
+                int start = starts.isEmpty() ? implicitStart : starts.pop();
+                RepeatRegion region = new RepeatRegion(start, i, backward.get(i));
+                regions.computeIfAbsent(start, key -> new ArrayList<>()).add(region);
+                implicitStart = i + 1;
+            }
+        }
+        // An outer repeat must be pushed before an inner repeat sharing its start.
+        for (List<RepeatRegion> rs : regions.values()) rs.sort((a, b) -> Integer.compare(b.end, a.end));
+        Deque<RepeatPass> active = new ArrayDeque<>();
+        List<Integer> order = new ArrayList<>();
+        int index = 0, lastPass = 1, steps = 0;
+        while (index < count) {
+            if (++steps > Math.max(100_000L, (long) count * 100)) {
+                throw new IllegalArgumentException("Repeat expansion exceeds supported score size");
+            }
+            for (RepeatRegion region : regions.getOrDefault(index, List.of())) {
+                boolean alreadyActive = active.stream().anyMatch(p -> p.region.equals(region));
+                if (!alreadyActive) active.push(new RepeatPass(region));
+            }
+            Set<Integer> allowed = endings.getOrDefault(index, Set.of());
+            int pass = active.isEmpty() ? lastPass : active.peek().pass;
+            if (allowed.isEmpty() || allowed.contains(pass)) order.add(index);
+            boolean jump = false;
+            while (!active.isEmpty() && active.peek().region.end == index) {
+                RepeatPass state = active.peek();
+                if (state.pass < state.region.times) {
+                    state.pass++;
+                    index = state.region.start;
+                    jump = true;
+                    break;
+                }
+                lastPass = active.pop().pass;
+            }
+            if (!jump) index++;
+        }
+        return order;
+    }
+
+    private static Set<Integer> endingNumbers (String value)
+    {
+        Set<Integer> numbers = new HashSet<>();
+        if (value == null) return numbers;
+        for (String token : value.split(",")) {
+            try {
+                int number = Integer.parseInt(token.trim());
+                if (number > 0) numbers.add(number);
+            } catch (NumberFormatException ex) {
+                logger.warn("Ignoring non-numeric ending number: {}", token);
+            }
+        }
+        return numbers;
+    }
+
+    private static int extractResolution (ScorePartwise sp)
+    {
+        int resolution = DEFAULT_PPQ;
         for (ScorePartwise.Part part : sp.getPart()) {
             for (ScorePartwise.Part.Measure m : part.getMeasure()) {
                 for (Object item : m.getNoteOrBackupOrForward()) {
                     if (item instanceof Attributes) {
                         Attributes a = (Attributes) item;
-                        if (a.getDivisions() != null) {
-                            return a.getDivisions().intValue();
+                        if (a.getDivisions() != null && a.getDivisions().signum() > 0) {
+                            BigDecimal value = a.getDivisions().stripTrailingZeros();
+                            BigInteger numerator = value.unscaledValue().multiply(BigInteger.TEN.pow(Math.max(0, -value.scale())));
+                            BigInteger denominator = BigInteger.TEN.pow(Math.max(0, value.scale()));
+                            numerator = numerator.divide(numerator.gcd(denominator));
+                            BigInteger current = BigInteger.valueOf(resolution);
+                            BigInteger lcm = current.divide(current.gcd(numerator)).multiply(numerator);
+                            // Standard MIDI reserves the sign bit for SMPTE timing.
+                            if (lcm.compareTo(BigInteger.valueOf(32767)) <= 0) resolution = lcm.intValue();
                         }
                     }
                 }
             }
         }
-        return DEFAULT_PPQ;
+        return resolution;
     }
 
     /**
@@ -332,7 +611,9 @@ public class MidiExporter
      */
     private static int[] extractChannelProgram (ScorePartwise.Part part, int fallbackIndex)
     {
-        int channel = fallbackIndex % 16;
+        // Channel 10 is percussion in General MIDI, so melodic fallback routing skips it.
+        int channel = fallbackIndex % 15;
+        if (channel >= 9) channel++;
         int program = 0;
 
         Object idRef = part.getId();
@@ -342,10 +623,10 @@ public class MidiExporter
                 if (o instanceof MidiInstrument) {
                     MidiInstrument mi = (MidiInstrument) o;
                     if (mi.getMidiChannel() != null) {
-                        channel = Math.max(0, mi.getMidiChannel() - 1);
+                        channel = Math.max(0, Math.min(15, mi.getMidiChannel() - 1));
                     }
                     if (mi.getMidiProgram() != null) {
-                        program = Math.max(0, mi.getMidiProgram() - 1);
+                        program = Math.max(0, Math.min(127, mi.getMidiProgram() - 1));
                     }
                     break;
                 }
@@ -357,7 +638,7 @@ public class MidiExporter
     private static void addCopyrightMeta (Track meta, String text)
             throws InvalidMidiDataException
     {
-        byte[] bytes = text.getBytes();
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
         MetaMessage m = new MetaMessage();
         m.setMessage(0x02, bytes, bytes.length);
         meta.add(new MidiEvent(m, 0));

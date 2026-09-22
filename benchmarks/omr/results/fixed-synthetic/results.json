@@ -1,0 +1,1779 @@
+{
+  "fixture_manifest": {
+    "kind": "authored synthetic engraving, not photographs or scans",
+    "verovio": "6.3.0[undefined]",
+    "fixtures": [
+      {
+        "id": "01_diatonic",
+        "description": "8 measures, monophonic treble, quarter and half notes",
+        "reference_notes": 25,
+        "png_size": [
+          2480,
+          598
+        ],
+        "png_sha256": "7f6277f57709cd15d12111a1b6eb07f4a10b3961f745e560c05f24eb2503bedc",
+        "musicxml_sha256": "cc5dd1e89bff9a96ef548838ef94f1f70ec06447284dbb6f2d6f4944465b9539"
+      },
+      {
+        "id": "02_accidentals",
+        "description": "6 measures, sharp and flat accidentals, chromatic notes",
+        "reference_notes": 22,
+        "png_size": [
+          2480,
+          598
+        ],
+        "png_sha256": "c333f995f78e711a431f956fd4d0c4cc9d3b366f20999be266478c00f19b2624",
+        "musicxml_sha256": "00f15b9d7d8f8cb535cf4fb0b387076671f0c1bfc2457d541c663e9e07dbbaec"
+      },
+      {
+        "id": "03_rhythm_ties",
+        "description": "4 measures, rests, dotted notes, eighths and tied notes",
+        "reference_notes": 11,
+        "png_size": [
+          2480,
+          343
+        ],
+        "png_sha256": "f8de92f10acec59989086633dd36b7f0197ba2c80f8be7c723f5e8d848456edd",
+        "musicxml_sha256": "424e5e3a64076fa2df666d89db938fb83d75fad310864f292a672c9399e5671c"
+      },
+      {
+        "id": "04_piano",
+        "description": "8 measures, piano grand staff, triads, broken chords and bass whole notes",
+        "reference_notes": 46,
+        "png_size": [
+          2480,
+          1023
+        ],
+        "png_sha256": "02391541a18d281bcbe20d72f65d28b77e391a85bcee329aaf2955b085f5b501",
+        "musicxml_sha256": "0f4a938395827ba7c2e569535077252cb587a67c0031bb93d9928e2b3762ff53"
+      },
+      {
+        "id": "05_polyphony",
+        "description": "4 measures, two simultaneous voices on one treble staff",
+        "reference_notes": 22,
+        "png_size": [
+          2480,
+          423
+        ],
+        "png_sha256": "cc567199d4ab9a82cd7d4dba3694e2349276e9d03c80f30320499098409a302f",
+        "musicxml_sha256": "4e2b0dd03a87e83d5afffdc049cab40501c54016912ce9cd650a557b424e91f3"
+      },
+      {
+        "id": "06_tuplets",
+        "description": "4 measures, triplet eighths mixed with quarter notes",
+        "reference_notes": 21,
+        "png_size": [
+          2480,
+          358
+        ],
+        "png_sha256": "d128063533d3f9ecb49a5a68c6d3300ad69d5b3aa73c05525698866bd1498f02",
+        "musicxml_sha256": "9eab90a75a7b8f5d39d81d9234b0c9d85d5090cf1fd46c39a749eaada549228a"
+      },
+      {
+        "id": "07_repeats",
+        "description": "4 written measures with repeat barlines; truth is expanded playback (8 measures)",
+        "reference_notes": 32,
+        "png_size": [
+          2480,
+          343
+        ],
+        "png_sha256": "fb43cef6e01e075942cd960f3d30668ccfcffc261e63fc53cbd9b47033d39981",
+        "musicxml_sha256": "e8f1703cc9ece7938043819afe8b423c6a5abb0bd50afac79bccc14a6bfd2e9b"
+      }
+    ]
+  },
+  "started_at": "2026-09-22T01:05:33-0500",
+  "commit": "bab36531040111336f59a9ff70474414b3b2d6bb",
+  "jar_sha256": "a5592b790c8401454e46039e8a4246eefe9d25bf09d82e82a792583086f1089e",
+  "truth_file": "truth.json",
+  "metric_definition": "one-to-one maximum-cardinality matching; exact MIDI pitch; onset tolerance 1/16 quarter beat; offset tolerance max(1/16 beat, 20% reference duration); no alignment or transposition; failures count all truth as false negatives",
+  "cases": [
+    {
+      "id": "01_diatonic",
+      "status": "ok",
+      "exit_code": 0,
+      "seconds": 3.71,
+      "command": [
+        "java",
+        "--enable-preview",
+        "-Xmx4g",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.PropertyResourceBundle.encoding=UTF-8",
+        "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        "app\\build\\install\\app\\lib\\*",
+        "NoteLite",
+        "-batch",
+        "-transcribe",
+        "-export",
+        "-export-midi",
+        "-output",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\01_diatonic",
+        "--",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\NoteLite\\benchmarks\\omr\\fixtures\\01_diatonic\\score.png"
+      ],
+      "midi_outputs": [
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\01_diatonic\\score.mid"
+      ],
+      "unclosed_notes": 0,
+      "metrics": {
+        "reference_notes": 25,
+        "predicted_notes": 22,
+        "pitch_onset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "recall": 0.88,
+          "f1": 0.9361702127659575
+        },
+        "pitch_onset_offset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "recall": 0.88,
+          "f1": 0.9361702127659575
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "recall": 0.88,
+          "f1": 0.9361702127659575
+        }
+      },
+      "actual_notes": [
+        {
+          "pitch": 60,
+          "onset": 0.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 1.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 2.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 3.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 4.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 5.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 6.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 7.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 8.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 9.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 10.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 11.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 12.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 14.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 16.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 17.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 18.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 19.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 20.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 21.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 22.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 23.0,
+          "duration": 1.0,
+          "part": 1
+        }
+      ],
+      "original_run_metrics": {
+        "reference_notes": 25,
+        "predicted_notes": 22,
+        "pitch_onset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "recall": 0.88,
+          "f1": 0.9361702127659575
+        },
+        "pitch_onset_offset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "recall": 0.88,
+          "f1": 0.9361702127659575
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "recall": 0.88,
+          "f1": 0.9361702127659575
+        }
+      }
+    },
+    {
+      "id": "02_accidentals",
+      "status": "ok",
+      "exit_code": 0,
+      "seconds": 3.704,
+      "command": [
+        "java",
+        "--enable-preview",
+        "-Xmx4g",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.PropertyResourceBundle.encoding=UTF-8",
+        "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        "app\\build\\install\\app\\lib\\*",
+        "NoteLite",
+        "-batch",
+        "-transcribe",
+        "-export",
+        "-export-midi",
+        "-output",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\02_accidentals",
+        "--",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\NoteLite\\benchmarks\\omr\\fixtures\\02_accidentals\\score.png"
+      ],
+      "midi_outputs": [
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\02_accidentals\\score.mid"
+      ],
+      "unclosed_notes": 0,
+      "metrics": {
+        "reference_notes": 22,
+        "predicted_notes": 20,
+        "pitch_onset": {
+          "tp": 20,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "recall": 0.9090909090909091,
+          "f1": 0.9523809523809523
+        },
+        "pitch_onset_offset": {
+          "tp": 20,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "recall": 0.9090909090909091,
+          "f1": 0.9523809523809523
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 20,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "recall": 0.9090909090909091,
+          "f1": 0.9523809523809523
+        }
+      },
+      "actual_notes": [
+        {
+          "pitch": 60,
+          "onset": 0.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 61,
+          "onset": 1.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 2.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 63,
+          "onset": 3.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 4.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 5.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 66,
+          "onset": 6.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 7.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 68,
+          "onset": 8.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 9.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 70,
+          "onset": 10.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 11.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 12.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 70,
+          "onset": 13.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 68,
+          "onset": 14.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 15.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 66,
+          "onset": 16.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 17.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 63,
+          "onset": 18.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 19.0,
+          "duration": 1.0,
+          "part": 1
+        }
+      ],
+      "original_run_metrics": {
+        "reference_notes": 22,
+        "predicted_notes": 20,
+        "pitch_onset": {
+          "tp": 20,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "recall": 0.9090909090909091,
+          "f1": 0.9523809523809523
+        },
+        "pitch_onset_offset": {
+          "tp": 20,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "recall": 0.9090909090909091,
+          "f1": 0.9523809523809523
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 20,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "recall": 0.9090909090909091,
+          "f1": 0.9523809523809523
+        }
+      }
+    },
+    {
+      "id": "03_rhythm_ties",
+      "status": "ok",
+      "exit_code": 0,
+      "seconds": 3.339,
+      "command": [
+        "java",
+        "--enable-preview",
+        "-Xmx4g",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.PropertyResourceBundle.encoding=UTF-8",
+        "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        "app\\build\\install\\app\\lib\\*",
+        "NoteLite",
+        "-batch",
+        "-transcribe",
+        "-export",
+        "-export-midi",
+        "-output",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\03_rhythm_ties",
+        "--",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\NoteLite\\benchmarks\\omr\\fixtures\\03_rhythm_ties\\score.png"
+      ],
+      "midi_outputs": [
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\03_rhythm_ties\\score.mid"
+      ],
+      "unclosed_notes": 0,
+      "metrics": {
+        "reference_notes": 11,
+        "predicted_notes": 11,
+        "pitch_onset": {
+          "tp": 11,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 11,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 11,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "actual_notes": [
+        {
+          "pitch": 60,
+          "onset": 0.0,
+          "duration": 1.5,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 1.5,
+          "duration": 0.5,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 3.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 5.0,
+          "duration": 0.5,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 5.5,
+          "duration": 0.5,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 6.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 8.5,
+          "duration": 0.5,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 9.0,
+          "duration": 1.5,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 10.5,
+          "duration": 0.5,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 11.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 12.0,
+          "duration": 3.0,
+          "part": 1
+        }
+      ],
+      "original_run_metrics": {
+        "reference_notes": 11,
+        "predicted_notes": 11,
+        "pitch_onset": {
+          "tp": 11,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 11,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 11,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      }
+    },
+    {
+      "id": "04_piano",
+      "status": "ok",
+      "exit_code": 0,
+      "seconds": 4.175,
+      "command": [
+        "java",
+        "--enable-preview",
+        "-Xmx4g",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.PropertyResourceBundle.encoding=UTF-8",
+        "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        "app\\build\\install\\app\\lib\\*",
+        "NoteLite",
+        "-batch",
+        "-transcribe",
+        "-export",
+        "-export-midi",
+        "-output",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\04_piano",
+        "--",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\NoteLite\\benchmarks\\omr\\fixtures\\04_piano\\score.png"
+      ],
+      "midi_outputs": [
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\04_piano\\score.mid"
+      ],
+      "unclosed_notes": 0,
+      "metrics": {
+        "reference_notes": 46,
+        "predicted_notes": 46,
+        "pitch_onset": {
+          "tp": 46,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 46,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 46,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "actual_notes": [
+        {
+          "pitch": 48,
+          "onset": 0.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 0.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 1.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 2.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 3.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 43,
+          "onset": 4.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 4.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 4.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 4.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 6.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 6.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 6.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 48,
+          "onset": 8.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 8.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 9.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 10.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 76,
+          "onset": 11.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 41,
+          "onset": 12.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 12.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 12.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 12.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 14.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 14.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 14.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 50,
+          "onset": 16.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 16.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 17.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 18.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 19.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 43,
+          "onset": 20.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 20.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 20.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 20.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 22.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 22.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 22.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 43,
+          "onset": 24.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 24.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 25.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 26.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 77,
+          "onset": 27.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 48,
+          "onset": 28.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 28.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 28.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 28.0,
+          "duration": 4.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 28.0,
+          "duration": 4.0,
+          "part": 1
+        }
+      ],
+      "original_run_metrics": {
+        "reference_notes": 46,
+        "predicted_notes": 46,
+        "pitch_onset": {
+          "tp": 46,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 46,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 46,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      }
+    },
+    {
+      "id": "05_polyphony",
+      "status": "ok",
+      "exit_code": 0,
+      "seconds": 3.156,
+      "command": [
+        "java",
+        "--enable-preview",
+        "-Xmx4g",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.PropertyResourceBundle.encoding=UTF-8",
+        "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        "app\\build\\install\\app\\lib\\*",
+        "NoteLite",
+        "-batch",
+        "-transcribe",
+        "-export",
+        "-export-midi",
+        "-output",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\05_polyphony",
+        "--",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\NoteLite\\benchmarks\\omr\\fixtures\\05_polyphony\\score.png"
+      ],
+      "midi_outputs": [
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\05_polyphony\\score.mid"
+      ],
+      "unclosed_notes": 0,
+      "metrics": {
+        "reference_notes": 22,
+        "predicted_notes": 22,
+        "pitch_onset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "actual_notes": [
+        {
+          "pitch": 60,
+          "onset": 0.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 0.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 1.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 2.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 76,
+          "onset": 2.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 77,
+          "onset": 3.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 59,
+          "onset": 4.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 79,
+          "onset": 4.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 77,
+          "onset": 5.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 6.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 76,
+          "onset": 6.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 7.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 8.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 76,
+          "onset": 8.0,
+          "duration": 0.5,
+          "part": 1
+        },
+        {
+          "pitch": 77,
+          "onset": 8.5,
+          "duration": 0.5,
+          "part": 1
+        },
+        {
+          "pitch": 79,
+          "onset": 9.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 10.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 10.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 55,
+          "onset": 12.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 12.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 14.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 14.0,
+          "duration": 2.0,
+          "part": 1
+        }
+      ],
+      "original_run_metrics": {
+        "reference_notes": 22,
+        "predicted_notes": 22,
+        "pitch_onset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 22,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      }
+    },
+    {
+      "id": "06_tuplets",
+      "status": "ok",
+      "exit_code": 0,
+      "seconds": 3.101,
+      "command": [
+        "java",
+        "--enable-preview",
+        "-Xmx4g",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.PropertyResourceBundle.encoding=UTF-8",
+        "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        "app\\build\\install\\app\\lib\\*",
+        "NoteLite",
+        "-batch",
+        "-transcribe",
+        "-export",
+        "-export-midi",
+        "-output",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\06_tuplets",
+        "--",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\NoteLite\\benchmarks\\omr\\fixtures\\06_tuplets\\score.png"
+      ],
+      "midi_outputs": [
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\06_tuplets\\score.mid"
+      ],
+      "unclosed_notes": 0,
+      "metrics": {
+        "reference_notes": 21,
+        "predicted_notes": 21,
+        "pitch_onset": {
+          "tp": 21,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 21,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 21,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "actual_notes": [
+        {
+          "pitch": 60,
+          "onset": 0.0,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 0.3333333333333333,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 0.6666666666666666,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 1.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 2.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 3.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 4.0,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 4.333333333333333,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 74,
+          "onset": 4.666666666666667,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 5.0,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 5.333333333333333,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 5.666666666666667,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 6.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 8.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 9.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 10.0,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 10.333333333333334,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 10.666666666666666,
+          "duration": 0.3333333333333333,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 11.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 12.0,
+          "duration": 2.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 14.0,
+          "duration": 2.0,
+          "part": 1
+        }
+      ],
+      "original_run_metrics": {
+        "reference_notes": 21,
+        "predicted_notes": 21,
+        "pitch_onset": {
+          "tp": 21,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 21,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 21,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      }
+    },
+    {
+      "id": "07_repeats",
+      "status": "ok",
+      "exit_code": 0,
+      "seconds": 3.255,
+      "command": [
+        "java",
+        "--enable-preview",
+        "-Xmx4g",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.PropertyResourceBundle.encoding=UTF-8",
+        "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        "app\\build\\install\\app\\lib\\*",
+        "NoteLite",
+        "-batch",
+        "-transcribe",
+        "-export",
+        "-export-midi",
+        "-output",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\07_repeats",
+        "--",
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\NoteLite\\benchmarks\\omr\\fixtures\\07_repeats\\score.png"
+      ],
+      "midi_outputs": [
+        "D:\\Chatgpt\\2026-09-22\\https-github-com-lucas0623z-notelite\\work\\omr-final-synthetic\\07_repeats\\score.mid"
+      ],
+      "unclosed_notes": 0,
+      "metrics": {
+        "reference_notes": 32,
+        "predicted_notes": 32,
+        "pitch_onset": {
+          "tp": 32,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 32,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 32,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "actual_notes": [
+        {
+          "pitch": 60,
+          "onset": 0.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 1.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 2.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 3.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 4.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 5.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 6.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 7.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 8.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 9.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 10.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 11.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 12.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 13.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 14.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 15.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 16.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 62,
+          "onset": 17.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 18.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 19.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 20.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 21.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 22.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 23.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 65,
+          "onset": 24.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 69,
+          "onset": 25.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 26.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 71,
+          "onset": 27.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 72,
+          "onset": 28.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 67,
+          "onset": 29.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 64,
+          "onset": 30.0,
+          "duration": 1.0,
+          "part": 1
+        },
+        {
+          "pitch": 60,
+          "onset": 31.0,
+          "duration": 1.0,
+          "part": 1
+        }
+      ],
+      "original_run_metrics": {
+        "reference_notes": 32,
+        "predicted_notes": 32,
+        "pitch_onset": {
+          "tp": 32,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_onset_offset": {
+          "tp": 32,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "pitch_inventory_diagnostic": {
+          "tp": 32,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      }
+    }
+  ],
+  "aggregate": {
+    "pitch_onset": {
+      "tp": 174,
+      "fp": 0,
+      "fn": 5,
+      "precision": 1.0,
+      "recall": 0.9720670391061452,
+      "f1": 0.9858356940509915
+    },
+    "pitch_onset_offset": {
+      "tp": 174,
+      "fp": 0,
+      "fn": 5,
+      "precision": 1.0,
+      "recall": 0.9720670391061452,
+      "f1": 0.9858356940509915
+    },
+    "pitch_inventory_diagnostic": {
+      "tp": 174,
+      "fp": 0,
+      "fn": 5,
+      "precision": 1.0,
+      "recall": 0.9720670391061452,
+      "f1": 0.9858356940509915
+    }
+  },
+  "rescored_against": "truth.json"
+}

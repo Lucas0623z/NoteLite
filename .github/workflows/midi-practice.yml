@@ -1,0 +1,42 @@
+name: MIDI and practice regression checks
+on:
+  pull_request:
+    paths: ['app/**', 'practice-web/**', '.github/workflows/midi-practice.yml']
+  push:
+    branches: [main]
+    paths: ['app/**', 'practice-web/**', '.github/workflows/midi-practice.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: practice-web/package-lock.json
+      - name: Build and test local assessment components
+        working-directory: practice-web
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Exercise real MIDI serialization and local HTTP delivery
+        run: bash ./gradlew :app:test --tests com.notelite.omr.score.MidiExporterTest --tests com.notelite.omr.score.MidiExporterAccuracyTest --tests com.notelite.omr.score.MidiExporterAdvancedTest --tests 'com.notelite.omr.practice.*' :app:installDist --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: midi-practice-evidence
+          path: |
+            app/build/reports/tests/test
+            app/build/midi-accuracy
+            work/practice-audio-metrics.json

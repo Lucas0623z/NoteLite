@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NoteLite · 乐器陪练</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body>
+<header><a class="brand" href="#">N<span>NoteLite</span></a><span class="workspace">乐器陪练</span><span class="local">● 本地练习 · 音频不上传</span><button id="import">导入乐谱</button><input id="file" type="file" accept=".xml,.musicxml,.mxl" hidden></header>
+<main>
+<section class="intro"><div><div class="eyebrow">PLAY · LISTEN · IMPROVE</div><h1>让每一个音，都有回应。</h1><p>看谱演奏，定位错音，再把难点练一遍。</p></div><button id="demo" class="quiet">载入演示曲谱 ↗</button></section>
+<div id="message" role="status" aria-live="polite">正在准备乐谱…</div>
+<div class="layout">
+<aside class="setup card">
+<h2>练习设置</h2>
+<label>练习声部<select id="part"></select></label>
+<div id="instrument" class="instrument"></div>
+<label>乐器<select id="instrument-choice"><option value="auto">按谱面自动判断</option><option value="piano">钢琴 / 键盘</option><option value="guitar">吉他 / 弹拨乐</option><option value="strings">提琴</option><option value="winds">管乐</option><option value="voice">人声</option><option value="other">其他有固定音高乐器</option></select></label>
+<label>演奏输入<select id="input"><option value="microphone">麦克风 · 单音旋律</option><option value="midi">MIDI 乐器 · 支持和弦</option><option value="keyboard">电脑键盘 · 功能演示</option></select></label>
+<select id="midi-device" aria-label="MIDI 输入设备" hidden></select>
+<p class="hint" id="input-hint">单音麦克风适合独奏旋律；和弦与多人合奏暂不能可靠评判。</p>
+<label>练习方式<select id="mode"><option value="wait">等我弹对 · 逐音纠错</option><option value="tempo">跟节拍 · 检查漏音和抢慢拍</option></select></label>
+<div class="row"><label>速度 BPM<input id="bpm" type="number" min="30" max="240" value="100"></label><label>调音 A4<input id="a4" type="number" min="415" max="466" value="440"></label></div>
+<div class="row"><label>起始小节序号<input id="from" type="number" min="1" value="1"></label><label>结束小节序号<input id="to" type="number" min="1" value="4"></label></div>
+<label class="check"><input type="checkbox" id="verified">我已试听或校对识谱结果</label>
+<button id="start" class="primary">开始练习</button><button id="stop" disabled>结束本次练习</button>
+<p class="hint">识谱结果决定评分基准。先校对，才能避免把识谱错误算作演奏错误。</p>
+</aside>
+<section class="score-area">
+<div class="metrics"><div><span>当前位置</span><strong id="position">—</strong></div><div><span>首次弹对</span><strong id="correct">—</strong></div><div><span>需要复习</span><strong id="errors">0 <small>处</small></strong></div><div><span>听到的音</span><strong id="heard">—</strong></div></div>
+<div class="score-card card"><div class="score-heading"><div><span class="eyebrow">YOUR SCORE</span><h2 id="title">正在载入</h2></div><div class="score-actions"><button id="listen">试听所选段落</button><button id="skip" disabled>跳过当前音</button></div></div><div class="legend"><span class="green">● 弹对</span><span class="red">● 错音 / 漏音</span><span class="amber">● 修正 / 节奏</span></div><div id="score"></div><div id="next" class="next">载入乐谱后开始练习</div></div>
+<section class="feedback card"><div class="score-heading"><div><span class="eyebrow">PRACTICE NOTES</span><h2>哪里需要再练一遍</h2></div><button id="report">保存练习记录</button></div><div id="error-list" aria-live="polite"><p class="empty">练习后会列出具体小节、拍位、应弹音与实际音。</p></div></section>
+<details class="capabilities"><summary>识别范围与成熟陪练引擎</summary><p>麦克风使用 Pitchy 单音检测，评分是 NoteLite 新增功能；持续同音需要短暂断开后重新起音。电脑键盘仅验证交互。MIDI 支持多音输入；当前评分涵盖音高、漏音与起音节奏，不评价触键、踏板、音色或时值。乐器名称来自谱面标注；名称推断不代表已通过该乐器的实录验收。</p><p>电子键盘完整陪练可在 NoteLite「书谱 → PianoBooster 陪练」中打开。多乐器商业识别引擎 <a href="https://phonicscore.com/solutions/note-detection-and-matching/" target="_blank" rel="noreferrer">PhonicScore / Practice Bird</a> 需要厂商 SDK 授权，尚未接入。</p><p>复杂扫描谱可先用 <a href="https://scanscore.zendesk.com/hc/en-us/articles/16769352622610-Export" target="_blank" rel="noreferrer">ScanScore</a> 等识谱软件导出 MusicXML，再从此页面导入；也可导入 MuseScore 校对后的乐谱。这是文件互通，外部识谱引擎未内嵌，NoteLite 不会自动购买或上传乐谱。</p><p>渲染采用 OpenSheetMusicDisplay，音频只在本机处理。<a href="THIRD-PARTY.txt" target="_blank">开源组件与许可证</a></p></details>
+</section></div></main><footer>NoteLite · 从读懂乐谱，到练好每个音。</footer>
+</body></html>

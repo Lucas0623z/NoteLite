@@ -1,0 +1,8 @@
+#!/bin/sh
+PRACTICE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -n "$JAVA_HOME" ]; then
+  PRACTICE_JAVA="$JAVA_HOME/bin/java"
+else
+  PRACTICE_JAVA=java
+fi
+exec "$PRACTICE_JAVA" --enable-preview -cp "$PRACTICE_DIR/../lib/*" com.notelite.omr.practice.PracticeStudio --browse "$@"
