@@ -9,17 +9,18 @@ import {NativeInputBridge} from './native-bridge.js';
 const $=id=>document.getElementById(id);
 const bridge=new NativeInputBridge(window.webkit?.messageHandlers?.noteLite);
 document.body.classList.toggle('native',bridge.available);
-const osmd=new OSMD.OpenSheetMusicDisplay('score',{autoResize:true,backend:'svg',drawTitle:false,drawComposer:false,drawPartNames:true,followCursor:true,cursorsOptions:[{type:0,color:'#345da8',alpha:.2,follow:true}]});
+const osmd=new OSMD.OpenSheetMusicDisplay('score',{autoResize:false,backend:'svg',drawTitle:false,drawComposer:false,drawPartNames:true,followCursor:true,cursorsOptions:[{type:0,color:'#345da8',alpha:.2,follow:true}]});
 let score,session,groups=[],graphics=[],phase='idle',scoreID=null;
 let micStream,audioContext,micAnalyser,animation,midiAccess,selectedMidi,inputGeneration=0;
 let playback=[],playbackTimer,tickTimer,beatTimer,beatStartTimer,createdAt,activeStartedAt=null,elapsedMilliseconds=0,lastReport=null;
+let renderedRange='',resizeTimer;
 const gate=new PitchGate(),buffer=new Float32Array(4096),detector=PitchDetector.forFloat32Array(4096);
 const labels={wrong:'错音',extra:'多弹 / 过早',missing:'漏音',early:'抢拍',late:'慢拍',intonation:'音准偏差'};
 
 function message(content,type=''){$('message').textContent=content;$('message').className=`practice-message ${type}`;if($('settings').open)$('settings-message').textContent=type==='error'||type==='warning'?content:'';}
 function guard(fn){return(...args)=>Promise.resolve().then(()=>fn(...args)).catch(e=>{if(e.name!=='AbortError')message(e.message||String(e),'error');});}
 function openSettings(focus){$('settings-message').textContent='';if(!$('settings').open)$('settings').showModal();if(focus)$(focus)?.focus();}
-function view(name){document.body.dataset.view=name;$('review-view').hidden=name!=='review';$('practice-nav').classList.toggle('selected',name==='practice');$('review-nav').classList.toggle('selected',name==='review');if(name==='practice'&&score)requestAnimationFrame(()=>{osmd.render();if(session?.active)cursorAt(session.current);});}
+function view(name){document.body.dataset.view=name;$('review-view').hidden=name!=='review';$('practice-nav').classList.toggle('selected',name==='practice');$('review-nav').classList.toggle('selected',name==='review');if(name==='practice'&&score&&phase!=='loading')requestAnimationFrame(()=>{renderScore(true);if(session?.active)cursorAt(session.current);});}
 function setPhase(next){
   phase=next;document.body.dataset.phase=phase;
   const locked=['connecting','active','paused','loading'].includes(phase);
@@ -48,19 +49,28 @@ function configure(autoInput=false){
   const {from,to}=currentOptions();$('range-label').textContent=`第 ${from}–${to} 小节`;$('transport-range').textContent=`范围 ${from}–${to}`;
   $('tempo-label').textContent=`${$('bpm').value} BPM`;$('mode-label').textContent=$('mode').value==='wait'?'等我弹对':'跟随节拍';
   inputHint();if(!session)$('next').textContent=groups.length?`${groups.length} 个起音位置 · ${poly?'请用 MIDI 演奏多音声部':'可用麦克风练习单音'}`:'这个声部没有可练习的音符。';
+  if(phase!=='loading')renderScore();
+}
+function renderScore(force=false){
+  if(!score||document.body.dataset.view==='review')return;
+  const compact=matchMedia('(max-width:599px)').matches,scope=currentOptions();let from=scope.from,to=scope.to;
+  if(compact){const current=session?.current?.mi+1||from;from+=Math.floor(Math.max(0,current-from)/2)*2;to=Math.min(to,from+1);}
+  const key=`${compact}/${from}/${to}/${$('score').clientWidth}`;if(!force&&key===renderedRange)return;renderedRange=key;
+  osmd.setOptions({drawPartNames:!compact,drawFromMeasureNumber:from,drawUpToMeasureNumber:to});osmd.Zoom=compact?.85:1;osmd.render();
+  if(compact)$('range-label').textContent=`第 ${from}${from!==to?`–${to}`:''} 小节`;
 }
 async function load(xml,title=null,id=null){
   finish(false);stopPlayback();setPhase('loading');message('正在排版乐谱…');
   try{
-    const parsed=parseScore(xml);view('practice');await osmd.load(xml);osmd.render();score=parsed;scoreID=id;
-    if(title)score.title=title;
+    const parsed=parseScore(xml);view('practice');await osmd.load(xml);score=parsed;scoreID=id;renderedRange='';
+    if(title&&(!score.title||score.title==='未命名乐谱'))score.title=title.replace(/\.(musicxml|mxl|xml)$/i,'');
     for(const target of ['title','window-title','sidebar-title'])$(target).textContent=score.title;
     const composer=Array.from(score.doc.getElementsByTagName('creator')).find(n=>n.getAttribute('type')==='composer')?.textContent||'';
     $('composer').textContent=$('window-composer').textContent=composer;$('sheet-length').textContent=`共 ${score.lengths.length} 小节`;
     $('bpm').value=Math.min(240,Math.max(30,Math.round(score.tempo)));$('from').value=1;$('to').value=score.lengths.length;
     $('from').max=$('to').max=score.lengths.length;$('verified').checked=false;$('instrument-choice').value='auto';
     $('part').replaceChildren(...score.parts.map(p=>new Option(p.name,p.id)));if(score.parts.length>1)$('part').add(new Option('全部声部','all'));$('part').value=score.parts[0]?.id||'';
-    graphics=collectScoreNotes(osmd);osmd.cursor.reset();osmd.cursor.hide();session=null;lastReport=null;configure(true);renderReport();
+    session=null;lastReport=null;configure(true);renderScore(true);graphics=collectScoreNotes(osmd);osmd.cursor.reset();osmd.cursor.hide();renderReport();
     $('position').textContent='尚未开始';$('correct').textContent='—';$('errors').textContent='0';$('heard').textContent='—';$('progress').value=0;
     message(score.warnings.length?score.warnings.join(' '):'先试听并校对乐谱，再开始练习。',score.warnings.length?'warning':'');
     setPhase('idle');
@@ -73,7 +83,7 @@ function update(){
   $('correct').textContent=`${session.results.filter(r=>r.status==='correct').length} / ${session.groups.length}`;$('errors').textContent=String(session.errors.length);
   $('position').textContent=g?`第 ${g.measure} 小节 / 共 ${score.lengths.length} 小节`:'本段已完成';$('progress').max=session.groups.length;$('progress').value=session.index;
   $('next').textContent=g?`第 ${g.measure} 小节 · 第 ${formatBeat(g.beat)} 拍 · 应弹 ${[...new Set(g.notes.map(n=>noteName(n.midi)))].join(' + ')}`:'本段已完成，可在回顾中重练难点。';
-  if(g&&phase==='active')cursorAt(g);
+  renderScore();if(g&&phase==='active')cursorAt(g);
   for(const r of session.results)colorGroup(session.groups[r.index],r.status==='correct'?'#417f62':r.status==='missing'?'#b84f45':'#a77b36');
   renderReport();if(!session.active&&phase==='active')finish(true);
 }
@@ -138,6 +148,7 @@ async function start(){
   try{
     const ctx=candidate.mode==='tempo'?await context():null;if(generation!==inputGeneration)return;
     if(!await connectInput()||generation!==inputGeneration)return;
+    if(ctx?.state==='suspended')await ctx.resume();if(generation!==inputGeneration)return;
     session=candidate;session.active=true;createdAt=new Date();elapsedMilliseconds=0;activeStartedAt=performance.now();lastReport=null;
     resetScoreColors(osmd,graphics);view('practice');setPhase('active');$('settings').close();
     message(input==='keyboard'?'键盘演示：A S D F G H J 对应 C4–B4，K 为 C5。':'弹对当前音后，谱面会自动前进。');startClock(ctx,true);update();
@@ -152,12 +163,14 @@ async function resume(){
   try{
     const ctx=session.mode==='tempo'?await context():null;if(generation!==inputGeneration)return;
     if(!await connectInput()||generation!==inputGeneration)return;
+    if(ctx?.state==='suspended')await ctx.resume();if(generation!==inputGeneration)return;
     session.resume(performance.now());activeStartedAt=performance.now();setPhase('active');message('继续演奏当前音。');startClock(ctx,false);update();
   }catch(error){if(generation===inputGeneration){releaseInput();setPhase('paused');throw error;}}
 }
 function reportData(){
   if(!session)return null;const data=session.report(),duration=elapsedMilliseconds+(activeStartedAt===null?0:performance.now()-activeStartedAt);
-  return{title:score.title,scoreID,createdAt:(createdAt||new Date()).toISOString(),durationSeconds:Math.max(0,duration/1000),...session.metadata,...data,completedPositions:data.completed,completed:session.index>=session.groups.length,measureCount:new Set(session.groups.map(g=>g.mi)).size,limitations:'Note-on pitch and timing only; microphone monophonic; unperformed notes not graded'};
+  const practiced=new Set([...session.results.map(r=>session.groups[r.index].mi),...session.errors.map(e=>e.mi)]);if(session.matched.size&&session.current)practiced.add(session.current.mi);
+  return{title:score.title,scoreID,createdAt:(createdAt||new Date()).toISOString(),durationSeconds:Math.max(0,duration/1000),...session.metadata,...data,completedPositions:data.completed,completed:session.index>=session.groups.length,measureCount:practiced.size,totalMeasureCount:new Set(session.groups.map(g=>g.mi)).size,limitations:'Note-on pitch and timing only; microphone monophonic; unperformed notes not graded'};
 }
 function finish(showReview=true){
   stopDuration();releaseInput();
@@ -187,7 +200,7 @@ function describe(e){
   return`${noteName(e.played)} ${e.delta<0?'提前':'延后'} ${Math.abs(Math.round(e.delta))} ms`;
 }
 function retryMeasures(from,to){
-  finish(false);$('from').value=from;$('to').value=to;session=null;lastReport=null;setPhase('idle');configure();view('practice');cursorAt(groups[0]);renderReport();message(`已选第 ${from}${to!==from?`–${to}`:''} 小节。点击“开始练习”重练。`);
+  finish(false);$('from').value=from;$('to').value=to;session=null;lastReport=null;setPhase('idle');resetScoreColors(osmd,graphics);configure();view('practice');cursorAt(groups[0]);renderReport();message(`已选第 ${from}${to!==from?`–${to}`:''} 小节。点击“开始练习”重练。`);
 }
 function renderErrorList(id,review=false){
   const list=$(id);list.replaceChildren();const errors=session?.errors||[];
@@ -199,11 +212,11 @@ function renderErrorList(id,review=false){
   }
 }
 function renderReport(){
+  if(!session){$('correct').textContent='—';$('errors').textContent='0';$('heard').textContent='—';$('position').textContent='尚未开始';$('progress').value=0;}
   renderErrorList('error-list');renderErrorList('review-error-list',true);
   const errorMeasures=[...new Set(session?.errors.map(e=>e.mi)||[])];$('mobile-error-summary').textContent=session?`已标记 ${session.errors.length} 处需要复习`:'练习后查看记录';
   $('review-title').textContent=score?.title||'尚无练习记录';$('review-errors').textContent=String(errorMeasures.length);
-  const played=new Set(session?.results.filter(r=>r.correct>0).map(r=>session.groups[r.index].mi)||[]);if(session?.matched.size&&session.current)played.add(session.current.mi);
-  $('review-measures').textContent=String(played.size);$('review-correct').textContent=session?`${session.results.filter(r=>r.status==='correct').length} / ${session.groups.length}`:'—';
+  $('review-measures').textContent=String(reportData()?.measureCount||0);$('review-correct').textContent=session?`${session.results.filter(r=>r.status==='correct').length} / ${session.groups.length}`:'—';
   const duration=Math.floor(reportData()?.durationSeconds||0);$('review-date').textContent=session?`${createdAt.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})} · 练习 ${Math.floor(duration/60)} 分 ${duration%60} 秒`:'';
   $('review-heading').textContent=errorMeasures.length?'这些小节再来一次':session?'本次记录':'练习后再来看看';
   $('review-note').textContent=session&&session.index<session.groups.length?'本次尚未弹完所选段落，未演奏的部分没有计为弹对。':'从较慢的速度开始，弹稳后再加速。';
@@ -238,6 +251,7 @@ for(const id of ['settings','more'])$(id).addEventListener('click',e=>{if(e.targ
 const keyMap={a:60,s:62,d:64,f:65,g:67,h:69,j:71,k:72,w:61,e:63,t:66,y:68,u:70};
 document.addEventListener('keydown',e=>{if(e.repeat||['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)||$('settings').open||$('more').open)return;const n=keyMap[e.key.toLowerCase()];if(n!==undefined&&$('input').value==='keyboard'&&phase==='active'){e.preventDefault();receive(n);}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});window.addEventListener('pagehide',()=>{finish(false);audioContext?.close();});
+new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(score&&phase!=='loading'){renderScore();if(session?.active)cursorAt(session.current);}},100);}).observe($('score'));
 window.NoteLiteNative={
   async loadScore(base64,title,id){if(typeof base64!=='string'||base64.length>21*1024*1024)throw new Error('乐谱文件过大。');const bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));await load(readBytes(bytes),title,id);},
   inputResult:(requestId,error)=>bridge.inputResult(requestId,error),noteOn:midi=>receive(midi,performance.now()),audioFrame:processAudio,

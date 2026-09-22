@@ -74,6 +74,9 @@ final class NativePracticeInput {
     private var engineObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var tapInstalled = false
+    #if os(iOS)
+    private var audioSessionActive = false
+    #endif
 
     func start(_ mode: String) async throws {
         try Task.checkCancellation()
@@ -88,6 +91,7 @@ final class NativePracticeInput {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
+            audioSessionActive = true
             #endif
             let engine = AVAudioEngine()
             self.engine = engine
@@ -195,7 +199,10 @@ final class NativePracticeInput {
         tapInstalled = false
         engine = nil
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if audioSessionActive {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            audioSessionActive = false
+        }
         #endif
         if midiPort != 0 { MIDIPortDispose(midiPort); midiPort = 0 }
         if midiClient != 0 { MIDIClientDispose(midiClient); midiClient = 0 }
