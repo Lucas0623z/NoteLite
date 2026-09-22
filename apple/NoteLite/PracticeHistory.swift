@@ -135,7 +135,7 @@ struct PracticeHistoryView: View {
         .fullScreenCover(item: $practicing) { score in PracticeView(record: score) }
         #else
         .sheet(item: $practicing) { score in
-            PracticeView(record: score).frame(minWidth: 960, idealWidth: 1440, minHeight: 700, idealHeight: 900)
+            PracticeView(record: score).noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
         }
         #endif
         .alert("练习记录", isPresented: Binding(get: { history.errorMessage != nil },

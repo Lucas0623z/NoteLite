@@ -9,7 +9,8 @@ import {NativeInputBridge} from './native-bridge.js';
 const $=id=>document.getElementById(id);
 const bridge=new NativeInputBridge(window.webkit?.messageHandlers?.noteLite);
 document.body.classList.toggle('native',bridge.available);
-const osmd=new OSMD.OpenSheetMusicDisplay('score',{autoResize:false,backend:'svg',drawTitle:false,drawComposer:false,drawPartNames:true,followCursor:true,cursorsOptions:[{type:0,color:'#345da8',alpha:.2,follow:true}]});
+const cursorOptions={type:1,color:'#345da8',alpha:.85,follow:true};
+const osmd=new OSMD.OpenSheetMusicDisplay('score',{autoResize:false,backend:'svg',drawTitle:false,drawComposer:false,drawPartNames:true,followCursor:true,cursorsOptions:[cursorOptions]});
 let score,session,groups=[],graphics=[],phase='idle',scoreID=null;
 let micStream,audioContext,micAnalyser,animation,midiAccess,selectedMidi,inputGeneration=0;
 let playback=[],playbackTimer,tickTimer,beatTimer,beatStartTimer,createdAt,activeStartedAt=null,elapsedMilliseconds=0,lastReport=null;
@@ -55,14 +56,14 @@ function renderScore(force=false){
   if(!score||document.body.dataset.view==='review')return;
   const compact=matchMedia('(max-width:599px)').matches,scope=currentOptions();let from=scope.from,to=scope.to;
   if(compact){const current=session?.current?.mi+1||from;from+=Math.floor(Math.max(0,current-from)/2)*2;to=Math.min(to,from+1);}
+  $('range-label').textContent=`第 ${from}${from!==to?`–${to}`:''} 小节`;
   const key=`${compact}/${from}/${to}/${$('score').clientWidth}`;if(!force&&key===renderedRange)return;renderedRange=key;
-  osmd.setOptions({drawPartNames:!compact,drawFromMeasureNumber:from,drawUpToMeasureNumber:to});osmd.Zoom=compact?.85:1;osmd.render();
-  if(compact)$('range-label').textContent=`第 ${from}${from!==to?`–${to}`:''} 小节`;
+  osmd.setOptions({drawPartNames:!compact,drawFromMeasureNumber:from,drawUpToMeasureNumber:to,cursorsOptions:[cursorOptions]});osmd.Zoom=compact ? .85 : 1;osmd.render();osmd.cursor.CursorOptions=cursorOptions;
 }
 async function load(xml,title=null,id=null){
   finish(false);stopPlayback();setPhase('loading');message('正在排版乐谱…');
   try{
-    const parsed=parseScore(xml);view('practice');await osmd.load(xml);score=parsed;scoreID=id;renderedRange='';
+    const parsed=parseScore(xml);view('practice');await osmd.load(parsed.doc);score=parsed;scoreID=id;renderedRange='';
     if(title&&(!score.title||score.title==='未命名乐谱'))score.title=title.replace(/\.(musicxml|mxl|xml)$/i,'');
     for(const target of ['title','window-title','sidebar-title'])$(target).textContent=score.title;
     const composer=Array.from(score.doc.getElementsByTagName('creator')).find(n=>n.getAttribute('type')==='composer')?.textContent||'';
@@ -238,7 +239,7 @@ function readBytes(bytes){
 }
 
 for(const [id,focus]of[['settings-open'],['instrument-open','instrument-choice'],['range-open','from'],['mode-open','mode'],['tempo-open','bpm']])$(id).onclick=()=>openSettings(focus);
-$('settings-close').onclick=()=>$('settings').close();$('more-open').onclick=()=>$('more').showModal();$('more-close').onclick=()=>$('more').close();
+$('settings-close').onclick=guard(()=>{configure();$('settings').close();});$('more-open').onclick=()=>$('more').showModal();$('more-close').onclick=()=>$('more').close();
 $('import').onclick=()=>$('file').click();$('file').onchange=guard(async()=>{const file=$('file').files[0];if(file){$('more').close();await load(await readFile(file));}$('file').value='';});
 $('demo').onclick=guard(async()=>{$('more').close();const response=await fetch('demo.musicxml');if(!response.ok)throw new Error('演示乐谱无法读取。');await load(await response.text());});
 for(const id of ['from','to','bpm','mode'])$(id).onchange=guard(()=>configure());$('part').onchange=guard(()=>configure(true));
