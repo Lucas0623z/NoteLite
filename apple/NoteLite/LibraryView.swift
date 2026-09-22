@@ -34,6 +34,7 @@ struct LibraryView: View {
     @State private var showingSettings = false
     @State private var deleting: ScoreRecord?
     @State private var phonePath: [UUID] = []
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     private var compact: Bool {
         #if os(iOS)
@@ -149,7 +150,7 @@ struct LibraryView: View {
     }
 
     private var splitLibrary: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $section) {
                 Section("资料库") {
                     ForEach(LibrarySection.allCases) { item in
@@ -193,21 +194,12 @@ struct LibraryView: View {
             }
             if records.isEmpty { emptyList }
             else {
-                List(selection: $selection) {
-                    ForEach(records) { record in
-                        NavigationLink(value: record.id) { ScoreLibraryRow(record: record) }
-                            .accessibilityIdentifier("score-row")
-                            .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
-                            .listRowBackground(NoteLiteTheme.surface)
-                            .swipeActions {
-                                Button("删除", role: .destructive) { deleting = record }
-                            }
-                            .contextMenu {
-                                if let url = library.sourceURL(record) {
-                                    ShareLink(item: url) { Label("分享原稿", systemImage: "square.and.arrow.up") }
-                                }
-                                Button("删除本地曲谱", role: .destructive) { deleting = record }
-                            }
+                Group {
+                    if compact {
+                        // A phone pushes a detail; it must not consume the tap as split-view selection.
+                        List { scoreRows }
+                    } else {
+                        List(selection: $selection) { scoreRows }
                     }
                 }
                 .listStyle(.plain).scrollContentBackground(.hidden)
@@ -238,6 +230,36 @@ struct LibraryView: View {
         }
         .onChange(of: selection) { value in
             if value != nil, section == .history { section = .all }
+        }
+    }
+
+    private var scoreRows: some View {
+        ForEach(records) { record in
+            scoreLink(record)
+                .accessibilityIdentifier("score-row")
+                .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                .listRowBackground(NoteLiteTheme.surface)
+                .swipeActions {
+                    Button("删除", role: .destructive) { deleting = record }
+                }
+                .contextMenu {
+                    if let url = library.sourceURL(record) {
+                        ShareLink(item: url) { Label("分享原稿", systemImage: "square.and.arrow.up") }
+                    }
+                    Button("删除本地曲谱", role: .destructive) { deleting = record }
+                }
+        }
+    }
+
+    @ViewBuilder private func scoreLink(_ record: ScoreRecord) -> some View {
+        if compact {
+            NavigationLink {
+                if let current = library.record(record.id) { ScoreDetailView(record: current) }
+            } label: {
+                ScoreLibraryRow(record: record)
+            }
+        } else {
+            NavigationLink(value: record.id) { ScoreLibraryRow(record: record) }
         }
     }
 

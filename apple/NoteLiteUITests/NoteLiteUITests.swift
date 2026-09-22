@@ -6,6 +6,7 @@ import UIKit
 final class NoteLiteUITests: XCTestCase {
     @MainActor
     func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() {
+        continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting-import-demo"]
         // The UI runner launches a separate process; pass the simulator runtime fix to it too.
@@ -44,7 +45,7 @@ final class NoteLiteUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 10), .completed)
         }
         #endif
-        let back = app.buttons.matching(identifier: "曲谱").firstMatch
+        let back = app.buttons.matching(identifier: "practice-close").firstMatch
         XCTAssertTrue(back.isHittable, "The return control must stay on screen")
         back.tap()
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.webViews.firstMatch)
@@ -56,7 +57,7 @@ final class NoteLiteUITests: XCTestCase {
     private func assertPracticeControlsVisible(_ app: XCUIApplication) {
         // matching(identifier:) also matches the AX title/value observed in the macOS snapshot.
         let start = app.webViews.buttons.matching(identifier: "开始练习").firstMatch
-        let back = app.buttons.matching(identifier: "曲谱").firstMatch
+        let back = app.buttons.matching(identifier: "practice-close").firstMatch
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         XCTAssertTrue(start.isHittable, "The bottom practice control must not be clipped")
         XCTAssertTrue(back.isHittable, "The native return control must not be clipped")
