@@ -8,6 +8,11 @@ final class NoteLiteUITests: XCTestCase {
     func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() {
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting-import-demo"]
+        // The UI runner launches a separate process; pass the simulator runtime fix to it too.
+        if let swiftPath = ProcessInfo.processInfo.environment["NOTELITE_SIM_SWIFT_PATH"],
+           swiftPath.hasPrefix("/") {
+            app.launchEnvironment["DYLD_FALLBACK_LIBRARY_PATH"] = swiftPath
+        }
         app.launch()
         let score = app.descendants(matching: .any).matching(identifier: "score-row").firstMatch
         XCTAssertTrue(score.waitForExistence(timeout: 15), "Bundled MusicXML must enter the real library importer")

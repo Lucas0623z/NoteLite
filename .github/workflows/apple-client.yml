@@ -97,11 +97,13 @@ jobs:
             -destination 'platform=macOS' -parallel-testing-enabled NO \
             -resultBundlePath TestResults-macOS.xcresult CODE_SIGNING_ALLOWED=NO
       - name: Test on iPhone simulator
+        timeout-minutes: 10
         if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_ios.outcome == 'success' }}
         working-directory: apple
         shell: bash
         run: bash scripts/run-simulator-tests.sh iPhone
       - name: Test on iPad simulator
+        timeout-minutes: 10
         if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_ios.outcome == 'success' }}
         working-directory: apple
         shell: bash
@@ -111,12 +113,17 @@ jobs:
         working-directory: apple
         continue-on-error: true
         run: |
+          export_failed=0
           for result in TestResults-*.xcresult; do
             if [ -d "$result" ]; then
               name="${result%.xcresult}"
-              xcrun xcresulttool export attachments --path "$result" --output-path "Screenshots/$name"
+              if ! xcrun xcresulttool export attachments --path "$result" --output-path "Screenshots/$name"; then
+                echo "::warning::Could not export attachments from $result; continuing with other devices"
+                export_failed=1
+              fi
             fi
           done
+          exit "$export_failed"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

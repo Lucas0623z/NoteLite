@@ -60,7 +60,9 @@ xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
   -destination 'platform=iOS Simulator,id=SIMULATOR_ID' CODE_SIGNING_ALLOWED=NO
 ```
 
-`NoteLiteTests` 覆盖 HTTPS 地址与凭据边界、真实 API JSON 解码、路径遍历拒绝、导入副本和待办任务持久化、损坏清单保护、25 MiB 限制、HTTP 错误，以及清理远端后重新识别不得复用旧结果的回归。CI 分别在 iPhone、iPad 模拟器执行。Windows 开发环境不能执行 Xcode；静态检查不能替代首次 macOS CI 构建。
+`NoteLiteTests` 覆盖 HTTPS 地址与凭据边界、真实 API JSON 解码、路径遍历拒绝、导入副本和待办任务持久化、损坏清单保护、25 MiB 限制、HTTP 错误，以及清理远端后重新识别不得复用旧结果的回归。练习测试还覆盖 MIDI 字节流、MusicXML 直接导入和练习记录持久化。CI 在 Mac、iPhone 与 iPad 分别执行单元测试与界面测试；界面测试通过真实导入进入谱面，验证底部控件、返回以及 iPad 旋转，并保存实拍截图。
+
+Xcode 16.4 的 iOS 18.5 模拟器存在 [WebKit 已确认的动态库加载问题](https://bugs.webkit.org/show_bug.cgi?id=293831)：支持较早 iOS 的应用使用 `callAsyncJavaScript` 等接口时，可能在启动时找不到 `libswiftWebKit.dylib`。CI 按官方方案将所选模拟器的 `Contents/Resources/RuntimeRoot/System/Cryptexes/OS/usr/lib/swift` 加入测试进程和应用的 `DYLD_FALLBACK_LIBRARY_PATH`，没有提高应用最低系统版本。使用此模拟器在 Xcode 手动运行时，也需在 Scheme → Run → Arguments 中设置对应运行时路径；这属于模拟器环境设置，不能将此路径写入真机应用。
 
 真机验收需检查：iCloud 导入、iPad 分屏与旋转、后台恢复、无效令牌、失败重试、真实服务器识谱后分别分享 `.mxl` 和 `.mid`、清理服务器任务以及删除本地文件。单元测试不覆盖 OMR 准确率或完整触摸交互。
 
