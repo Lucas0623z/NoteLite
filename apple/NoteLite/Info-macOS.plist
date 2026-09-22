@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>NoteLite</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.music</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>连接你配置的 NoteLite 识谱服务器以上传乐谱并下载结果。</string>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.recordare.musicxml</string>
+            <key>UTTypeDescription</key><string>MusicXML Score</string>
+            <key>UTTypeConformsTo</key><array><string>public.xml</string></array>
+            <key>UTTypeTagSpecification</key><dict>
+                <key>public.filename-extension</key><array><string>musicxml</string></array>
+                <key>public.mime-type</key><string>application/vnd.recordare.musicxml+xml</string>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.recordare.musicxml.compressed</string>
+            <key>UTTypeDescription</key><string>Compressed MusicXML Score</string>
+            <key>UTTypeConformsTo</key><array><string>public.zip-archive</string></array>
+            <key>UTTypeTagSpecification</key><dict>
+                <key>public.filename-extension</key><array><string>mxl</string></array>
+                <key>public.mime-type</key><string>application/vnd.recordare.musicxml</string>
+            </dict>
+        </dict>
+    </array>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>在你开始麦克风练习后聆听演奏，对照乐谱提示音高与节奏。</string>
+</dict>
+</plist>

@@ -1,9 +1,15 @@
 import { build } from 'esbuild';
-import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, copyFile, cp, stat, readFile, writeFile } from 'node:fs/promises';
 const out = '../app/res/practice';
 await mkdir(out, {recursive:true});
-await build({entryPoints:['src/app.js'],bundle:true,minify:true,format:'iife',target:['chrome100','firefox110'],outfile:`${out}/app.js`,legalComments:'linked'});
+await build({entryPoints:['src/app.js'],bundle:true,minify:true,format:'iife',target:['chrome100','firefox110','safari16'],outfile:`${out}/app.js`,legalComments:'linked'});
 for (const name of ['index.html','style.css','demo.musicxml']) await copyFile(`src/${name}`,`${out}/${name}`);
+// Keep asset URLs identical in the desktop browser and the bundled Apple web view.
+try {
+  if ((await stat('src/icons')).isDirectory()) await cp('src/icons', `${out}/icons`, {recursive:true});
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
 const packages = ['opensheetmusicdisplay','pitchy','fflate','vexflow','fft.js','jszip','loglevel','typescript-collections','pako','lie','immediate','readable-stream','safe-buffer','string_decoder','core-util-is','inherits','isarray','process-nextick-args','util-deprecate','setimmediate'];
 let notices = 'NoteLite practice third-party notices\n\n';
 for (const name of packages) {

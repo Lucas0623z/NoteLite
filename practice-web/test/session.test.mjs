@@ -4,6 +4,17 @@ import {PracticeSession,PitchGate} from '../src/session.js';
 
 const group=(onset,pitches,measure='1')=>({onset,mi:Number(measure)-1,measure,beat:onset+1,notes:pitches.map(midi=>({midi,onset,duration:1,part:'P1'}))});
 
+test('pausing freezes tempo grading and shifts the beat clock on resume',()=>{
+  const s=new PracticeSession([group(0,[60]),group(1,[62])],{mode:'tempo',bpm:60});s.begin(1000);s.noteOn(60,1000);s.pause(1200);
+  s.tick(12000);assert.equal(s.noteOn(62,12000),null);assert.equal(s.index,1);assert.equal(s.errors.length,0);
+  s.resume(5200);assert.equal(s.expectedAt(s.current),6000);assert.equal(s.noteOn(62,6000).kind,'correct');assert.equal(s.errors.length,0);
+});
+test('pause preserves a partially played chord and a not-yet-started wait session',()=>{
+  const s=new PracticeSession([group(0,[60,64])]);s.pause(100);s.resume(900);assert.equal(s.startedAt,null);
+  s.noteOn(60,1000);s.pause(1100);s.resume(2000);assert.equal(s.matched.has(60),true);assert.equal(s.noteOn(64,2001).complete,true);
+  s.finish();s.resume(3000);assert.equal(s.active,false);
+});
+
 test('wait mode keeps the cursor on a wrong note and remembers correction location',()=>{
   const s=new PracticeSession([group(0,[60]),group(1,[62])]);
   assert.equal(s.noteOn(61,1000).kind,'wrong');

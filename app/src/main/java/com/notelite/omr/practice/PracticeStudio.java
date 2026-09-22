@@ -110,10 +110,11 @@ public final class PracticeStudio {
                 byte[] bytes;
                 String type;
                 if (file.equals("score.musicxml")) {bytes = scoreSnapshot; type = "application/xml";}
-                else if (assets.containsKey(file)) {
+                else if (assets.containsKey(file) || file.matches("icons/[a-z0-9-]+\\.svg") || file.equals("icons/LICENSE.txt")) {
                     try (var stream = PracticeStudio.class.getResourceAsStream("/res/practice/" + file)) {
                         if (stream == null) {exchange.sendResponseHeaders(404, -1);return;}
-                        bytes = stream.readAllBytes(); type = assets.get(file);
+                        bytes = stream.readAllBytes();
+                        type = assets.getOrDefault(file, file.endsWith(".svg") ? "image/svg+xml" : "text/plain; charset=utf-8");
                     }
                 } else { exchange.sendResponseHeaders(404, -1); return; }
                 exchange.getResponseHeaders().set("Content-Type", type);

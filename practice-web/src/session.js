@@ -4,11 +4,17 @@ export class PracticeSession {
     if(!groups.length)throw new Error('所选范围没有可练习的音符。');
     this.groups=groups;this.mode=mode;this.bpm=bpm;this.toleranceMs=toleranceMs;
     this.index=0;this.matched=new Set();this.results=[];this.errors=[];this.startedAt=null;this.played=[];
-    this.firstOnset=groups[0].onset;this.badGroups=new Set();this.active=true;
+    this.firstOnset=groups[0].onset;this.badGroups=new Set();this.active=true;this.pausedAt=null;
   }
   get current(){return this.groups[this.index];}
   expectedAt(group){return this.startedAt+(group.onset-this.firstOnset)*60000/this.bpm;}
   begin(time){this.startedAt=time;}
+  pause(time){if(this.active){this.active=false;this.pausedAt=time;}}
+  resume(time){
+    if(this.pausedAt===null||!this.current)return;
+    if(this.startedAt!==null)this.startedAt+=Math.max(0,time-this.pausedAt);
+    this.pausedAt=null;this.active=true;
+  }
   tick(time){
     if(!this.active||this.mode!=='tempo'||this.startedAt===null)return;
     while(this.current) {
@@ -56,7 +62,7 @@ export class PracticeSession {
     this.results.push({index:this.index,measure:g.measure,beat:g.beat,correct:this.matched.size,expected:new Set(g.notes.map(n=>n.midi)).size,status:missing?'missing':this.badGroups.has(this.index)?'corrected':'correct'});
     this.index++;this.matched.clear();if(!this.current)this.active=false;
   }
-  finish(){this.active=false;return this.report();}
+  finish(){this.active=false;this.pausedAt=null;return this.report();}
   report(){
     return {mode:this.mode,bpm:this.bpm,completed:this.index,total:this.groups.length,firstTryCorrect:this.results.filter(r=>r.status==='correct').length,errors:this.errors,results:this.results,played:this.played};
   }

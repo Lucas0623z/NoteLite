@@ -90,6 +90,13 @@ final class LibraryStore: ObservableObject {
 
     func sourceURL(_ record: ScoreRecord) -> URL? { storage?.sourceURL(for: record) }
 
+    func practiceURL(_ record: ScoreRecord) -> URL? {
+        if record.isMusicXML { return sourceURL(record) }
+        return record.downloadedArtifacts.sorted().first(where: {
+            FileRules.musicXMLExtensions.contains(($0 as NSString).pathExtension.lowercased())
+        }).flatMap { artifactURL($0, record: record) }
+    }
+
     func artifactURL(_ name: String, record: ScoreRecord) -> URL? {
         guard let url = try? storage?.artifactURL(name: name, for: record),
               FileManager.default.fileExists(atPath: url.path) else { return nil }
@@ -98,6 +105,8 @@ final class LibraryStore: ObservableObject {
 
     func start(_ id: UUID, newJob: Bool = false) {
         guard let storage, let record = record(id), workers[id] == nil else { return }
+        // Structured scores can be practised directly and must not be sent to the image recognizer.
+        guard !record.isMusicXML else { return }
         do {
             // Existing tasks stay attached to their original server and that server's Keychain token.
             let address = !newJob && record.job != nil ? (record.serverURL ?? serverAddress) : serverAddress
