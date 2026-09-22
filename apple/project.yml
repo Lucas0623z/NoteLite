@@ -3,10 +3,10 @@ options:
   minimumXcodeGenVersion: 2.42.0
   deploymentTarget:
     iOS: "16.0"
+    macOS: "13.0"
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
     ENABLE_USER_SCRIPT_SANDBOXING: YES
@@ -15,11 +15,16 @@ targets:
     type: application
     platform: iOS
     sources:
-      - NoteLite
+      - path: NoteLite
+        excludes: ["**/*.plist", "**/*.entitlements"]
+      - path: ../app/res/practice
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mobile
         PRODUCT_NAME: NoteLite
+        TARGETED_DEVICE_FAMILY: "1,2"
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
@@ -28,7 +33,43 @@ targets:
     dependencies:
       - sdk: SwiftUI.framework
       - sdk: QuickLook.framework
+      - sdk: PDFKit.framework
+      - sdk: QuickLookThumbnailing.framework
       - sdk: Security.framework
+      - sdk: WebKit.framework
+      - sdk: CoreMIDI.framework
+      - sdk: AVFoundation.framework
+  NoteLiteMac:
+    type: application
+    platform: macOS
+    productName: NoteLite
+    sources:
+      - path: NoteLite
+        excludes: ["**/*.plist", "**/*.entitlements"]
+      - path: ../app/res/practice
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac
+        PRODUCT_NAME: NoteLite
+        PRODUCT_MODULE_NAME: NoteLite
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: NoteLite/Info-macOS.plist
+        CODE_SIGN_ENTITLEMENTS: NoteLite/NoteLite-macOS.entitlements
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_HARDENED_RUNTIME: YES
+    dependencies:
+      - sdk: SwiftUI.framework
+      - sdk: QuickLook.framework
+      - sdk: PDFKit.framework
+      - sdk: QuickLookThumbnailing.framework
+      - sdk: Security.framework
+      - sdk: WebKit.framework
+      - sdk: CoreMIDI.framework
+      - sdk: AVFoundation.framework
   NoteLiteTests:
     type: bundle.unit-test
     platform: iOS
@@ -40,17 +81,74 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: NoteLite
+  NoteLiteMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - NoteLiteTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/NoteLite.app/Contents/MacOS/NoteLite"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: NoteLiteMac
+  NoteLiteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - NoteLiteUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mobile.uitests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: NoteLite
+  NoteLiteMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - NoteLiteUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: NoteLiteMac
+    dependencies:
+      - target: NoteLiteMac
 schemes:
   NoteLite:
     build:
       targets:
         NoteLite: all
         NoteLiteTests: [test]
+        NoteLiteUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      macroExpansion: NoteLite
+      environmentVariables:
+        NOTELITE_SIM_SWIFT_PATH: "$(NOTELITE_SIM_SWIFT_PATH)"
+        DYLD_FALLBACK_LIBRARY_PATH: "$(NOTELITE_SIM_SWIFT_PATH)"
+      targets:
+        - NoteLiteTests
+        - NoteLiteUITests
+    archive:
+      config: Release
+  NoteLiteMac:
+    build:
+      targets:
+        NoteLiteMac: all
+        NoteLiteMacTests: [test]
+        NoteLiteMacUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - NoteLiteTests
+        - NoteLiteMacTests
+        - NoteLiteMacUITests
     archive:
       config: Release

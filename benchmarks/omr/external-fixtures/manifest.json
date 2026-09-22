@@ -1,0 +1,65 @@
+{
+  "kind": "independent published Mutopia digital PDF editions, not photos; publisher MIDI truth with repeats unexpanded",
+  "fixtures": [
+    {
+      "id": "08_mutopia_minuet",
+      "description": "Petzold Menuet in G BWV Anh. 114; Mutopia ID 75; 32 printed measures; published MIDI, repeats unexpanded; grace note included",
+      "input": "score.pdf",
+      "reference_notes": 204,
+      "source_page": "https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=75",
+      "expanded_reference_notes": 408,
+      "repeat_sections_beats": [
+        [
+          0,
+          48
+        ],
+        [
+          48,
+          96
+        ]
+      ],
+      "repeat_verification": "Minuet: printed bars 1-16 and 17-32, 3/4. Mozart: printed bars 1-28 and 29-73, 4/4; verified from original PDF and LilyPond repeat blocks.",
+      "source_urls": {
+        "source.ly": "https://www.mutopiaproject.org/ftp/BachJS/BWVAnh114/anna-magdalena-04/anna-magdalena-04.ly",
+        "reference.mid": "https://www.mutopiaproject.org/ftp/BachJS/BWVAnh114/anna-magdalena-04/anna-magdalena-04.mid",
+        "score.pdf": "https://www.mutopiaproject.org/ftp/BachJS/BWVAnh114/anna-magdalena-04/anna-magdalena-04-a4.pdf"
+      },
+      "sha256": {
+        "source.ly": "aa6c19e6fecf20753591d739f9e6cf32f3d925fa8a50245c011c8928a1cd1d83",
+        "reference.mid": "fd87a6673e18104047842a1c858d2c9d8eb9ad845d7a8fa46e3664b17642cb75",
+        "score.pdf": "6b34ba44122d9694156a113c749eee0bf3232f54ead431a44be6f2a1b6f32c8b"
+      },
+      "license": "Public Domain (typesetter Allen Garvin)"
+    },
+    {
+      "id": "09_mutopia_mozart",
+      "description": "Mozart Piano Sonata K545 first movement; Mutopia published complete score and MIDI; repeats unexpanded",
+      "input": "score.pdf",
+      "reference_notes": 1289,
+      "source_page": "https://www.ibiblio.org/pub/multimedia/mutopia/MozartWA/KV545/K545-1/",
+      "expanded_reference_notes": 2578,
+      "repeat_sections_beats": [
+        [
+          0,
+          112
+        ],
+        [
+          112,
+          292
+        ]
+      ],
+      "repeat_verification": "Minuet: printed bars 1-16 and 17-32, 3/4. Mozart: printed bars 1-28 and 29-73, 4/4; verified from original PDF and LilyPond repeat blocks.",
+      "source_urls": {
+        "source.ly": "https://www.ibiblio.org/pub/multimedia/mutopia/MozartWA/KV545/K545-1/K545-1.ly",
+        "reference.mid": "https://www.ibiblio.org/pub/multimedia/mutopia/MozartWA/KV545/K545-1/K545-1.mid",
+        "score.pdf": "https://www.ibiblio.org/pub/multimedia/mutopia/MozartWA/KV545/K545-1/K545-1-a4.pdf"
+      },
+      "sha256": {
+        "source.ly": "9ac4f91a638076ae6cb77a77e294046fac3e68327f41a4af53af745e5af95c4e",
+        "reference.mid": "66f789fc1d6265beef960729e60bea6ed32310aa0440bc4094373b292a0c0c8d",
+        "score.pdf": "27ac5ca765a5bd9f47a75eeb29f64c83d4a8500edaf24eaf0eb9432971272f6d"
+      },
+      "license": "Creative Commons Attribution-ShareAlike 3.0 Unported; typesetter Alejandro Sierra, copyright 2007; https://creativecommons.org/licenses/by-sa/3.0/"
+    }
+  ]
+}

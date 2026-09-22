@@ -39,8 +39,9 @@ final class DocumentStorage: @unchecked Sendable {
         let ext = url.pathExtension.lowercased()
         guard FileRules.supportedExtensions.contains(ext) else { throw NoteLiteError.invalidFile }
         try FileRules.validateFilename(url.lastPathComponent)
-        let record = ScoreRecord(id: UUID(), filename: url.lastPathComponent,
+        var record = ScoreRecord(id: UUID(), filename: url.lastPathComponent,
                                  sourceName: "source.\(ext)", importedAt: Date())
+        if record.isMusicXML { record.phase = .ready }
         let folder = directory(for: record.id)
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
         do {

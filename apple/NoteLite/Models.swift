@@ -45,6 +45,8 @@ struct ScoreRecord: Identifiable, Codable, Equatable {
     var lastError: String?
     var paused = false
 
+    var isMusicXML: Bool { FileRules.musicXMLExtensions.contains((sourceName as NSString).pathExtension.lowercased()) }
+
     mutating func prepareForUpload(serverURL: String) {
         job = nil
         downloadedArtifacts = []
@@ -99,7 +101,7 @@ enum NoteLiteError: LocalizedError {
         case .invalidServer:
             return "请输入 HTTPS 服务器地址，例如 https://scores.example.com，不要包含路径、用户名或查询参数。"
         case .missingToken: return "请先在服务器设置中保存访问令牌。"
-        case .invalidFile: return "只支持 PDF、PNG、JPEG 和 TIFF 乐谱文件。"
+        case .invalidFile: return "请导入 PDF、乐谱图片或 MusicXML（XML / MXL）文件。"
         case .fileTooLarge: return "单个文件不能超过 25 MiB。"
         case .unsafeArtifact: return "服务器返回了不安全的结果文件名。"
         case .invalidResponse: return "服务器返回的数据格式不正确。"
@@ -111,7 +113,8 @@ enum NoteLiteError: LocalizedError {
 
 enum FileRules {
     static let maximumUploadBytes = 25 * 1024 * 1024
-    static let supportedExtensions: Set<String> = ["pdf", "png", "jpg", "jpeg", "tif", "tiff"]
+    static let musicXMLExtensions: Set<String> = ["xml", "musicxml", "mxl"]
+    static let supportedExtensions: Set<String> = Set(["pdf", "png", "jpg", "jpeg", "tif", "tiff"]).union(musicXMLExtensions)
 
     static func validateFilename(_ filename: String) throws {
         guard filename != ".", filename != "..", !filename.isEmpty,

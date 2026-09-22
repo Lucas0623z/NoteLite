@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light"><title>NoteLite · 练习</title>
+  <link rel="stylesheet" href="style.css"><script defer src="app.js"></script>
+</head>
+<body data-view="practice" data-phase="idle">
+<header class="appbar">
+  <button id="back" class="quiet back"><img src="icons/chevron-left.svg" alt=""><span>曲谱</span></button>
+  <div class="window-title"><strong id="window-title">NoteLite</strong><span id="window-composer"></span></div>
+  <div class="toolbar-actions">
+    <button id="listen" class="icon-button" title="试听所选段落" aria-label="试听所选段落"><img src="icons/volume-2.svg" alt=""></button>
+    <button id="settings-open" class="icon-button" title="练习设置" aria-label="练习设置"><img src="icons/sliders-horizontal.svg" alt=""></button>
+    <button id="more-open" class="icon-button" title="更多操作" aria-label="更多操作"><img src="icons/ellipsis.svg" alt=""></button>
+  </div>
+</header>
+<main class="workspace">
+  <aside class="sidebar" aria-label="练习导航">
+    <p class="sidebar-label">正在练习</p>
+    <button id="practice-nav" class="navigation selected"><img src="icons/file-music.svg" alt=""><span id="sidebar-title">当前曲谱</span></button>
+    <button id="review-nav" class="navigation"><img src="icons/clock.svg" alt=""><span>本次记录</span></button>
+    <div class="sidebar-bottom"><span class="connection-dot"></span><span class="connection-text">尚未连接</span></div>
+  </aside>
+  <section class="practice-view" aria-label="乐谱练习">
+    <div class="score-toolbar">
+      <button id="instrument-open" class="quiet instrument-button"><span id="instrument-summary">载入乐谱后选择乐器</span><img src="icons/chevron-down.svg" alt=""></button>
+      <span class="mobile-connection"><span class="connection-dot"></span><span class="connection-text">尚未连接</span></span>
+      <button id="range-open" class="quiet range-button"><span id="range-label">小节范围</span><img src="icons/repeat-2.svg" alt=""></button>
+    </div>
+    <div class="sheet-scroll" id="sheet-scroll">
+      <article class="paper">
+        <div class="paper-heading"><h1 id="title">正在载入乐谱</h1><p id="composer"></p></div>
+        <div id="score" aria-label="当前乐谱"></div>
+        <div class="paper-footer"><span id="sheet-length"></span></div>
+      </article>
+    </div>
+    <div class="practice-message" id="message" role="status" aria-live="polite">正在准备乐谱…</div>
+    <div id="next" class="next">载入乐谱后开始练习</div>
+    <button id="mobile-review" class="mobile-review quiet"><span id="mobile-error-summary">练习后查看记录</span><span>查看<img src="icons/chevron-right.svg" alt=""></span></button>
+  </section>
+  <aside class="inspector" aria-label="本次练习反馈">
+    <h2>本次练习</h2><p id="position" class="position">尚未开始</p>
+    <progress id="progress" value="0" max="1" aria-label="已完成起音位置"></progress>
+    <div class="session-facts"><span>首次弹对 <strong id="correct">—</strong></span><span>听到 <strong id="heard">—</strong></span></div>
+    <div class="inspector-section"><h3>需要再练的地方 <span id="errors">0</span></h3><div id="error-list"><p class="empty">演奏后，这里会显示需要复习的小节。</p></div></div>
+    <div class="inspector-bottom"><img src="icons/headphones.svg" alt=""><span class="connection-text">尚未连接</span></div>
+  </aside>
+  <section id="review-view" class="review-view" aria-label="本次练习回顾" hidden>
+    <div class="review-toolbar"><button id="review-back" class="quiet"><img src="icons/chevron-left.svg" alt="">返回乐谱</button><button id="report" class="icon-button" aria-label="保存练习记录" title="保存练习记录"><img src="icons/upload.svg" alt=""></button></div>
+    <h1>本次练习</h1><h2 id="review-title">尚无练习记录</h2><p id="review-date"></p>
+    <div class="review-stats"><div><strong id="review-measures">0</strong><span>已练小节</span></div><div><strong id="review-errors">0</strong><span>需要重练</span></div><div><strong id="review-correct">—</strong><span>首次弹对</span></div></div>
+    <h2 id="review-heading">练习后再来看看</h2><div id="review-error-list"></div><p id="review-note" class="hint">只记录实际演奏，未完成的音符不会算作弹对。</p>
+    <button id="retry" class="primary review-retry" disabled><img src="icons/repeat-2.svg" alt=""><span>再次练习</span></button>
+  </section>
+</main>
+<footer class="transport">
+  <button id="mode-open" class="quiet transport-mode"><span id="mode-label">等我弹对</span><img src="icons/chevron-down.svg" alt=""></button>
+  <div class="transport-actions"><button id="start" class="primary"><img id="start-icon" src="icons/play.svg" alt=""><span id="start-label">开始练习</span></button><button id="stop" disabled>结束</button><button id="skip" class="quiet skip" disabled>跳过</button></div>
+  <button id="tempo-open" class="quiet transport-tempo"><img src="icons/metronome.svg" alt=""><span id="tempo-label">100 BPM</span></button>
+  <span id="transport-range" class="transport-range"></span>
+</footer>
+<dialog id="settings" class="settings-sheet" aria-labelledby="settings-title">
+  <div class="sheet-handle"></div><div class="dialog-heading"><h2 id="settings-title">练习设置</h2><button id="settings-close" class="quiet">完成</button></div>
+  <div class="settings-content">
+    <section class="settings-section"><h3>乐器与输入</h3><div id="instrument" class="instrument"></div><p id="instrument-source" class="hint"></p>
+      <label class="setting-row"><span>乐器</span><select id="instrument-choice"><option value="auto">按谱面自动判断</option><option value="piano">钢琴 / 键盘</option><option value="guitar">吉他 / 弹拨乐</option><option value="strings">提琴</option><option value="winds">管乐</option><option value="voice">人声</option><option value="other">其他有固定音高乐器</option></select></label>
+      <label class="setting-row"><span>练习声部</span><select id="part"></select></label>
+      <label class="setting-row"><span>演奏输入</span><select id="input"><option value="microphone">麦克风 · 单音旋律</option><option value="midi">MIDI 乐器 · 支持和弦</option><option value="keyboard">电脑键盘 · 演示</option></select></label>
+      <select id="midi-device" aria-label="MIDI 输入设备" hidden></select><p id="input-hint" class="hint"></p>
+    </section>
+    <section class="settings-section"><h3>练习方式</h3>
+      <label class="setting-row"><span>模式</span><select id="mode"><option value="wait">等我弹对</option><option value="tempo">跟随节拍</option></select></label>
+      <div class="setting-pair"><label>速度 BPM<input id="bpm" type="number" min="30" max="240" value="100" inputmode="numeric"></label><label>调音 A4 · Hz<input id="a4" type="number" min="415" max="466" value="440" inputmode="numeric"></label></div>
+      <div class="setting-pair"><label>起始小节序号<input id="from" type="number" min="1" value="1" inputmode="numeric"></label><label>结束小节序号<input id="to" type="number" min="1" value="1" inputmode="numeric"></label></div>
+    </section>
+    <section class="settings-section verification"><h3>开始前确认</h3><button id="settings-listen" class="quiet"><img src="icons/volume-2.svg" alt="">试听所选段落</button><label class="check"><input type="checkbox" id="verified"><span>我已试听或校对乐谱</span></label><p class="hint">确认音符和节奏无误后再开始，避免把识谱错误算作演奏错误。</p><p id="settings-message" class="hint" role="status"></p></section>
+  </div>
+</dialog>
+<dialog id="more" class="more-sheet" aria-labelledby="more-title"><div class="dialog-heading"><h2 id="more-title">曲谱与帮助</h2><button id="more-close" class="quiet">完成</button></div><div class="menu-actions"><button id="import"><img src="icons/file-up.svg" alt="">导入 MusicXML 乐谱</button><button id="demo"><img src="icons/music.svg" alt="">载入演示曲谱</button></div><input id="file" type="file" accept=".xml,.musicxml,.mxl" hidden>
+  <details class="capabilities"><summary>识别范围与隐私</summary><p>麦克风适合独奏单音。和弦请使用 MIDI 乐器；无固定音高的打击乐暂不支持音高评分。持续同音需要短暂断开后重新起音。</p><p>练习反馈包含音高、漏音和起音节奏，不评价触键、踏板、音色或时值。乐器根据谱面标注推断，可在设置中调整。</p><p>音频只在本机处理，不保存原始录音。谱面按书写顺序练习，暂不展开反复和跳转。</p><p>渲染与单音检测采用 OpenSheetMusicDisplay、Pitchy。<a href="THIRD-PARTY.txt" target="_blank" rel="noreferrer">开源组件与许可证</a></p></details>
+</dialog>
+</body></html>

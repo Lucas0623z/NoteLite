@@ -1,0 +1,24 @@
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+[Error] Adding 'beam' to a 'chord'
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+[Error] Adding 'beam' to a 'chord'
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+[Error] Adding 'beam' to a 'chord'
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+[Error] Adding 'beam' to a 'chord'
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+[Error] Adding 'beam' to a 'chord'
+[Error] Adding 'beam' to a 'chord'
+[Error] Adding 'beam' to a 'chord'
+[Error] MusicXML import: Chord starting point has not been found
+08_mutopia_minuet {"reference_notes": 408, "predicted_notes": 406, "pitch_onset": {"tp": 406, "fp": 0, "fn": 2, "precision": 1.0, "recall": 0.9950980392156863, "f1": 0.9975429975429976}, "pitch_onset_offset": {"tp": 404, "fp": 2, "fn": 4, "precision": 0.9950738916256158, "recall": 0.9901960784313726, "f1": 0.9926289926289926}, "pitch_inventory_diagnostic": {"tp": 406, "fp": 0, "fn": 2, "precision": 1.0, "recall": 0.9950980392156863, "f1": 0.9975429975429976}}
+09_mutopia_mozart {"reference_notes": 2578, "predicted_notes": 2426, "pitch_onset": {"tp": 362, "fp": 2064, "fn": 2216, "precision": 0.14921681780708987, "recall": 0.1404189294026377, "f1": 0.14468425259792167}, "pitch_onset_offset": {"tp": 348, "fp": 2078, "fn": 2230, "precision": 0.1434460016488046, "recall": 0.13498836307214895, "f1": 0.13908872901678657}, "pitch_inventory_diagnostic": {"tp": 2324, "fp": 102, "fn": 254, "precision": 0.9579554822753503, "recall": 0.9014740108611327, "f1": 0.9288569144684252}}

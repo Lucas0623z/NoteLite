@@ -1,0 +1,10 @@
+# Preserve evidence bytes so the recorded hashes survive checkout on all platforms.
+benchmarks/midi/results/** -text -whitespace linguist-generated=true
+benchmarks/omr/results/** -text -whitespace linguist-generated=true
+benchmarks/omr/fixtures/** -text -whitespace linguist-generated=true
+benchmarks/omr/external-fixtures/** -text -whitespace linguist-vendored=true
+# Browser runtime is reproducibly generated from practice-web/.
+app/res/practice/app.js* -text linguist-generated=true
+app/res/practice/THIRD-PARTY.txt -text -whitespace linguist-generated=true
+app/dev/scripts/PracticeStudio text eol=lf
+app/dev/scripts/PracticeStudio.bat text eol=crlf

@@ -1,0 +1,169 @@
+{
+  "id": "02_accidentals",
+  "description": "6 measures, sharp and flat accidentals, chromatic notes",
+  "parts": [
+    {
+      "clefs": [
+        "G"
+      ],
+      "measures": [
+        [
+          [
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "C#4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D#4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "E4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F#4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "G#4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "A4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "Bb4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "B4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "C5"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "Bb4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "Ab4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "G4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "Gb4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "F4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "Eb4"
+              ],
+              "duration": "1"
+            },
+            {
+              "pitches": [
+                "D4"
+              ],
+              "duration": "1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "pitches": [
+                "Db4"
+              ],
+              "duration": "2"
+            },
+            {
+              "pitches": [
+                "C4"
+              ],
+              "duration": "2"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}
