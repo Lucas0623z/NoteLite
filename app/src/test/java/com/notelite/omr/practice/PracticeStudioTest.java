@@ -36,6 +36,10 @@ public class PracticeStudioTest
             assertEquals(200, get(client, uri.resolve("app.js")).statusCode());
             assertEquals(200, get(client, uri.resolve("style.css")).statusCode());
             assertEquals(200, get(client, uri.resolve("demo.musicxml")).statusCode());
+            var icon = get(client, uri.resolve("icons/play.svg"));
+            assertEquals(200, icon.statusCode());
+            assertEquals("image/svg+xml", icon.headers().firstValue("Content-Type").orElse(""));
+            assertTrue(icon.body().contains("<svg"));
         }
     }
 
@@ -46,6 +50,7 @@ public class PracticeStudioTest
             assertEquals(404, get(client, URI.create(uri + "../score.musicxml")).statusCode());
             assertEquals(404, get(client, URI.create(uri + "%2e%2e%2fscore.musicxml")).statusCode());
             assertEquals(404, get(client, uri.resolve("missing.txt")).statusCode());
+            assertEquals(404, get(client, URI.create(uri + "icons/%2e%2e%2fscore.musicxml")).statusCode());
             var post = HttpRequest.newBuilder(uri.resolve("score.musicxml")).POST(HttpRequest.BodyPublishers.ofString("mutate")).build();
             assertEquals(405, client.send(post, HttpResponse.BodyHandlers.ofString()).statusCode());
             assertEquals("<score/>", get(client, uri.resolve("score.musicxml")).body());

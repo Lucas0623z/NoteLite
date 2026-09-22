@@ -1,11 +1,14 @@
-# NoteLite for iPhone / iPad
+# NoteLite for iPhone / iPad / Mac
 
-原生 SwiftUI 客户端，最低支持 **iOS 16 / iPadOS 16**，同一个应用同时覆盖 iPhone 与 iPad。识谱继续使用仓库现有的 Java 引擎，通过 [桥接服务](../bridge/README.md) 调用。macOS 桌面端仍使用现有 NoteLite Java 应用，参见 [macOS 打包说明](../packaging/README.md)。
+原生 SwiftUI 客户端，最低支持 **iOS 16 / iPadOS 16 / macOS 13**。界面采用 [NoteLite Figma 设计](https://www.figma.com/design/auKshwj0bSnA6UxzLpcqlN?node-id=22-4648)，分别使用手机导航、平板分栏和 Mac 工作区。识谱继续通过 [桥接服务](../bridge/README.md) 调用 Java 引擎；原有 Java 桌面校谱工具继续可用。
+
+练习页以本地 WKWebView 复用 NoteLite 的谱面排版和逐音评分，不需要联网加载脚本。MIDI 通过 CoreMIDI 输入，麦克风通过 AVAudioEngine 输入并在本机做 Pitchy 单音检测。麦克风不能可靠判断和弦或合奏；不评价踏板、音色或触键。原生硬件输入仍需要使用真实乐器做设备验收。
 
 ## 已实现
 
 - iPhone 单栏导航；iPad 自适应侧栏与详情，支持旋转、分屏和可调整窗口、动态字体。
-- 从“文件”导入 PDF / PNG / JPEG / TIFF，单文件上限 25 MiB。离开 Files 提供者前复制到应用自己的存储，原稿和列表重启后仍在；iCloud 文件协调与复制在后台线程进行。
+- 从“文件”导入 PDF / PNG / JPEG / TIFF / MusicXML / MXL，单文件上限 25 MiB（进入陪练时上限 15 MB）。MusicXML 可以直接练习；扫描谱完成识别后，打开下载的 MusicXML 练习。原稿复制到应用自己的存储，列表重启后仍在；文件协调与复制在后台线程进行。
+- 练习支持谱面乐器推断、手动调整、声部/小节选择、试听、校对确认、暂停继续、错音定位与重练。结束后的回顾保存在本机，最多保留 500 次，不包含录音。
 - Quick Look 预览原稿、系统分享原稿；不要求连接服务器。
 - HTTPS 服务器设置，按服务器分别把 bearer token 存入 Keychain。健康检查不验证令牌；正式请求会显示认证错误。不关闭 ATS，不跟随 HTTP 重定向。
 - 真正的文件上传和上传进度、服务端任务状态轮询、失败重试、下载 MusicXML / MIDI / 引擎其他结果，通过系统分享菜单保存到“文件”或发送其他应用。
@@ -19,7 +22,7 @@
 
 **编译、模拟器运行及签名 iPhone / iPad 应用，需要 Mac 上的完整 Xcode 和 iOS SDK。** Windows 可以编辑代码和运行桥接服务；安装 Windows Swift 编译器不能获得 iOS SDK，也不能代替 Xcode 完成 iOS 构建。仓库 CI 使用 GitHub 的 macOS runner 构建并运行模拟器单元测试。
 
-macOS Java 桌面版不需要重写为 Swift，主要构建依赖仍是 JDK 21 和 Gradle；打包、签名等要求看桌面打包说明。
+原生 Mac 客户端选择 `NoteLiteMac` scheme。原有 Java 桌面编辑器构建依赖仍是 JDK 21 和 Gradle，参见桌面打包说明。
 
 ## 在 Mac 上运行
 
@@ -28,12 +31,16 @@ macOS Java 桌面版不需要重写为 Swift，主要构建依赖仍是 JDK 21 �
 
 ```sh
 brew install xcodegen
+cd practice-web
+npm ci
+npm run build
+cd ..
 cd apple
 xcodegen generate --spec project.yml
 open NoteLite.xcodeproj
 ```
 
-工程来自 `project.yml`，生成的 `.xcodeproj` 不纳入版本控制。选中 `NoteLite` scheme 和 iPhone / iPad 模拟器即可运行，不需要配置签名。真机运行时在 Signing & Capabilities 中选择自己的 Team，并按需要修改唯一的 Bundle Identifier。对外分发还需要签名配置、应用图标、隐私声明和发布资料；本改动不包含已签名安装包或商店发布。
+工程来自 `project.yml`，生成的 `.xcodeproj` 不纳入版本控制。`NoteLite` scheme 用于 iPhone / iPad；`NoteLiteMac` 用于原生 Mac。练习资源从 `app/res/practice` 打包，所以应先运行上面的网页资源构建。真机运行时在 Signing & Capabilities 中选择自己的 Team。对外分发还需要签名配置、应用图标、隐私声明和发布资料；本改动不包含已签名安装包或商店发布。
 
 3. 按 [桥接服务说明](../bridge/README.md) 在电脑或服务器启动真实引擎，并配置手机可访问、证书受信任的 HTTPS 入口。应用内保存该地址和同一个访问令牌，再导入原稿并点“开始识别”。`localhost` 在手机上指手机本身。
 
