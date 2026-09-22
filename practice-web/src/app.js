@@ -3,6 +3,7 @@ import {PitchDetector} from 'pitchy';
 import {unzipSync,strFromU8} from 'fflate';
 import {parseScore,selectGroups,inferInstrument,isPolyphonic,noteName} from './score.js';
 import {PracticeSession,PitchGate} from './session.js';
+import {collectScoreNotes,colorScoreGroup,resetScoreColors} from './score-colors.js';
 
 const $=id=>document.getElementById(id);
 const osmd=new OSMD.OpenSheetMusicDisplay('score',{autoResize:true,backend:'svg',drawTitle:false,drawComposer:false,drawPartNames:true,followCursor:true});
@@ -14,15 +15,19 @@ function guard(fn){return (...args)=>Promise.resolve().then(()=>fn(...args)).cat
 function currentOptions(){return {part:$('part').value,from:Number($('from').value),to:Number($('to').value)};}
 function selection(){const o=currentOptions();if(!Number.isInteger(o.from)||!Number.isInteger(o.to)||o.from<1||o.to<o.from||o.to>score.lengths.length)throw new Error('请设置有效的小节范围。');return selectGroups(score,o.part,o.from,o.to);}
 function selectedParts(){return score.parts.filter(p=>$('part').value==='all'||p.id===$('part').value);}
+function inputHint(){
+  const input=$('input').value,poly=isPolyphonic(groups);
+  $('midi-device').hidden=input!=='midi';
+  $('input-hint').textContent=input==='keyboard'?'电脑键盘仅用于演示：A S D F G H J 为 C4 至 B4，K 为 C5。':input==='midi'?'连接 USB MIDI 乐器，开始后选择对应设备。支持同时演奏和弦。':poly?'所选声部含和弦或重叠音。请用 MIDI 乐器，或改选单音声部。':'麦克风可检测独奏单音。远离伴奏音源，并用耳机试听。';
+}
 function configure(){
   if(!score)return;groups=selection();
   const parts=selectedParts(),info=parts.map(inferInstrument),poly=isPolyphonic(groups);
   $('instrument').textContent=info.map(i=>i.name).join(' + ')+(poly?' · 多音声部':' · 单音旋律');
   $('instrument').title=info.map(i=>i.source).join('；');
   if($('instrument-choice').value!=='auto')$('instrument').textContent=$('instrument-choice').selectedOptions[0].textContent+' · 手动选择'+(poly?' · 多音声部':' · 单音旋律');
-  $('input-hint').textContent=poly?'所选声部含和弦或重叠音。请用 MIDI 乐器，或改选单音声部。':'麦克风可检测独奏单音。远离伴奏音源，并用耳机试听。';
   if($('instrument-choice').value==='auto')$('input').value=poly||info.some(i=>i.input==='midi')?'midi':'microphone';
-  $('midi-device').hidden=$('input').value!=='midi';
+  inputHint();
   $('next').textContent=groups.length?`共 ${groups.length} 个起音位置 · ${poly?'支持 MIDI 多音练习':'可用麦克风单音练习'}`:'此声部没有可练习音符。';
 }
 async function load(xml){
@@ -33,22 +38,16 @@ async function load(xml){
   $('part').replaceChildren(...score.parts.map(p=>new Option(p.name,p.id)));
   if(score.parts.length>1)$('part').add(new Option('全部声部','all'));
   $('part').value=score.parts[0]?.id||'';
-  graphics=[];osmd.cursor.reset();let count=0;
-  while(!osmd.cursor.Iterator.EndReached&&count++<50000){
-    const onset=osmd.cursor.Iterator.CurrentSourceTimestamp.RealValue*4;
-    for(const g of osmd.cursor.GNotesUnderCursor())graphics.push({onset,part:g.sourceNote.ParentStaff.ParentInstrument.IdString,g});
-    osmd.cursor.next();
-  }
+  graphics=collectScoreNotes(osmd);
   osmd.cursor.reset();osmd.cursor.hide();session=null;configure();renderReport();
   $('position').textContent='—';$('correct').textContent='—';$('errors').textContent='0 处';$('heard').textContent='—';
   message(score.warnings.length?score.warnings.join(' '):'已载入乐谱。先试听并确认识谱结果，再连接乐器开始。',score.warnings.length?'warning':'');
 }
 function cursorAt(group){if(!group)return;osmd.cursor.reset();let i=0;while(!osmd.cursor.Iterator.EndReached&&osmd.cursor.Iterator.CurrentSourceTimestamp.RealValue*4<group.onset-0.00001&&i++<50000)osmd.cursor.next();osmd.cursor.show();}
 function colorGroup(group,color){
-  const parts=new Set(group.notes.map(n=>n.part));
-  for(const entry of graphics)if(Math.abs(entry.onset-group.onset)<1e-5&&parts.has(entry.part))entry.g.setColor(color,{applyToNoteheads:true,applyToStem:true,applyToBeams:false,applyToModifiers:false});
+  colorScoreGroup(osmd,graphics,group,color);
 }
-function resetColors(){for(const {g}of graphics)g.setColor('#202733',{applyToNoteheads:true,applyToStem:true,applyToBeams:false,applyToModifiers:false});}
+function resetColors(){resetScoreColors(osmd,graphics);}
 function update(){
   if(!session)return;
   $('correct').textContent=`${session.results.filter(r=>r.status==='correct').length} / ${session.groups.length}`;
@@ -66,7 +65,7 @@ function receive(midi,time=performance.now(),cents=0){
   const result=session?.noteOn(midi,time,cents);
   if(!result)return;
   if(result.kind==='wrong'||result.kind==='extra'){colorGroup(result.group,'#c04f50');message(`第 ${result.group.measure} 小节：听到 ${noteName(midi)}，应弹 ${result.group.notes.map(n=>noteName(n.midi)).join(' + ')}。`,'warning');}
-  else if(result.kind==='correct'){colorGroup(result.group,'#258465');message(result.complete?'这个位置已弹对，继续下一音。':'音高正确，请继续弹齐和弦。');}
+  else if(result.kind==='correct'){colorGroup(result.group,'#258465');message(!session.active?'本段练习完成，下面是这次需要复习的位置。':result.complete?'这个位置已弹对，继续下一音。':'音高正确，请继续弹齐和弦。');}
   update();
 }
 async function context(){audioContext??=new AudioContext();if(audioContext.state==='suspended')await audioContext.resume();return audioContext;}
@@ -147,8 +146,14 @@ function stop(completed=false){
   stopPlayback();
   micStream?.getTracks().forEach(t=>t.stop());micStream=null;micAnalyser=null;
   if(selectedMidi){selectedMidi.onmidimessage=null;selectedMidi=null;}
-  if(session){session.finish();renderReport();}
-  lock(false);if(completed)message('本段练习完成，下面是这次需要复习的位置。');
+  if(session){
+    session.finish();renderReport();osmd.cursor.hide();
+    $('position').textContent=completed?'完成':'已停止';
+    $('next').textContent=completed?'本段已完成。可以从下面的记录重练难点。':'练习已停止，记录已保留。点击“开始练习”重新练习所选段落。';
+  }
+  lock(false);
+  if(completed)message('本段练习完成，下面是这次需要复习的位置。');
+  else if(session)message('练习已停止，本次记录已保留。');
 }
 function tone(ctx,midiOrHz,delay,duration,volume=.08,isMidi=false){
   const osc=ctx.createOscillator(),gain=ctx.createGain(),time=ctx.currentTime+delay;
@@ -202,7 +207,7 @@ function readBytes(bytes){
 $('import').onclick=()=>$('file').click();$('file').onchange=guard(async()=>{const f=$('file').files[0];if(f)await load(await readFile(f));$('file').value='';});
 $('demo').onclick=guard(async()=>load(await (await fetch('demo.musicxml')).text()));
 for(const id of ['part','from','to'])$(id).onchange=guard(configure);
-$('input').onchange=()=>{$('midi-device').hidden=$('input').value!=='midi';};
+$('input').onchange=inputHint;
 $('instrument-choice').onchange=guard(()=>{configure();if($('instrument-choice').value!=='auto')$('input').value=$('instrument-choice').value==='piano'?'midi':'microphone';$('input').onchange();});
 $('midi-device').onchange=selectMidi;$('start').onclick=guard(start);$('stop').onclick=()=>stop();$('skip').onclick=()=>{session?.advance(true);update();};$('listen').onclick=guard(listen);$('report').onclick=guard(downloadReport);
 const keyMap={a:60,s:62,d:64,f:65,g:67,h:69,j:71,k:72,w:61,e:63,t:66,y:68,u:70};
