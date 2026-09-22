@@ -36,6 +36,7 @@ final class NoteLiteUITests: XCTestCase {
             }, object: app)
             XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 10), .completed,
                            "The iPad practice screen must rotate before capture")
+            waitForStableLandscapeLayout(app)
             assertPracticeControlsVisible(app)
             attach(app, name: "Practice-landscape")
             XCUIDevice.shared.orientation = .portrait
@@ -68,9 +69,42 @@ final class NoteLiteUITests: XCTestCase {
         #endif
     }
 
+    #if os(iOS)
+    @MainActor
+    private func waitForStableLandscapeLayout(_ app: XCUIApplication) {
+        var previousWindow = CGRect.null
+        var previousWebView = CGRect.null
+        var stableSamples = 0
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let window = app.windows.firstMatch.frame
+            let webView = app.webViews.firstMatch.frame
+            guard window.width > window.height, webView.width > webView.height,
+                  window.contains(webView) else {
+                stableSamples = 0
+                return false
+            }
+            if window == previousWindow && webView == previousWebView {
+                stableSamples += 1
+            } else {
+                previousWindow = window
+                previousWebView = webView
+                stableSamples = 0
+            }
+            return stableSamples >= 2
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed,
+                       "The rotated window and score renderer must finish resizing before capture")
+    }
+    #endif
+
     @MainActor
     private func attach(_ app: XCUIApplication, name: String) {
+        #if os(iOS)
+        // Capture the whole display; app-frame cropping can be wrong after device rotation.
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        #else
         let attachment = XCTAttachment(screenshot: app.screenshot())
+        #endif
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
