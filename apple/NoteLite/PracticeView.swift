@@ -31,6 +31,7 @@ struct PracticeView: View {
                     Button { controller.close { dismiss() } } label: {
                         Label("曲谱", systemImage: "chevron.left")
                     }
+                    .accessibilityIdentifier("practice-close")
                 }
             }
             #if os(iOS)

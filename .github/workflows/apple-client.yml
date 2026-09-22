@@ -96,18 +96,6 @@ jobs:
           xcodebuild test -project NoteLite.xcodeproj -scheme NoteLiteMac \
             -destination 'platform=macOS' -parallel-testing-enabled NO \
             -resultBundlePath TestResults-macOS.xcresult CODE_SIGNING_ALLOWED=NO
-      - name: Test on iPhone simulator
-        timeout-minutes: 10
-        if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_ios.outcome == 'success' }}
-        working-directory: apple
-        shell: bash
-        run: bash scripts/run-simulator-tests.sh iPhone
-      - name: Test on iPad simulator
-        timeout-minutes: 10
-        if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_ios.outcome == 'success' }}
-        working-directory: apple
-        shell: bash
-        run: bash scripts/run-simulator-tests.sh iPad
       - name: Export native interface screenshots
         if: always()
         working-directory: apple
@@ -128,6 +116,53 @@ jobs:
         if: always()
         with:
           name: apple-client-test-results
+          path: |
+            apple/TestResults-*.xcresult
+            apple/Screenshots/
+          if-no-files-found: ignore
+
+  simulator-clients:
+    name: ${{ matrix.family }} interface
+    runs-on: macos-15
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [iPhone, iPad]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: practice-web/package-lock.json
+      - name: Build bundled practice view
+        working-directory: practice-web
+        run: |
+          npm ci
+          npm run build
+      - name: Generate Xcode project
+        working-directory: apple
+        run: |
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate --spec project.yml
+      - name: Test native interface and model
+        timeout-minutes: 10
+        working-directory: apple
+        run: bash scripts/run-simulator-tests.sh '${{ matrix.family }}'
+      - name: Export native interface screenshots
+        if: always()
+        working-directory: apple
+        run: |
+          result='TestResults-${{ matrix.family }}.xcresult'
+          if [ -d "$result" ]; then
+            xcrun xcresulttool export attachments --path "$result" --output-path 'Screenshots/TestResults-${{ matrix.family }}'
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apple-client-test-results-${{ matrix.family }}
           path: |
             apple/TestResults-*.xcresult
             apple/Screenshots/
