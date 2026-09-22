@@ -128,6 +128,10 @@ schemes:
       config: Debug
     test:
       config: Debug
+      macroExpansion: NoteLite
+      environmentVariables:
+        NOTELITE_SIM_SWIFT_PATH: "$(NOTELITE_SIM_SWIFT_PATH)"
+        DYLD_FALLBACK_LIBRARY_PATH: "$(NOTELITE_SIM_SWIFT_PATH)"
       targets:
         - NoteLiteTests
         - NoteLiteUITests
