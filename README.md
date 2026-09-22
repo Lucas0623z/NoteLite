@@ -1,366 +1,129 @@
-# NoteLite
-
 <div align="center">
 
-**An OMR-based platform for lightweight score structuring, error detection, and music-education evaluation**
+# NoteLite
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v5.11.0-brightgreen.svg)](https://github.com/Lucas0623z/NoteLite/releases/latest)
-[![Status](https://img.shields.io/badge/status-In%20Development-yellow.svg)]()
-[![GitHub](https://img.shields.io/badge/GitHub-Lucas0623z-blue?logo=github)](https://github.com/Lucas0623z)
+**把纸上的乐谱，变成可以校对、试听和练习的乐谱。**
 
-[Features](#features) • [Architecture](#architecture) • [Installation](#installation) • [Roadmap](#roadmap) • [Contact](#contact)
+识谱与校谱 · MusicXML / MIDI 导出 · 跟谱陪练
+
+[![Release](https://img.shields.io/github/v/release/Lucas0623z/NoteLite?label=release&color=2563eb)](https://github.com/Lucas0623z/NoteLite/releases)
+[![Java](https://img.shields.io/badge/Java-21-64748b)](#从源码运行)
+[![Apple](https://img.shields.io/badge/iOS%20%2F%20iPadOS-16%2B-64748b)](apple/README.md)
+[![macOS](https://img.shields.io/badge/macOS%20native-13%2B-64748b)](apple/README.md)
+
+[下载](https://github.com/Lucas0623z/NoteLite/releases) · [快速开始](#快速开始) · [Apple 客户端](apple/README.md) · [问题反馈](https://github.com/Lucas0623z/NoteLite/issues)
 
 </div>
 
-## Apple platforms / 苹果端
-
-- **macOS desktop:** the full Java editor, with modern macOS menu/Finder integration,
-  Command shortcuts, and separate Apple Silicon / Intel DMG builds with bundled Java.
-  See [macOS build instructions](packaging/MACOS.md).
-- **iPhone and iPad:** a new SwiftUI client for importing and previewing scores,
-  submitting recognition jobs, and downloading/sharing MusicXML and MIDI. Recognition
-  runs on your own computer/server through the [recognition bridge](bridge/README.md).
-  See [Apple client setup](apple/README.md).
-
-The mobile client does **not** run the Java/Swing engine on-device or provide the full
-desktop score-correction editor. Apple builds must be compiled and checked on a Mac;
-the included GitHub Actions workflows provide unsigned build checks, not App Store releases.
-
-中文环境准备与适配范围见 [苹果端适配说明](docs/APPLE_PLATFORMS.md)。
-
 ---
 
-## Overview
+NoteLite 基于 Audiveris 识谱引擎，保留原版桌面编辑器，并加入独立的陪练模式。你可以识别 PDF 或图片，在谱面上检查、修正结果，再导出 MusicXML / MIDI，或直接进入跟谱练习。
 
-NoteLite is a smart score-processing platform aimed at music-education scenarios. Built on Optical Music Recognition (OMR), combined with lightweight encoding, score matching, and error detection, it forms a complete loop from "scan recognition" to "database management" to "teaching feedback".
+| 原版桌面编辑器 | 新增陪练模式 |
+| :---: | :---: |
+| [![NoteLite 原版识谱与校谱界面](docs/images/desktop-editor.png)](docs/images/desktop-editor.png) | [![NoteLite 跟谱陪练界面](docs/images/practice-workspace.png)](docs/images/practice-workspace.png) |
+| 识别、检查和修正谱面 | 跟谱演奏、查看错音与练习回顾 |
 
-### Background & Motivation
+两张截图展示同一首《G 大调小步舞曲》。原版编辑器保持可用，陪练从“文集”菜单进入，在本地浏览器中打开。
 
-Existing OMR tools (Audiveris, oemer, homr, etc.) can already convert score images into machine-readable formats such as MusicXML, but several gaps remain for real music-education platforms:
+## 识谱、校谱，再练习
 
-- No lightweight structured representation suitable for database storage
-- No automatic matching and diffing against canonical scores
-- No suspected-error detection on scanned scores
-- No audio-based assessment of performance correctness
+| 识谱与校谱 | 乐器陪练 |
+| --- | --- |
+| 导入 PDF、扫描件与乐谱图片 | 导入 MusicXML / MXL，或使用当前识别结果 |
+| 在原版桌面编辑器中检查和修改识别结果 | 按谱中乐器信息选择输入方式，也可手动调整 |
+| 导出 MusicXML、压缩 MusicXML 和 MIDI | 选择声部、小节与速度，跟着谱面练习 |
+| 保留中文菜单、工具栏和完整校谱流程 | 提示错音与漏音，结束后查看回顾、重练片段 |
 
-NoteLite is designed to fill these gaps. **It is not another OMR engine** — it builds an education-oriented application layer on top of mature open-source OMR.
+陪练提供等待弹对再继续、按节拍跟奏两种模式。谱面显示与音高检测在本机完成；桌面入口会打开本地浏览器页面，原版编辑器继续保留。
 
----
+### 输入方式
 
-## Latest Release (v5.11.0, 2026-04-29)
+| 输入 | 适用范围 |
+| --- | --- |
+| MIDI | 支持 MIDI 输出的乐器，可识别单音与和弦，检查音高和起音时机 |
+| 麦克风 | 单声部、有固定音高的旋律；不支持和弦、扫弦或合奏的逐音评分 |
+| 电脑键盘 | 体验跟谱与错音提示的演示输入 |
 
-NoteLite is currently a fork of the Audiveris OMR engine. The released desktop build includes:
+自动判断依据是乐谱中的乐器名称、声部与 MIDI 音色信息；缺少信息时可以手动选择。当前陪练不评价音色、踏板、指法或触键，各类真实乐器的连续演奏效果仍需进一步验收。
 
-- **Full OMR pipeline**: PDF / image → transcription → MusicXML export
-- **MIDI export** (new in this release): file-type dropdown supports `.mxl` / `.xml` / `.mid`, with no need for MuseScore or other external tools
-- **Chinese UI**: full zh_CN localization of menus / dialogs / toolbars
-- **JDK 21 build**: extract and run, no compilation needed
+已安装 [PianoBooster](https://www.pianobooster.org/) 的用户，也可从桌面菜单将当前谱子或外部 MIDI 交给它练习。其他识谱软件导出的 MusicXML / MXL 可以直接导入 NoteLite；这些入口通过文件互通。
 
-Download: [`NoteLite-5.11.0.zip`](https://github.com/Lucas0623z/NoteLite/releases/latest)
+## 平台支持
 
-> MIDI export is intended for proof-listening only. The first version uses a fixed velocity of 80; advanced features such as drum kits, repeat marks, and transposing instruments are not yet supported. See the release notes for details.
+| 版本 | 主要用途 | 说明 |
+| --- | --- | --- |
+| Windows / Linux / macOS 桌面版 | 完整识谱、手动校谱、导出与陪练 | Java 桌面编辑器；macOS 提供 Apple Silicon / Intel 打包流程 |
+| iPhone / iPad 原生客户端 | 曲谱库、原稿预览、识谱任务、陪练与练习记录 | iOS / iPadOS 16 起；手机导航和平板分栏布局 |
+| macOS 原生客户端 | 曲谱库、识谱任务、陪练与练习记录 | macOS 13 起；SwiftUI 分栏工作区 |
 
----
+Apple 原生客户端通过你配置的[识谱桥接服务](bridge/README.md)处理 PDF 和图片，不在设备上运行 Java 识谱引擎；已有 MusicXML 可以直接进入练习。完整的手动校谱仍在桌面编辑器中完成。
 
-## Features
+Apple 构建目前用于开发测试，未上架 App Store。真机安装或对外分发需要配置自己的签名。详见 [Apple 客户端说明](apple/README.md)与 [macOS 桌面打包说明](packaging/MACOS.md)。
 
-### Core Modules
+## 快速开始
 
-| Module | Description | Status |
-|--------|-------------|--------|
-| **Score Recognition** | Recognize scanned, photographed, and PDF scores | In progress |
-| **Lightweight Encoding** | Convert scores into compact structured data optimized for storage and retrieval | In progress |
-| **Score Matching** | Auto-match against canonical scores with sequence-level diffing | Planned |
-| **Smart Correction** | Detect missing/wrong notes, rhythm anomalies, accidental errors, etc. | Planned |
-| **Performance Assessment** | Coarse-grained performance evaluation based on audio recognition | Planned |
+### 使用桌面版
 
-### Highlights
+1. 在 [Releases](https://github.com/Lucas0623z/NoteLite/releases) 下载适合系统的安装包或分发包，以该版本的发布说明为准。
+2. ZIP 分发包解压后，运行 `bin/NoteLite.bat`（Windows）或 `bin/NoteLite`（Linux / macOS）。这类包需要本机安装 **Java 21**；包含 Java 运行时的 macOS 安装包无需另装 Java。
+3. 打开 PDF 或乐谱图片，完成识别，并在编辑器中校对结果。
+4. 导出 MusicXML / MIDI，或选择 **文集 → 乐器陪练工作室**。
 
-1. **Lightweight score encoding**
-   A compressed representation designed for databases — far smaller than full MusicXML.
+已有其他软件导出的乐谱，可选择 **文集 → 导入外部识谱结果练习**。当前源码的分发包还提供 `bin/PracticeStudio.bat` / `bin/PracticeStudio`，用于直接打开陪练；不指定文件时打开示例谱。
 
-2. **Canonical-score-driven diffing**
-   New scans are not just recognized; they are also automatically validated against the canonical version in the database.
+> 陪练以导入的乐谱为判断依据。开始前请先核对识谱结果，避免把识别错误当作演奏错误。旧版本发行包可能不包含当前源码中的新增功能。
 
-3. **Education-oriented closed loop**
-   An end-to-end flow from paper score to online teaching feedback.
+### 从源码运行
 
----
+安装 **JDK 21**，并让 `JAVA_HOME` 指向该版本：
 
-## Architecture
-
-### System Layers
-
-```
-┌─────────────────────────────────────────────────┐
-│                Application Layer                 │
-│   Upload | Matching | Correction | Assessment   │
-└─────────────────────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────┐
-│            Database & Retrieval Layer           │
-│   Canonical | User Uploads | Versions | Index   │
-└─────────────────────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────┐
-│              Lightweight Encoding               │
-│   Relative pitch | Tokenize | Hash | Compress   │
-└─────────────────────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────┐
-│             Score Structuring Layer             │
-│  Clef | Key | Time | Notes | Duration | Marks   │
-└─────────────────────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────┐
-│               OMR Recognition Layer             │
-│  Preprocess | Staff detection | Symbols | Pitch │
-└─────────────────────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────┐
-│                   Input Layer                   │
-│   Scanned image | Photo | PDF | Audio recording │
-└─────────────────────────────────────────────────┘
-```
-
-### Tech Stack
-
-- **OMR engine**: Audiveris / oemer / homr (alternative options)
-- **Data formats**: MusicXML, JSON, custom compressed format
-- **Matching algorithms**: edit distance, dynamic programming, hash fingerprints
-- **Audio recognition**: TBD (for performance assessment)
-
----
-
-## Installation
-
-### Option 1: Direct Download (Recommended)
-
-For end users — no compilation required:
-
-1. Download `NoteLite-5.11.0.zip` from [Releases](https://github.com/Lucas0623z/NoteLite/releases/latest)
-2. Extract anywhere
-3. Run `bin/NoteLite.bat` (Windows) or `bin/NoteLite` (Linux/macOS)
-4. Requires **Java 21** runtime on the machine
-
-### Option 2: Build from Source
-
-For development or contribution:
-
-```bash
-# Clone the repo
+```sh
 git clone https://github.com/Lucas0623z/NoteLite.git
 cd NoteLite
 
-# Use JDK 21 (verify with `java -version` showing 21.x)
-export JAVA_HOME=/path/to/jdk-21
-
-# Run
+# 启动原版桌面编辑器
 ./gradlew :app:run --no-daemon
 
-# Build a distribution
+# 生成包含编辑器与陪练入口的分发包
 ./gradlew :app:distZip --no-daemon
-# Artifact at app/build/distributions/app-<version>.zip
 ```
 
-On Windows, use `.\gradlew` instead of `./gradlew`.
+Windows 使用 `./gradlew.bat`。分发 ZIP 位于 `app/build/distributions/`；首次识谱如需 OCR 语言数据，可在应用的语言设置中配置。
 
-### Long-Term Plan (Education-Platform Layer)
+陪练运行资源已随源码保存。修改陪练界面时，使用 **Node.js 20+** 重新生成资源：
 
-The education layer (lightweight encoding / canonical matching / performance assessment) is still in design. It will eventually introduce:
-
-- Python 3.8+ (matching algorithms / data processing)
-- Node.js 16+ (frontend)
-- PostgreSQL / MySQL (database)
-
----
-
-## Database Design
-
-### Core Tables
-
-#### 1. Score Master Table (`scores`)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| score_id | INT | Primary key |
-| title | VARCHAR | Title |
-| composer | VARCHAR | Composer |
-| key_signature | VARCHAR | Key signature |
-| time_signature | VARCHAR | Time signature |
-| measure_count | INT | Number of measures |
-| canonical_version_id | INT | Canonical version ID |
-
-#### 2. Score Content Table (`score_content`)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| score_id | INT | Foreign key |
-| raw_musicxml | TEXT | Original MusicXML |
-| structured_json | JSON | Structured data |
-| compressed_code | VARCHAR | Lightweight encoding |
-| midi_url | VARCHAR | MIDI file path |
-
-#### 3. Comparison Result Table (`comparisons`)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| compare_id | INT | Primary key |
-| uploaded_score_id | INT | Uploaded score ID |
-| matched_standard_id | INT | Matched canonical score ID |
-| similarity_score | FLOAT | Similarity score |
-| error_positions | JSON | Error positions |
-
----
-
-## Roadmap
-
-### Phase 1: MVP (Current)
-
-- [x] Project architecture design
-- [x] OMR engine integration (Audiveris fork, v5.10.x)
-- [x] Structured-data output (MusicXML / MIDI)
-- [x] Chinese UI localization (v5.10.0+)
-- [x] Bundled MIDI export (v5.11.0)
-- [ ] Lightweight-encoding implementation
-- [ ] Initial database setup
-
-### Phase 2: Canonical Matching & Correction
-
-- [ ] Build canonical-score database
-- [ ] Score-fingerprint index
-- [ ] Diff-analysis algorithms
-- [ ] Error-highlight UI
-
-### Phase 3: Recognition Improvements
-
-- [ ] Phone-photo scenario tuning
-- [ ] Fine-tuning on teaching-score samples
-- [ ] Misrecognition-rule fixes
-
-### Phase 4: Performance Assessment
-
-- [ ] Audio upload
-- [ ] Pitch / rhythm extraction
-- [ ] Comparison against canonical scores
-- [ ] Learning-report generation
-
----
-
-## Lightweight Encoding Example
-
-### Design Idea
-
-MusicXML is verbose and ill-suited for large-scale database storage. NoteLite uses a custom lightweight format:
-
-```
-# MusicXML (hundreds of lines)
-<score-partwise>
-  <part id="P1">
-    <measure number="1">
-      <note>
-        <pitch><step>G</step><octave>4</octave></pitch>
-        <duration>1</duration>
-        <type>quarter</type>
-      </note>
-      ...
-    </measure>
-  </part>
-</score-partwise>
-
-# NoteLite encoding (single line)
-TS:4/4;KS:G;M1:G4/q,A4/q,B4/h|M2:C5/q,B4/q,A4/h
-
-# Token form (relative pitch)
-4/4|G|+0:q,+2:q,+4:h|+5:q,+4:q,+2:h
+```sh
+cd practice-web
+npm ci
+npm test
+npm run build
 ```
 
-**Benefits**:
-- 90%+ reduction in storage size
-- Simple database indexing
-- Efficient similar-score matching
-- Friendly to version management
+Apple 原生客户端需在 Mac 上使用 Xcode 与 XcodeGen 构建，完整步骤见 [apple/README.md](apple/README.md)。
+
+## 实测与文档
+
+识谱、MIDI 导出和陪练输入是不同环节，分别验证；小样本测试结果不代表所有乐谱或所有乐器的准确率。
+
+| 文档 | 内容 |
+| --- | --- |
+| [图片 / PDF 转 MIDI 实测](benchmarks/omr/README.md) | 原始输入、独立参考答案、真实识谱输出和复现方式 |
+| [MIDI 导出验证](benchmarks/midi/README.md) | MusicXML 写入 MIDI 的音高、时序与导出回归 |
+| [陪练说明与录音乐器样本测试](practice-web/README.md) | 输入范围、已知限制、样本来源与测试命令 |
+| [Apple 客户端](apple/README.md) | 三端构建、签名设置、界面测试与真机验收 |
+| [识谱桥接服务](bridge/README.md) | 在自己的电脑或服务器提供识谱接口 |
+| [macOS 桌面打包](packaging/MACOS.md) | Apple Silicon / Intel 安装包、签名与公证 |
+
+## 开源来源与许可
+
+- [Audiveris](https://github.com/Audiveris/audiveris)：桌面识谱与校谱引擎；衍生源码保留 AGPL-3.0-or-later 许可声明。
+- [OpenSheetMusicDisplay](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay)：陪练谱面排版。
+- [Pitchy](https://github.com/ianprime0509/pitchy)：单声音高检测。
+- [Lucide](https://lucide.dev/)：陪练界面图标。
+
+本仓库包含不同许可的代码和资源。根目录保留 [MIT 声明](LICENSE)；各源文件的许可头、上游许可及[陪练第三方声明](app/res/practice/THIRD-PARTY.txt)适用于对应部分，不能将整个 Audiveris 衍生程序视为仅受 MIT 许可约束。
 
 ---
 
-## Technical Notes
-
-### Score-Matching Algorithm
-
-A multi-stage retrieval strategy:
-
-1. **Coarse filter**: key signature + time signature + measure count
-2. **Mid filter**: melody fingerprint hash
-3. **Fine filter**: sequence-level edit distance
-
-### Diff-Detection Capabilities
-
-| Error Type | Method | Example |
-|------------|--------|---------|
-| Missing/extra notes | Sequence-length comparison | Canonical 8 notes, scan 7 notes |
-| Wrong pitch | Per-symbol comparison | Canonical C5, scan D5 |
-| Wrong duration | Rhythm-pattern matching | Canonical quarter note, scan eighth |
-| Missing accidentals | Tonality analysis | Canonical F#, scan F |
-| Measure-beat anomaly | Beat accumulation | Sum of durations in 4/4 measure ≠ 4 beats |
-
----
-
-## Development Conventions
-
-This project is currently maintained solely by the author and does not accept external pull requests. For issues or suggestions, please use the contact info below.
-
-- Code style: existing Audiveris Java conventions (see `dev/jalopy/java-convention.xml`)
-- Build: JDK 21 + Gradle
-- Commit messages: [Conventional Commits](https://www.conventionalcommits.org/)
-- Docs: Javadoc required for public APIs
-
----
-
-## License
-
-This project is released under the MIT License — see the [LICENSE](LICENSE) file for details.
-
----
-
-## Author
-
-**Yuexuan Zhang**
-
-Undergraduate, University of Illinois Urbana-Champaign (UIUC)
-Research interests: computer science, intelligent systems, education technology, music information processing
-
-### Contact
-
-- **Email**: Lucas.z0623@outlook.com
-- **GitHub**: [@Lucas0623z](https://github.com/Lucas0623z)
-- **Personal site**: [https://personal-website-tau-lake.vercel.app/](https://personal-website-tau-lake.vercel.app/)
-
----
-
-## Acknowledgements
-
-Thanks to the following open-source projects and communities:
-
-- [Audiveris](https://github.com/Audiveris/audiveris) — classic OMR framework
-- [oemer](https://github.com/BreezeWhite/oemer) — modern deep-learning OMR
-- [homr](https://github.com/TimeEscaper/homr) — end-to-end OMR model
-- The broader GitHub open-source community for years of work in music information retrieval
-
----
-
-## Project Status
-
-- **Current version**: v5.11.0 (desktop OMR + MIDI export)
-- **Status**: actively developed
-- **Last updated**: 2026-04-29
-
----
-
-<div align="center">
-
-**If this project helps you, please consider giving it a Star**
-
-Made by [Yuexuan Zhang](https://github.com/Lucas0623z)
-
-</div>
+由 [Yuexuan Zhang · @Lucas0623z](https://github.com/Lucas0623z) 维护。问题和建议可提交 [Issue](https://github.com/Lucas0623z/NoteLite/issues)，或联系 [Lucas.z0623@outlook.com](mailto:Lucas.z0623@outlook.com)。
