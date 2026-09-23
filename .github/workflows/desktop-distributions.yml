@@ -1,0 +1,120 @@
+name: Desktop distributions
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'practice-web/**'
+      - '*.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/desktop-distributions.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  distribution:
+    name: Build and validate ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows-x86_64
+          - runner: ubuntu-latest
+            platform: linux-x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: practice-web/package-lock.json
+      - name: Build and test bundled practice UI
+        working-directory: practice-web
+        shell: bash
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: x64
+          cache: gradle
+      - name: Test MIDI and practice, and build the platform distribution
+        shell: bash
+        run: |
+          bash ./gradlew --no-daemon -PtargetOS=${{ matrix.platform }} \
+            :app:test \
+            --tests com.notelite.omr.score.MidiExporterTest \
+            --tests com.notelite.omr.score.MidiExporterAccuracyTest \
+            --tests com.notelite.omr.score.MidiExporterAdvancedTest \
+            --tests 'com.notelite.omr.practice.*' \
+            :app:distZip :app:installDist
+      - name: Validate installed launcher, native libraries and recognition
+        shell: pwsh
+        run: |
+          $platform = '${{ matrix.platform }}'
+          foreach ($library in @('leptonica', 'tesseract')) {
+            if (-not (Test-Path "app/build/install/app/lib/$library-*-$platform.jar")) {
+              throw "The distribution is missing $library native libraries for $platform"
+            }
+          }
+          $launcher = if ($IsWindows) {
+            Join-Path $PWD 'app/build/install/app/bin/NoteLite.bat'
+          } else {
+            Join-Path $PWD 'app/build/install/app/bin/NoteLite'
+          }
+          & $launcher -help
+          if ($LASTEXITCODE -ne 0) { throw 'The installed launcher failed its help check' }
+
+          $env:TESSDATA_PREFIX = Join-Path $env:RUNNER_TEMP 'notelite-tessdata'
+          New-Item -ItemType Directory -Force -Path $env:TESSDATA_PREFIX | Out-Null
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tessdata/4.1.0/eng.traineddata' `
+            -OutFile (Join-Path $env:TESSDATA_PREFIX 'eng.traineddata') `
+            -MaximumRetryCount 3 -RetryIntervalSec 2
+          $smokeOutput = Join-Path $PWD 'work/release-smoke'
+          New-Item -ItemType Directory -Force -Path $smokeOutput | Out-Null
+          $score = Join-Path $PWD 'data/examples/chula.png'
+          & $launcher -batch -transcribe -export -export-midi -output $smokeOutput -- $score
+          if ($LASTEXITCODE -ne 0) { throw 'Recognition through the installed launcher failed' }
+          foreach ($extension in @('mxl', 'mid')) {
+            $results = @(Get-ChildItem -LiteralPath $smokeOutput -Recurse -Filter "*.$extension" |
+              Where-Object { $_.Length -gt 0 })
+            if ($results.Count -eq 0) { throw "Recognition produced no nonempty $extension artifact" }
+          }
+      - name: Name the validated archive for its platform
+        id: archive
+        shell: pwsh
+        run: |
+          $source = Get-Content 'app/build.gradle' -Raw
+          $version = [regex]::Match($source, "(?m)^project\.version\s*=\s*'([^']+)'\s*$").Groups[1].Value
+          if (-not $version) { throw 'Cannot read the application version' }
+          $archives = @(Get-ChildItem 'app/build/distributions' -Filter '*.zip')
+          if ($archives.Count -ne 1) { throw 'Expected exactly one application distribution ZIP' }
+          $name = "NoteLite-$version-${{ matrix.platform }}"
+          New-Item -ItemType Directory -Force -Path 'release' | Out-Null
+          Copy-Item -LiteralPath $archives[0].FullName -Destination "release/$name.zip"
+          "artifact_name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Upload validated desktop archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.artifact_name }}
+          path: release/*.zip
+          if-no-files-found: error
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-validation-${{ matrix.platform }}
+          path: |
+            app/build/reports/tests/test
+            app/build/midi-accuracy
+            work/release-smoke
+          if-no-files-found: warn

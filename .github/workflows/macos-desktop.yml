@@ -63,11 +63,44 @@ jobs:
           mkdir -p "$mountpoint"
           # jpackage embeds this repository's LICENSE in the DMG; hdiutil prompts before mounting.
           hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mountpoint" <<< "Y"
-          trap 'hdiutil detach "$mountpoint"' EXIT
+          practice_pid=""
+          cleanup() {
+            if [ -n "$practice_pid" ]; then
+              kill "$practice_pid" 2>/dev/null || true
+              wait "$practice_pid" 2>/dev/null || true
+            fi
+            hdiutil detach "$mountpoint"
+          }
+          trap cleanup EXIT
           bundle="$mountpoint/NoteLite.app"
           lipo "$bundle/Contents/MacOS/NoteLite" -verify_arch "$EXPECTED_ARCH"
           "$bundle/Contents/runtime/Contents/Home/bin/java" -version
           "$bundle/Contents/MacOS/NoteLite" -help
+          # Use only the installed runtime and jars, so missing jlink modules fail this check.
+          practice_log="$RUNNER_TEMP/notelite-practice.log"
+          "$bundle/Contents/runtime/Contents/Home/bin/java" --enable-preview -cp "$bundle/Contents/app/*" \
+            com.notelite.omr.practice.PracticeStudio >"$practice_log" 2>&1 &
+          practice_pid=$!
+          practice_url=""
+          for attempt in {1..30}; do
+            practice_url=$(awk '/^http:\/\/127\.0\.0\.1:[0-9]+\/[0-9a-f-]+\/$/ { print; exit }' "$practice_log")
+            if [ -n "$practice_url" ]; then break; fi
+            if ! kill -0 "$practice_pid" 2>/dev/null; then
+              cat "$practice_log"
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ -z "$practice_url" ]; then
+            cat "$practice_log"
+            echo 'Packaged practice server did not start within 30 seconds' >&2
+            exit 1
+          fi
+          for asset in index.html app.js score.musicxml; do
+            curl --fail --silent --show-error --max-time 10 \
+              "${practice_url}${asset}" --output "$RUNNER_TEMP/notelite-$asset"
+            test -s "$RUNNER_TEMP/notelite-$asset"
+          done
           export TESSDATA_PREFIX="$RUNNER_TEMP/notelite-tessdata"
           mkdir -p "$TESSDATA_PREFIX"
           curl --fail --location --retry 3 \

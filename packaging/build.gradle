@@ -99,7 +99,7 @@ tasks.register('customJre', Exec) {
     dependsOn 'validatePackagingHost'
     def jdkHome = file(System.getProperty('java.home'))
     def runtimeDir = layout.buildDirectory.dir('custom-jre')
-    def runtimeModules = 'java.base,java.datatransfer,java.desktop,java.xml,java.naming,jdk.zipfs,jdk.crypto.ec,jdk.unsupported'
+    def runtimeModules = 'java.base,java.datatransfer,java.desktop,java.xml,java.naming,jdk.zipfs,jdk.crypto.ec,jdk.unsupported,jdk.httpserver'
     inputs.file(new File(jdkHome, 'release'))
     inputs.property('jdkHome', jdkHome.absolutePath)
     inputs.property('architecture', app.ext.hostOSArch)

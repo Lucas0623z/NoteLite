@@ -137,7 +137,7 @@ exclude:
 # ---------------------------------
 
 # Latest NoteLite functional version
-notelite_functional_version: "5.12"
+notelite_functional_version: "5.13"
 
 # Needed Java version for master
 master_java_version: 25

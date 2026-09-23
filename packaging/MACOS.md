@@ -23,8 +23,8 @@ bash ./gradlew :app:test --tests com.notelite.omr.ui.MacApplicationTest
 bash ./gradlew :packaging:jpackage -PinstallerType=DMG
 ```
 
-The output is `packaging/build/dist/NoteLite-5.12.0-macosx-arm64.dmg` or
-`NoteLite-5.12.0-macosx-x86_64.dmg`, depending on the JDK architecture. A JDK running
+The output is `packaging/build/dist/NoteLite-5.13.0-macosx-arm64.dmg` or
+`NoteLite-5.13.0-macosx-x86_64.dmg`, depending on the JDK architecture. A JDK running
 under Rosetta produces an Intel package. Do not override `targetOS` to pretend to
 cross-compile an installer: the build rejects a mismatch between the native libraries
 and the JRE. Use the corresponding Mac/JDK, or the CI workflow, for each architecture.
@@ -68,9 +68,9 @@ No signing credentials are stored in this repository. After configuring a
 artifact and staple Apple's accepted ticket:
 
 ```sh
-xcrun notarytool submit packaging/build/dist/NoteLite-5.12.0-macosx-arm64.dmg \
+xcrun notarytool submit packaging/build/dist/NoteLite-5.13.0-macosx-arm64.dmg \
   --keychain-profile notelite-notary --wait
-xcrun stapler staple packaging/build/dist/NoteLite-5.12.0-macosx-arm64.dmg
+xcrun stapler staple packaging/build/dist/NoteLite-5.13.0-macosx-arm64.dmg
 ```
 
 Only staple after notarization reports **Accepted**. Substitute `x86_64` for the Intel

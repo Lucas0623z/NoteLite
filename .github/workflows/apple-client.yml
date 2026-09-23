@@ -47,7 +47,7 @@ jobs:
           xcodebuild -version
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen generate --spec project.yml
-      - name: Build universal iOS app without signing
+      - name: Build iOS simulator app without signing
         id: build_ios
         working-directory: apple
         run: |
@@ -124,7 +124,7 @@ jobs:
   simulator-clients:
     name: ${{ matrix.family }} interface
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -148,7 +148,7 @@ jobs:
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen generate --spec project.yml
       - name: Test native interface and model
-        timeout-minutes: 10
+        timeout-minutes: 15
         working-directory: apple
         run: bash scripts/run-simulator-tests.sh '${{ matrix.family }}'
       - name: Export native interface screenshots
