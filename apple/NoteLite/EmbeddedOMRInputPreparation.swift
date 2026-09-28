@@ -69,6 +69,7 @@ enum EmbeddedOMRInputPreparer {
             guard !pdf.isLocked else { throw EmbeddedOMRInputError.lockedPDF }
             guard pdf.pageCount > 0 else { throw EmbeddedOMRInputError.invalidFile }
             guard pdf.pageCount <= limits.maxPageCount else { throw EmbeddedOMRInputError.tooManyPages }
+            try preflightPDF(pdf, limits: limits, cancellationCheck: cancellationCheck)
             // PDFBox receives all pages, vector content, crops and rotations unchanged.
             let url = try stage(in: directory, fileExtension: "pdf", limits: limits, cancellationCheck: cancellationCheck) { temporary in
                 try FileManager.default.copyItem(at: source, to: temporary)
@@ -149,6 +150,43 @@ enum EmbeddedOMRInputPreparer {
         let transparent: Bool
         let dpiX: Double?
         let dpiY: Double?
+    }
+
+    private static func preflightPDF(_ document: PDFDocument, limits: EmbeddedOMRInputLimits,
+                                     cancellationCheck: () throws -> Void) throws {
+        // ImageLoading.pdfResolution defaults to 300 DPI. The embedded engine
+        // does not expose a resolution override: keep this in sync if it gains one.
+        // PDFBox 3.0.6 PDFRenderer uses Float arithmetic, floors each dimension,
+        // and swaps the raster dimensions for 90/270-degree page rotation.
+        let scale: Float = 300 / 72
+        var totalPixels = 0
+        for index in 0..<document.pageCount {
+            try cancellationCheck()
+            guard let page = document.page(at: index)?.pageRef else { throw EmbeddedOMRInputError.invalidFile }
+            let media = page.getBoxRect(.mediaBox)
+            let crop = page.getBoxRect(.cropBox)
+            guard [media.minX, media.minY, media.maxX, media.maxY,
+                   crop.minX, crop.minY, crop.maxX, crop.maxY].allSatisfy({ $0.isFinite }) else {
+                throw EmbeddedOMRInputError.imageTooLarge
+            }
+            // PDPage.getCropBox clips its inherited crop to the media box.
+            let effectiveCrop = crop.intersection(media)
+            guard !effectiveCrop.isNull, !effectiveCrop.isEmpty else { throw EmbeddedOMRInputError.invalidFile }
+            let width = max(1, (Float(effectiveCrop.width) * scale).rounded(.down))
+            let height = max(1, (Float(effectiveCrop.height) * scale).rounded(.down))
+            guard width.isFinite, height.isFinite,
+                  width <= Float(limits.maxDimension), height <= Float(limits.maxDimension) else {
+                throw EmbeddedOMRInputError.imageTooLarge
+            }
+            let rotation = (page.rotationAngle % 360 + 360) % 360
+            let pixelWidth = Int(rotation == 90 || rotation == 270 ? height : width)
+            let pixelHeight = Int(rotation == 90 || rotation == 270 ? width : height)
+            guard pixelWidth <= limits.maxPixelsPerPage / pixelHeight,
+                  pixelWidth <= (limits.maxTotalImagePixels - totalPixels) / pixelHeight else {
+                throw EmbeddedOMRInputError.imageTooLarge
+            }
+            totalPixels += pixelWidth * pixelHeight
+        }
     }
 
     private static func planPage(source: CGImageSource, index: Int, limits: EmbeddedOMRInputLimits,
@@ -251,9 +289,13 @@ enum EmbeddedOMRInputPreparer {
         let files = FileManager.default
         try files.createDirectory(at: directory, withIntermediateDirectories: true)
         let token = UUID().uuidString
-        let temporary = directory.appendingPathComponent(".preparing-\(token).\(suffix)")
+        // ImageIO can create private sibling files before finalizing TIFF output.
+        // Own an entire temporary directory so cancellation also removes those.
+        let staging = directory.appendingPathComponent(".preparing-\(token)", isDirectory: true)
+        try files.createDirectory(at: staging, withIntermediateDirectories: false)
+        let temporary = staging.appendingPathComponent("source.\(suffix)")
         let output = directory.appendingPathComponent("source-\(token).\(suffix)")
-        defer { try? files.removeItem(at: temporary) }
+        defer { try? files.removeItem(at: staging) }
         try cancellationCheck()
         try write(temporary)
         try cancellationCheck()

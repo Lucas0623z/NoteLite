@@ -157,14 +157,63 @@ final class EmbeddedOMRInputPreparationTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staged.path), [])
     }
 
+    func testPDFRasterLimitsRejectWholeDocumentBeforeStaging() throws {
+        // The second page alone exceeds 16M pixels at the engine's 300 DPI,
+        // despite a tiny file and both raster edges being below 8192 pixels.
+        for dimensions in [CGSize(width: 1_000, height: 1_000), CGSize(width: 5_000, height: 100)] {
+            let source = root.appendingPathComponent(UUID().uuidString + ".pdf")
+            try writePDF(source, sizes: [CGSize(width: 200, height: 100), dimensions])
+            XCTAssertThrowsError(try EmbeddedOMRInputPreparer.prepare(source: source, in: staged)) {
+                XCTAssertEqual($0 as? EmbeddedOMRInputError, .imageTooLarge)
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+            XCTAssertEqual(PDFDocument(url: source)?.pageCount, 2)
+        }
+        let source = root.appendingPathComponent("aggregate.pdf")
+        try writePDF(source, sizes: Array(repeating: CGSize(width: 200, height: 100), count: 2))
+        var limits = EmbeddedOMRInputLimits.default
+        limits.maxTotalImagePixels = 500_000 // Each page is 833 x 416; both exceed the total.
+        XCTAssertThrowsError(try EmbeddedOMRInputPreparer.prepare(source: source, in: staged, limits: limits)) {
+            XCTAssertEqual($0 as? EmbeddedOMRInputError, .imageTooLarge)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+    }
+
+    func testPDFUsesEffectiveCropAtEngineResolutionAndPreservesRotation() throws {
+        let source = root.appendingPathComponent("large-media-small-crop.pdf")
+        try writePDF(source, sizes: [CGSize(width: 10_000, height: 10_000)])
+        let document = try XCTUnwrap(PDFDocument(url: source))
+        let page = try XCTUnwrap(document.page(at: 0))
+        page.setBounds(CGRect(x: 300, y: 400, width: 200, height: 100), for: .cropBox)
+        page.rotation = 270
+        XCTAssertTrue(document.write(to: source))
+        let original = try Data(contentsOf: source)
+        var limits = EmbeddedOMRInputLimits.default
+        limits.maxDimension = 833
+        limits.maxPixelsPerPage = 833 * 416 // Exactly PDFBox's Float/floor dimensions.
+        let result = try EmbeddedOMRInputPreparer.prepare(source: source, in: staged, limits: limits)
+        XCTAssertTrue(result.preservedOriginalBytes)
+        XCTAssertEqual(try Data(contentsOf: result.url), original)
+        XCTAssertEqual(PDFDocument(url: result.url)?.page(at: 0)?.rotation, 270)
+        limits.maxPixelsPerPage -= 1
+        XCTAssertThrowsError(try EmbeddedOMRInputPreparer.prepare(source: source, in: staged, limits: limits)) {
+            XCTAssertEqual($0 as? EmbeddedOMRInputError, .imageTooLarge)
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staged.path), [result.url.lastPathComponent])
+    }
+
     func testCancellationDuringMultiPageEncodingRemovesTemporaryFile() throws {
         let source = root.appendingPathComponent("cancel.tiff")
         try writeImage(source, type: .tiff, orientations: [6, 6, 6])
         var sawPartialFile = false
         XCTAssertThrowsError(try EmbeddedOMRInputPreparer.prepare(source: source, in: staged, cancellationCheck: {
-            if let names = try? FileManager.default.contentsOfDirectory(atPath: self.staged.path), !names.isEmpty {
-                sawPartialFile = true
-                throw CancellationError()
+            if let items = FileManager.default.enumerator(at: self.staged, includingPropertiesForKeys: [.isRegularFileKey]) {
+                for case let file as URL in items {
+                    if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                        sawPartialFile = true
+                        throw CancellationError()
+                    }
+                }
             }
         })) { XCTAssertTrue($0 is CancellationError) }
         XCTAssertTrue(sawPartialFile)
@@ -181,6 +230,19 @@ final class EmbeddedOMRInputPreparationTests: XCTestCase {
         try Data("broken image".utf8).write(to: malformed)
         XCTAssertThrowsError(try EmbeddedOMRInputPreparer.prepare(source: malformed, in: staged))
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+    }
+
+    private func writePDF(_ url: URL, sizes: [CGSize]) throws {
+        var box = CGRect(origin: .zero, size: sizes[0])
+        let consumer = try XCTUnwrap(CGDataConsumer(url: url as CFURL))
+        let context = try XCTUnwrap(CGContext(consumer: consumer, mediaBox: &box, nil))
+        for size in sizes {
+            var pageBox = CGRect(origin: .zero, size: size)
+            let data = Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)
+            context.beginPDFPage([kCGPDFContextMediaBox as String: data] as CFDictionary)
+            context.endPDFPage()
+        }
+        context.closePDF()
     }
 
     private func writeImage(_ url: URL, type: UTType, orientations: [Int], transparent: Bool = false) throws {
