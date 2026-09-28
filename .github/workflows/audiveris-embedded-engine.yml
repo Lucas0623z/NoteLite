@@ -1,0 +1,166 @@
+name: Embedded Audiveris full recognition
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/audiveris-embedded-builds]
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'apple/EmbeddedOMRRuntime/Sources/TemplateScorer.*'
+      - 'tools/audiveris-port/**'
+      - '.github/workflows/audiveris-embedded-engine.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: embedded-omr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-engine-with-mobile-desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scorer: java
+            artifact: embedded-engine-host-evidence
+          - scorer: native
+            artifact: embedded-engine-native-host-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Compile the production native scorer for host verification
+        if: matrix.scorer == 'native'
+        run: |
+          mkdir -p build/native-template
+          clang++ -std=c++17 -O2 -fPIC -shared -fno-fast-math -ffp-contract=off \
+            -Wall -Wextra -Werror -pedantic \
+            -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" \
+            -Iapple/EmbeddedOMRRuntime/Sources \
+            apple/EmbeddedOMRRuntime/Sources/TemplateScorer.cpp \
+            tools/audiveris-port/native-template-host.cpp \
+            -o build/native-template/libnotelite_template.so
+          clang++ --version > build/native-template/compiler.txt
+          sha256sum apple/EmbeddedOMRRuntime/Sources/TemplateScorer.{hpp,cpp} \
+            tools/audiveris-port/native-template-host.cpp \
+            build/native-template/libnotelite_template.so \
+            > build/native-template/source-and-library.sha256
+      - name: Prepare pinned legacy OCR model
+        run: |
+          mkdir -p build/tessdata
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/tesseract-ocr/tessdata/4767ea922bcc460e70b87b1d303ebdfed0897da8/eng.traineddata \
+            -o build/tessdata/eng.traineddata
+          echo 'daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047  build/tessdata/eng.traineddata' | sha256sum --check
+      - name: Check the native scoring boundary with JNI diagnostics
+        if: matrix.scorer == 'native'
+        run: |
+          set -euo pipefail
+          bash ./gradlew --no-daemon \
+            "-PnativeTemplateLibrary=$GITHUB_WORKSPACE/build/native-template/libnotelite_template.so" \
+            :app:nativeTemplateCheckedTest 2>&1 | tee build/native-template/checked-jni.log
+      - name: Run actual image, font, OCR, serialization and recognition paths
+        env:
+          TESSDATA_PREFIX: ${{ github.workspace }}/build/tessdata
+          SCORER: ${{ matrix.scorer }}
+        run: |
+          native_args=()
+          if [ "$SCORER" = native ]; then
+            native_args+=("-PnativeTemplateLibrary=$GITHUB_WORKSPACE/build/native-template/libnotelite_template.so")
+          fi
+          bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle \
+            -I tools/audiveris-port/test-mobile-desktop.gradle \
+            "${native_args[@]}" \
+            :app:portProbe :app:embeddedOmrTest
+      - name: Compare every exported score and verify acceptance gate
+        env:
+          SCORER: ${{ matrix.scorer }}
+        run: |
+          python3 tools/audiveris-port/test_verify_embedded_score.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+          suites = [ET.parse(path).getroot() for path in Path('app/build/test-results/embeddedOmrTest').glob('TEST-*.xml')]
+          if not suites or sum(int(suite.get('tests', '0')) for suite in suites) < 21:
+              raise SystemExit('The complete engine and template regression suites must execute')
+          if any(int(suite.get(key, '0')) for suite in suites for key in ('failures', 'errors', 'skipped')):
+              raise SystemExit('Full host acceptance does not allow failed or skipped tests')
+          statistics = Path('app/build/embedded-tests/native-template-statistics.json')
+          if not statistics.is_file():
+              raise SystemExit('Missing scoring implementation evidence')
+          evidence = json.loads(statistics.read_text())
+          native = os.environ['SCORER'] == 'native'
+          if evidence.get('requested') is not native or evidence.get('enabled') is not native:
+              raise SystemExit('The requested scoring implementation was not exercised')
+          if native:
+              # Global JNI checking copies AWT raster buffers for each small draw.
+              # Check the scorer in a separate VM, then run full scores normally.
+              if evidence.get('jniCheckEnabled') is not False:
+                  raise SystemExit('Full-score parity must use normal runtime settings')
+              checked = [ET.parse(path).getroot() for path in Path('app/build/test-results/nativeTemplateCheckedTest').glob('TEST-*.xml')]
+              required = {'com.notelite.omr.image.TemplateEvaluationTest',
+                          'com.notelite.omr.image.NativeTemplateBoundaryTest'}
+              if {suite.get('name') for suite in checked} != required:
+                  raise SystemExit('Both checked native regression classes must execute')
+              if any(int(suite.get('tests', '0')) == 0 or any(int(suite.get(key, '0'))
+                     for key in ('failures', 'errors', 'skipped')) for suite in checked):
+                  raise SystemExit('Checked native regressions must pass without skips')
+              checked_evidence = json.loads(Path('app/build/embedded-tests/native-template-checked-statistics.json').read_text())
+              if any(checked_evidence.get(key) is not True for key in ('requested', 'enabled', 'jniCheckEnabled')):
+                  raise SystemExit('Checked scorer did not run under actual JNI checking')
+              if checked_evidence.get('scorePairs') != 21888:
+                  raise SystemExit('The complete template comparison set must execute')
+              for item in (evidence, checked_evidence):
+                  before, after = item['before'], item['after']
+                  if len(before) != 4 or len(after) != 4:
+                      raise SystemExit('Incomplete native lifetime counters')
+                  calls, pins, releases, copies = [end - start for start, end in zip(before, after)]
+                  if calls <= 0 or pins <= 0 or pins != releases or not 0 <= copies <= pins:
+                      raise SystemExit('Actual native scoring and balanced releases are required in both phases')
+              diagnostics = '\n'.join(text for suite in suites + checked for text in suite.itertext())
+              diagnostics += Path('build/native-template/checked-jni.log').read_text()
+              if any(marker in diagnostics for marker in ('WARNING in native method',
+                     'FATAL ERROR in native method', 'Calling other JNI functions in the scope')):
+                  raise SystemExit('JNI checking reported a native boundary violation')
+          print(json.dumps(evidence))
+          exports = sorted(Path('app/build/embedded-tests').rglob('chula.mxl'))
+          if len(exports) < 3:
+              raise SystemExit('Expected repeat recognition and JNI-entry exports')
+          for score in exports:
+              subprocess.run(['python3', 'tools/audiveris-port/verify_embedded_score.py', str(score.parent),
+                              '--reference', 'tools/audiveris-port/fixtures/chula-semantic-reference.json',
+                              '--source-image', 'data/examples/chula.png',
+                              '--report', str(score.parent / 'semantic-parity.json')], check=True)
+          output = '\n'.join(text for suite in suites for text in suite.itertext())
+          documents = re.findall(r'EMBEDDED_MULTIPAGE_RESULT input=multipage\.(tiff|pdf) notes=302 noteOnEvents=440 output=([^\r\n]+)', output)
+          if len(documents) != 2 or {kind for kind, path in documents} != {'tiff', 'pdf'} or len({path for kind, path in documents}) != 2:
+              raise SystemExit('Both independent two-page document jobs must complete')
+          for kind, path in documents:
+              directory = Path(path.strip())
+              subprocess.run(['python3', 'tools/audiveris-port/verify_embedded_score.py', str(directory),
+                              '--reference', f'tools/audiveris-port/fixtures/chula-two-page-{kind}-semantic-reference.json',
+                              '--expected-movements', '2',
+                              '--report', str(directory / 'semantic-parity.json')], check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            app/build/embedded-tests/
+            app/build/port-probe/
+            app/build/test-results/embeddedOmrTest/
+            app/build/test-results/nativeTemplateCheckedTest/
+            build/native-template/

@@ -1,0 +1,223 @@
+name: Audiveris iOS interpreted runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Apple target for the runtime build
+        required: true
+        default: both
+        type: choice
+        options: [device, simulator, both]
+  push:
+    branches: ["codex/audiveris-ios-builds", "codex/audiveris-ios-runtime-*"]
+    paths:
+      - "tools/audiveris-port/build-mobile-jdk.sh"
+      - "tools/audiveris-port/build-mobile-jdk-tools.sh"
+      - "tools/audiveris-port/package-mobile-modules.py"
+      - "tools/audiveris-port/test-host-mobile-runtime.gradle"
+      - "tools/audiveris-port/mobile-desktop/**"
+      - "tools/audiveris-port/patch-mobile-desktop.py"
+      - ".github/workflows/audiveris-mobile-runtime.yml"
+  pull_request:
+    paths:
+      - "tools/audiveris-port/build-mobile-jdk.sh"
+      - "tools/audiveris-port/build-mobile-jdk-tools.sh"
+      - "tools/audiveris-port/package-mobile-modules.py"
+      - "tools/audiveris-port/test-host-mobile-runtime.gradle"
+      - "tools/audiveris-port/mobile-desktop/**"
+      - "tools/audiveris-port/patch-mobile-desktop.py"
+      - ".github/workflows/audiveris-mobile-runtime.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mobile-jdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform || 'both' }}
+  cancel-in-progress: true
+
+jobs:
+  host_tools:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      MOBILE_JDK_JOBS: "3"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore matching macOS module tools
+        id: tools_cache
+        uses: actions/cache@v4
+        with:
+          path: build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz
+          key: mobile-jdk28-tools-c1ed06aaef34-Xcode26.6-${{ runner.arch }}-${{ hashFiles('tools/audiveris-port/build-mobile-jdk-tools.sh') }}
+      - name: Reuse proven matching tools across experimental branches
+        id: previous_tools
+        if: steps.tools_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Actions caches are branch-scoped. This successful source build also
+          # provides the same tools to sibling branches; expiry falls back to a rebuild.
+          mkdir -p build/mobile-tools/artifacts
+          gh run download 36406804700 --repo "$GITHUB_REPOSITORY" \
+            --name audiveris-ios-host-tools --dir build/mobile-tools/artifacts
+          python3 - <<'PY'
+          from pathlib import Path
+          import tarfile
+          script = Path('tools/audiveris-port/build-mobile-jdk-tools.sh').read_text()
+          expected = 'c1ed06aaef34c8dccf71e236d1ffa20918a77cfb'
+          if 'mobile_ref=' + expected not in script:
+              raise SystemExit('Pinned host source changed; rebuild matching tools')
+          archive = Path('build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz')
+          with tarfile.open(archive) as source:
+              marker = source.extractfile('jdk/notelite-source-commit')
+              if marker is None or marker.read().decode().strip() != expected:
+                  raise SystemExit('Downloaded host tools do not match pinned target source')
+          PY
+      - name: Install build tools
+        if: steps.tools_cache.outputs.cache-hit != 'true' && steps.previous_tools.outcome != 'success'
+        run: brew install autoconf make
+      - name: Set up bootstrap JDK
+        if: steps.tools_cache.outputs.cache-hit != 'true' && steps.previous_tools.outcome != 'success'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "26"
+      - name: Build matching host jmod and jlink
+        if: steps.tools_cache.outputs.cache-hit != 'true' && steps.previous_tools.outcome != 'success'
+        run: bash tools/audiveris-port/build-mobile-jdk-tools.sh
+      - name: Share matching host tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-ios-host-tools
+          retention-days: 14
+          if-no-files-found: error
+          path: build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz
+      - name: Preserve host compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-ios-host-tools-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/mobile-tools/logs/
+            build/mobile-tools/openjdk-mobile/build/**/configure.log
+            build/mobile-tools/openjdk-mobile/build/**/make-support/failure-logs/
+  host_runtime_validation:
+    needs: host_tools
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      MOBILE_JDK_HOST_HOME: ${{ github.workspace }}/build/mobile-tools/jdk
+      TESSDATA_PREFIX: ${{ github.workspace }}/build/tessdata
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: actions/download-artifact@v4
+        with:
+          name: audiveris-ios-host-tools
+          path: build/mobile-tools/download
+      - name: Unpack exact host runtime and original OCR model
+        run: |
+          tar -xzf build/mobile-tools/download/mobile-jdk-host-tools.tar.gz -C build/mobile-tools
+          mkdir -p build/tessdata
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/tesseract-ocr/tessdata/4767ea922bcc460e70b87b1d303ebdfed0897da8/eng.traineddata \
+            -o build/tessdata/eng.traineddata
+          echo 'daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047  build/tessdata/eng.traineddata' | shasum -a 256 --check
+      - name: Run complete engine on matching JDK28 with mobile desktop classes
+        run: |
+          bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle \
+            -I tools/audiveris-port/test-host-mobile-runtime.gradle \
+            :app:portProbe :app:embeddedOmrTest
+      - name: Verify all score exports against desktop semantics
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          exports = sorted(Path('app/build/embedded-tests').rglob('chula.mxl'))
+          if len(exports) < 3:
+              raise SystemExit('Expected repeat recognition and JNI-entry exports')
+          for score in exports:
+              subprocess.run(['python3', 'tools/audiveris-port/verify_embedded_score.py', str(score.parent),
+                              '--reference', 'tools/audiveris-port/fixtures/chula-semantic-reference.json',
+                              '--source-image', 'data/examples/chula.png',
+                              '--report', str(score.parent / 'semantic-parity.json')], check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: embedded-engine-jdk28-host-evidence
+          retention-days: 14
+          path: |
+            app/build/embedded-tests/
+            app/build/port-probe/
+            app/build/test-results/embeddedOmrTest/
+  runtime:
+    needs: host_tools
+    runs-on: macos-26
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platform == 'device' && '["device"]' || inputs.platform == 'simulator' && '["simulator"]' || '["device","simulator"]') }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      MOBILE_JDK_WORK_DIR: ${{ github.workspace }}/build/mobile-jdk
+      MOBILE_JDK_BASELINE_CACHE: ${{ github.workspace }}/build/mobile-baseline/${{ matrix.platform }}.tar.gz
+      MOBILE_JDK_JOBS: "3"
+      MOBILE_JDK_HOST_HOME: ${{ github.workspace }}/build/mobile-tools/jdk
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download matching macOS module tools
+        uses: actions/download-artifact@v4
+        with:
+          name: audiveris-ios-host-tools
+          path: build/mobile-tools/download
+      - name: Unpack matching macOS module tools
+        run: tar -xzf build/mobile-tools/download/mobile-jdk-host-tools.tar.gz -C build/mobile-tools
+      - name: Install build tools
+        run: brew install autoconf make
+      - name: Set up bootstrap JDK
+        id: bootstrap
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "26"
+      - name: Restore clean compiled target baseline
+        id: baseline_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/mobile-baseline/${{ matrix.platform }}.tar.gz
+          key: mobile-baseline-c1ed06aaef34-Xcode26.6-${{ matrix.platform }}-${{ runner.arch }}-${{ steps.bootstrap.outputs.version }}-${{ hashFiles('tools/audiveris-port/build-mobile-jdk.sh') }}
+      - name: Build Zero runtime and attempt headless java.desktop
+        env:
+          MOBILE_PLATFORM: ${{ matrix.platform }}
+        run: bash tools/audiveris-port/build-mobile-jdk.sh "$MOBILE_PLATFORM"
+      - name: Preserve the clean baseline even if the headless adaptation fails
+        if: always() && steps.baseline_cache.outputs.cache-hit != 'true' && hashFiles(format('build/mobile-baseline/{0}.tar.gz', matrix.platform)) != ''
+        uses: actions/cache/save@v4
+        with:
+          path: build/mobile-baseline/${{ matrix.platform }}.tar.gz
+          key: ${{ steps.baseline_cache.outputs.cache-primary-key }}
+      - name: Preserve compiler diagnostics and produced runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-ios-runtime-${{ matrix.platform }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/mobile-jdk/logs/
+            build/mobile-jdk/artifacts/
+            build/mobile-jdk/openjdk-mobile/build/**/configure.log
+            build/mobile-jdk/openjdk-mobile/build/**/make-support/failure-summary
+            build/mobile-jdk/openjdk-mobile/build/**/make-support/failure-logs/

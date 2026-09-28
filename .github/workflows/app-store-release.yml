@@ -1,11 +1,14 @@
 name: iOS App Store release
 
 on:
+  push:
+    branches: [codex/audiveris-release-builds]
   pull_request:
     paths:
       - "apple/**"
       - "practice-web/**"
       - "app/res/practice/**"
+      - "tools/audiveris-port/**"
       - ".github/workflows/app-store-release.yml"
   workflow_dispatch:
     inputs:
@@ -32,9 +35,13 @@ on:
       build_number:
         description: "New build number; empty uses the workflow run number"
         type: string
+      acceptance_run_id:
+        description: "Successful full embedded iPhone/iPad acceptance run for this exact commit (required for export)"
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: app-store-release-${{ github.ref }}
@@ -43,7 +50,7 @@ concurrency:
 jobs:
   archive:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'verify' }}
       RELEASE_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.upload && 'true' || 'false' }}
@@ -51,8 +58,18 @@ jobs:
       RELEASE_TEAM_ID: ${{ inputs.team_id }}
       RELEASE_VERSION: ${{ inputs.version || '1.0.0' }}
       RELEASE_BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+      RELEASE_ACCEPTANCE_RUN: ${{ inputs.acceptance_run_id }}
     steps:
       - uses: actions/checkout@v4
+      - name: Test native build provenance gates
+        run: |
+          python3 tools/audiveris-port/test_download_native_artifacts.py
+          python3 -B apple/release/test_release.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -66,11 +83,27 @@ jobs:
           npm ci
           npm test
           npm run build
-      - name: Generate Xcode project
-        working-directory: apple
+      - name: Prepare complete native artifacts and validate accepted source before export
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          xcodegen generate --spec project.yml
+          arguments=(--platform device --destination build/release-native)
+          if [ "$RELEASE_MODE" = export ]; then
+            if [ -z "$RELEASE_ACCEPTANCE_RUN" ]; then
+              echo "Export requires a successful full embedded acceptance run for this source commit." >&2
+              exit 1
+            fi
+            arguments+=(--acceptance-run "$RELEASE_ACCEPTANCE_RUN" --source-sha "$GITHUB_SHA")
+          fi
+          python3 tools/audiveris-port/download-native-artifacts.py "${arguments[@]}"
+      - name: Compose the complete offline release application
+        run: |
+          bash tools/audiveris-port/build-embedded-probe.sh iphoneos \
+            "$EMBEDDED_RUNTIME" "$EMBEDDED_OCR" build/release-embedded-probe
+          bash tools/audiveris-port/build-embedded-app.sh iphoneos \
+            build/release-embedded-probe/embedding build/release-embedded-app
+          printf 'RELEASE_EMBEDDED_BUILD=%s\n' "$GITHUB_WORKSPACE/build/release-embedded-app" >> "$GITHUB_ENV"
       - name: Verify unsigned iOS device archive
         if: env.RELEASE_MODE == 'verify'
         run: python3 apple/release/release.py archive
@@ -87,11 +120,37 @@ jobs:
       - name: Remove temporary signing credentials
         if: always()
         run: python3 apple/release/release.py cleanup
+      - name: Preserve JNI verification diagnostics even after a rejected archive or IPA
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP']) / 'yinban-release-output'
+          destination = Path('build/release-embedded-app/evidence')
+          for report in source.glob('embedded-*-jni-bindings.json'):
+              destination.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(report, destination / report.name)
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: yinban-ios-${{ env.RELEASE_MODE }}-${{ env.RELEASE_BUILD_NUMBER }}
           path: |
             ${{ runner.temp }}/yinban-release-output/Yinban.xcarchive.zip
             ${{ runner.temp }}/yinban-release-output/export/*.ipa
+            ${{ runner.temp }}/yinban-release-output/embedded-archive-inventory.json
+            ${{ runner.temp }}/yinban-release-output/embedded-ipa-inventory.json
           if-no-files-found: error
           retention-days: 7
+      - name: Preserve embedded build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yinban-embedded-evidence-${{ env.RELEASE_BUILD_NUMBER }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build/release-native/source-runs.json
+            build/release-native/accepted-run.json
+            build/release-embedded-probe/evidence/
+            build/release-embedded-app/evidence/

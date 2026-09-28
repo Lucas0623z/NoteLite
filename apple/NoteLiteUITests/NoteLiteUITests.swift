@@ -7,6 +7,9 @@ final class NoteLiteUITests: XCTestCase {
     @MainActor
     func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() {
         continueAfterFailure = false
+        // Simulator launch, accessibility snapshots and both iPad rotations
+        // exceeded 120 seconds in CI while every functional assertion passed.
+        executionTimeAllowance = 300
         #if os(iOS)
         XCUIDevice.shared.orientation = .portrait
         #endif
@@ -18,7 +21,8 @@ final class NoteLiteUITests: XCTestCase {
             app.launchEnvironment["DYLD_FALLBACK_LIBRARY_PATH"] = swiftPath
         }
         app.launch()
-        let score = app.descendants(matching: .any).matching(identifier: "score-row").firstMatch
+        let score = app.descendants(matching: .any).matching(identifier: "score-row")
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "demo", "demo")).firstMatch
         XCTAssertTrue(score.waitForExistence(timeout: 15), "Bundled MusicXML must enter the real library importer")
         attach(app, name: "Library")
         score.tap()
@@ -100,7 +104,9 @@ final class NoteLiteUITests: XCTestCase {
             }
             return stableSamples >= 2
         }, object: app)
-        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed,
+        // One CI accessibility query took 9.16 seconds after rotation. Allow
+        // three stable samples while keeping orientation and containment checks.
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 30), .completed,
                        "The rotated window and score renderer must finish resizing before capture")
     }
     #endif

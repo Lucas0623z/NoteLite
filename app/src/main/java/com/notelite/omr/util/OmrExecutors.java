@@ -159,6 +159,55 @@ public class OmrExecutors
         logger.debug("OmrExecutors open");
     }
 
+    /**
+     * Reopen pools for a serialized embedded job only after every previous worker terminated.
+     * A timed-out worker must not overlap a later job using the application's static state.
+     */
+    public static synchronized void restartForEmbedded ()
+    {
+        for (Pool pool : allPools) {
+            if (pool.hasUnterminatedWorkers()) {
+                throw new IllegalStateException("Previous OMR workers are still running: " + pool.getName());
+            }
+        }
+        creationAllowed = true;
+    }
+
+    /**
+     * Drain pools without losing references to uncooperative workers. Unlike desktop shutdown,
+     * this method is intended for a JVM that remains alive for the next job. No thread is stopped.
+     */
+    public static synchronized boolean shutdownForEmbedded (boolean cancel,
+                                                            long timeoutMillis)
+    {
+        if (timeoutMillis < 0 || timeoutMillis > 300_000) {
+            throw new IllegalArgumentException("Invalid embedded shutdown timeout");
+        }
+        creationAllowed = false;
+        final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        boolean interrupted = Thread.interrupted();
+        boolean terminated = true;
+        try {
+            for (Pool pool : allPools) {
+                pool.requestEmbeddedShutdown(cancel);
+            }
+            for (Pool pool : allPools) {
+                try {
+                    terminated &= pool.awaitEmbeddedShutdown(deadline);
+                } catch (InterruptedException ex) {
+                    interrupted = true;
+                    terminated = false;
+                    pool.requestEmbeddedShutdown(true);
+                }
+            }
+            return terminated;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     //----------//
     // shutdown //
     //----------//
@@ -380,6 +429,43 @@ public class OmrExecutors
     {
         /** The underlying pool of threads. */
         protected ExecutorService pool;
+
+        synchronized boolean hasUnterminatedWorkers ()
+        {
+            return pool != null && !pool.isTerminated();
+        }
+
+        synchronized void requestEmbeddedShutdown (boolean cancel)
+        {
+            if (pool != null) {
+                if (cancel) {
+                    pool.shutdownNow();
+                } else {
+                    pool.shutdown();
+                }
+            }
+        }
+
+        boolean awaitEmbeddedShutdown (long deadline) throws InterruptedException
+        {
+            final ExecutorService current;
+            synchronized (this) {
+                current = pool;
+            }
+            if (current == null) {
+                return true;
+            }
+            if (!current.awaitTermination(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)) {
+                current.shutdownNow();
+                return false; // Retain the reference, so the next embedded job cannot start yet.
+            }
+            synchronized (this) {
+                if (pool == current) {
+                    pool = null;
+                }
+            }
+            return true;
+        }
 
         /**
          * Terminate the pool.

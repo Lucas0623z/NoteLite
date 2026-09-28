@@ -32,6 +32,9 @@ struct LibraryView: View {
     @State private var search = ""
     @State private var importing = false
     @State private var showingSettings = false
+    #if DEBUG
+    @State private var showingLocalOMR = false
+    #endif
     @State private var deleting: ScoreRecord?
     @State private var phonePath: [UUID] = []
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -104,13 +107,16 @@ struct LibraryView: View {
                 .noteLiteSheetSize(idealWidth: 560, idealHeight: 590)
                 #endif
         }
+        #if DEBUG
+        .sheet(isPresented: $showingLocalOMR) { LocalOMRDebugView() }
+        #endif
         .alert("无法完成操作", isPresented: Binding(
             get: { library.errorMessage != nil },
             set: { if !$0 { library.errorMessage = nil } }
         )) {
             Button("好", role: .cancel) { library.errorMessage = nil }
         } message: { Text(library.errorMessage ?? "") }
-        .confirmationDialog("删除这份本地曲谱及下载结果？", isPresented: Binding(
+        .confirmationDialog("删除这份曲谱及识谱结果？", isPresented: Binding(
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }
         ), titleVisibility: .visible) {
             Button("删除本地文件", role: .destructive) {
@@ -119,7 +125,7 @@ struct LibraryView: View {
             }
             Button("取消", role: .cancel) { deleting = nil }
         } message: {
-            Text("已有服务器任务会先被清理；仍在运行或无法连接时保留本地记录，请稍后再试。")
+            Text(deleting?.job != nil ? "已有服务器任务会先被清理；仍在运行或无法连接时保留本地记录，请稍后再试。" : "将删除保存在这台设备上的原稿和识谱结果。")
         }
         .task { library.resumePending() }
         .onChange(of: library.records.map(\.id)) { ids in
@@ -223,7 +229,13 @@ struct LibraryView: View {
                         Divider()
                         Button("服务器设置") { showingSettings = true }
                     }
+                    #if DEBUG
+                    Divider()
+                    Button("本地引擎移植测试") { showingLocalOMR = true }
+                        .accessibilityIdentifier("local-omr-open")
+                    #endif
                 } label: { Label("排列与设置", systemImage: "line.3.horizontal.decrease") }
+                    .accessibilityIdentifier("library-menu")
                 Button { importing = true } label: { Label("导入乐谱", systemImage: "plus") }
                     .keyboardShortcut("o").disabled(!library.canImport)
             }
@@ -329,13 +341,15 @@ struct ScoreDetailView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var history: PracticeHistoryStore
     let record: ScoreRecord
-    @State private var practicing = false
+    @State private var practicing: PracticePart?
+    @State private var choosingPart = false
     @State private var showingOriginal = false
     @State private var showingSettings = false
     @State private var confirmingRestart = false
     @State private var confirmingCleanup = false
     private var active: Bool { library.activeIDs.contains(record.id) }
     private var canPractice: Bool { library.practiceURL(record) != nil }
+    private var practiceParts: [PracticePart] { library.practiceParts(record) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -377,15 +391,22 @@ struct ScoreDetailView: View {
             }
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $practicing) {
-            PracticeView(record: record, onDismiss: { practicing = false })
+        .fullScreenCover(item: $practicing) { part in
+            PracticeView(record: record, part: part, onDismiss: { practicing = nil })
         }
         #else
-        .sheet(isPresented: $practicing) {
-            PracticeView(record: record, onDismiss: { practicing = false })
+        .sheet(item: $practicing) { part in
+            PracticeView(record: record, part: part, onDismiss: { practicing = nil })
                 .noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
         }
         #endif
+        .confirmationDialog("选择要练习的部分", isPresented: $choosingPart, titleVisibility: .visible) {
+            ForEach(practiceParts) { part in
+                Button(part.title ?? "开始练习") { practicing = part }
+                    .accessibilityIdentifier("practice-part-" + part.id)
+            }
+            Button("取消", role: .cancel) {}
+        }
         .sheet(isPresented: $showingOriginal) {
             NavigationStack {
                 if let url = library.sourceURL(record) {
@@ -406,12 +427,12 @@ struct ScoreDetailView: View {
                 .noteLiteSheetSize(idealWidth: 560, idealHeight: 590)
                 #endif
         }
-        .confirmationDialog("重新上传原稿并创建新的识谱任务？",
+        .confirmationDialog(library.hasLocalEngine && record.job == nil ? "重新识别这份原稿？" : "重新上传原稿并创建新的识谱任务？",
                             isPresented: $confirmingRestart, titleVisibility: .visible) {
             Button("重新识别") { library.start(record.id, newJob: true) }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("先清理原服务器上的旧任务，再使用当前服务器设置重新上传。服务器仍在运行旧任务时需要等待。")
+            Text(library.hasLocalEngine && record.job == nil ? "识别成功后会替换之前的导出结果。" : "先清理原服务器上的旧任务，再使用当前服务器设置重新上传。服务器仍在运行旧任务时需要等待。")
         }
         .confirmationDialog("清理服务器上的原稿、任务和结果？",
                             isPresented: $confirmingCleanup, titleVisibility: .visible) {
@@ -429,12 +450,19 @@ struct ScoreDetailView: View {
                 Text(canPractice ? "曲谱已就绪" : "原稿已保存在此设备").font(.headline)
             }
             if canPractice {
-                Button { practicing = true } label: {
+                Button {
+                    if practiceParts.count == 1 { practicing = practiceParts.first }
+                    else { choosingPart = true }
+                } label: {
                     Label(history.latest(for: record.id) == nil ? "开始练习" : "继续练习", systemImage: "play")
                         .frame(minHeight: 24)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .accessibilityIdentifier("practice-start")
+                if practiceParts.count > 1 {
+                    Text("这份曲谱包含 \(practiceParts.count) 个部分，可分别练习。")
+                        .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
+                }
                 Text("乐器根据谱面信息判断，可在练习前更改。")
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             } else {
@@ -450,7 +478,7 @@ struct ScoreDetailView: View {
                 Text("识谱与转换").font(.headline)
                 Spacer()
                 if active { ProgressView().controlSize(.small) }
-                Text(record.paused ? "已暂停跟踪" : record.phase.title)
+                Text(record.paused ? (record.recognitionLocation == .device ? "已停止" : "已暂停跟踪") : record.phase.title)
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             }
             if record.phase == .uploading {
@@ -460,26 +488,27 @@ struct ScoreDetailView: View {
                 Text(error).font(.subheadline).foregroundStyle(NoteLiteTheme.wrong).textSelection(.enabled)
             }
             if active {
-                Button(record.phase == .uploading ? "停止上传" : "暂停跟踪") { library.pause(record.id) }
-                Text("暂停跟踪不会取消服务器识谱，之后可以继续获取结果。")
+                Button(record.recognitionLocation == .device ? "停止识谱" : (record.phase == .uploading ? "停止上传" : "暂停跟踪")) { library.pause(record.id) }
+                Text(record.recognitionLocation == .device ? "停止后可以重新识别；当前图像处理会在安全结束后释放。" : "暂停跟踪不会取消服务器识谱，之后可以继续获取结果。")
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             } else if record.phase != .ready {
                 VStack(alignment: .leading, spacing: 12) {
                     Button(actionTitle) { library.start(record.id) }
-                        .buttonStyle(.bordered).disabled(!library.isConfigured && record.serverURL == nil)
-                    if !library.isConfigured { Button("连接识谱服务器") { showingSettings = true } }
+                        .buttonStyle(.bordered).disabled(!library.canRecognize && record.serverURL == nil)
+                        .accessibilityIdentifier("recognition-start")
+                    if !library.hasLocalEngine && !library.isConfigured { Button("连接识谱服务器") { showingSettings = true } }
                 }
             }
             if (record.job != nil || record.phase == .ready) && !active {
                 Menu("更多识谱操作") {
-                    Button("重新提交识别") { confirmingRestart = true }.disabled(!library.isConfigured)
+                    Button("重新识别") { confirmingRestart = true }.disabled(!library.canRecognize)
                     if record.job != nil {
                         Button("清理服务器任务", role: .destructive) { confirmingCleanup = true }
                     }
                 }
             }
             if !canPractice {
-                Text("点选开始识别时，原稿将上传到你配置的识谱服务器。")
+                Text(library.hasLocalEngine && record.job == nil ? "识谱在设备内完成，无需网络。" : "点选开始识别时，原稿将上传到你配置的识谱服务器。")
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             }
             if let server = record.serverURL {
@@ -505,7 +534,7 @@ struct ScoreDetailView: View {
     private var actionTitle: String {
         if record.job?.state == .failed { return "重新识别" }
         if record.job != nil { return record.phase == .failed ? "重试获取结果" : "继续获取结果" }
-        return record.phase == .failed ? "重新上传识别" : "开始识别"
+        return record.phase == .failed ? (library.hasLocalEngine ? "重新识别" : "重新上传识别") : "开始识别"
     }
 }
 

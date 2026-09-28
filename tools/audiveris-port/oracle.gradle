@@ -1,0 +1,55 @@
+// Run the actual desktop classes to produce the native port's reference outputs.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def oracleRoot = new File(gradle.rootProject.projectDir, 'tools/audiveris-port')
+    def classes = new File(app.buildDir, 'port-oracle-classes')
+    app.tasks.register('compilePortOracle', JavaCompile) {
+        dependsOn app.tasks.named('classes')
+        source new File(oracleRoot, 'GenerateOracle.java')
+        source new File(oracleRoot, 'PortabilityProbe.java')
+        classpath = app.sourceSets.main.runtimeClasspath
+        destinationDirectory = classes
+        options.encoding = 'UTF-8'
+        options.compilerArgs += ['--enable-preview']
+        sourceCompatibility = '21'
+        targetCompatibility = '21'
+    }
+    app.tasks.register('portOracle', JavaExec) {
+        dependsOn app.tasks.named('compilePortOracle')
+        classpath = app.files(classes) + app.sourceSets.main.runtimeClasspath
+        mainClass = 'GenerateOracle'
+        workingDir = gradle.rootProject.projectDir
+        jvmArgs '--enable-preview', '-Djava.awt.headless=true'
+        args new File(app.buildDir, 'port-oracle').absolutePath
+    }
+    app.tasks.register('portJNI', JavaExec) {
+        classpath = app.configurations.runtimeClasspath
+        mainClass = 'org.bytedeco.javacpp.tools.Builder'
+        workingDir = gradle.rootProject.projectDir
+        doFirst {
+            def presets = app.configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts.findAll {
+                it.moduleVersion.id.group == 'org.bytedeco' &&
+                it.moduleVersion.id.name in ['leptonica', 'tesseract'] && !it.classifier
+            }.collect { it.file.absolutePath }.sort()
+            if (presets.size() != 2) throw new GradleException('Expected exact Leptonica and Tesseract API JARs')
+            def output = new File(app.buildDir, 'ios-jni')
+            output.mkdirs()
+            new File(output, 'binding-jars.json').text = groovy.json.JsonOutput.toJson(presets)
+            // Builder package scanning needs its own classpath, not only the JVM's.
+            // Include C++ object bindings as well as the global C API wrappers.
+            setArgs(['-classpath', presets.join(File.pathSeparator), '-Dplatform=ios-arm64',
+                     '-d', output.absolutePath, '-nocompile',
+                     'org.bytedeco.leptonica.**', 'org.bytedeco.tesseract.**'])
+        }
+    }
+    app.tasks.register('portProbe', JavaExec) {
+        dependsOn app.tasks.named('compilePortOracle')
+        classpath = app.files(classes) + app.sourceSets.main.runtimeClasspath
+        mainClass = 'PortabilityProbe'
+        workingDir = gradle.rootProject.projectDir
+        jvmArgs '--enable-preview', '-Djava.awt.headless=true'
+        args new File(app.projectDir, 'res').absolutePath,
+             new File(app.buildDir, 'port-probe').absolutePath,
+             System.getenv('TESSDATA_PREFIX') ?: ''
+    }
+}

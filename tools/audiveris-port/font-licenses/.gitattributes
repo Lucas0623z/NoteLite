@@ -1,0 +1,3 @@
+# Preserve publisher license bytes and their recorded SHA-256 across platforms.
+*-LICENSE.txt -text -whitespace
+MakeMusic-OFL.txt -text -whitespace

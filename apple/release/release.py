@@ -4,9 +4,10 @@
 import base64
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import plistlib
 import re
 import secrets
@@ -14,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import zipfile
 
 
 class ReleaseError(Exception):
@@ -172,6 +174,262 @@ def install_signing(private, bundle, team, credentials):
     return profile["UUID"], fingerprint
 
 
+NATIVE_ENGINE_ENTRIES = (
+    "JNI_CreateJavaVM", "JNI_OnLoad_jnijavacpp", "JNI_OnLoad_jnileptonica",
+    "JNI_OnLoad_jnitesseract", "loadfunctions",
+)
+REQUIRED_ENGINE_RESOURCES = {
+    "build-inventory.json", "runtime/lib/modules", "tessdata/eng.traineddata",
+    "assets/basic-classifier.zip", "assets/Bravura.otf", "assets/FinaleJazzText.otf",
+    "licenses/fonts/provenance.json", "licenses/fonts/FONT-NOTICES.txt",
+    "licenses/fonts/Bravura-LICENSE.txt", "licenses/fonts/Leland-LICENSE.txt",
+    "licenses/fonts/MakeMusic-OFL.txt",
+}
+REQUIRED_ENGINE_CLASSES = {
+    "com/notelite/omr/EmbeddedOmrEngine.class",
+    "org/apache/pdfbox/rendering/PDFRenderer.class",
+    "org/bytedeco/javacpp/Loader.class",
+    "org/bytedeco/tesseract/global/tesseract.class",
+    "org/bytedeco/leptonica/global/leptonica.class",
+}
+PRACTICE_SOURCE = Path(__file__).resolve().parents[2] / "app/res/practice"
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def contained_file(root, relative):
+    require(isinstance(relative, str) and relative and "\\" not in relative,
+            "Invalid embedded resource path.")
+    name = PurePosixPath(relative)
+    require(not name.is_absolute() and ".." not in name.parts and ":" not in relative,
+            "Embedded resource path escapes its directory.")
+    result = (root / relative).resolve()
+    require(result.is_relative_to(root.resolve()) and result.is_file(),
+            f"Missing or escaped embedded file: {relative}.")
+    return result
+
+
+def verify_resource_inventory(root, resources):
+    require(isinstance(resources, list) and resources, "Embedded resource inventory is empty.")
+    names = set()
+    for entry in resources:
+        require(isinstance(entry, dict), "Invalid embedded resource inventory entry.")
+        name = entry.get("path")
+        path = contained_file(root, name)
+        require(name.casefold() not in names, "Duplicate embedded resource inventory path.")
+        names.add(name.casefold())
+        require(isinstance(entry.get("sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", entry["sha256"]),
+                f"Invalid embedded resource checksum: {name}.")
+        require(type(entry.get("bytes")) is int and path.stat().st_size == entry["bytes"]
+                and digest(path) == entry["sha256"], f"Embedded resource differs from composition: {name}.")
+    expected = {entry["path"] for entry in resources}
+    actual = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+    require(actual == expected, "Embedded resource files do not match the complete composition inventory.")
+    require(REQUIRED_ENGINE_RESOURCES <= expected, "The composition omits required engine resources or font notices.")
+    return expected
+
+
+def verify_embedded_cpp_flags(value):
+    """Keep the measured template kernel optimized with strict floating point."""
+    flags = shlex.split(value)
+    required = {"-O2", "-fno-fast-math", "-ffp-contract=off"}
+    require(required <= set(flags), "Embedded C++ settings must include -O2, -fno-fast-math and -ffp-contract=off.")
+    # Refuse conflicting flags anywhere, including after the required flags.
+    # Merely checking token presence would accept a later -O0 or -ffast-math.
+    relaxed = {"-ffast-math", "-funsafe-math-optimizations", "-fassociative-math",
+               "-freciprocal-math", "-ffinite-math-only", "-fno-signed-zeros",
+               "-fno-honor-infinities", "-fno-honor-nans", "-menable-unsafe-fp-math"}
+    conflicts = [flag for flag in flags
+                 if flag in relaxed
+                 or (re.fullmatch(r"-O(?:[0-9]+|s|z|g|fast)?", flag) and flag != "-O2")
+                 or (flag.startswith("-ffp-contract=") and flag != "-ffp-contract=off")
+                 or (flag.startswith("-ffp-model=") and flag != "-ffp-model=strict")]
+    require(not conflicts, "Embedded C++ settings contain conflicting optimization or floating-point flags: "
+            + ", ".join(conflicts))
+    return flags
+
+
+def embedded_build():
+    """Resolve only a verified device composition; there is no baseline fallback."""
+    raw = os.environ.get("RELEASE_EMBEDDED_BUILD", "")
+    require(raw.strip(), "RELEASE_EMBEDDED_BUILD must name a complete iphoneos engine build.")
+    build = Path(raw).resolve()
+    require(build.is_dir(), "The embedded build directory does not exist.")
+    evidence = build / "evidence"
+    location = contained_file(evidence, "project-location.txt").read_text(encoding="utf-8").strip()
+    project_directory = Path(location)
+    require(project_directory.is_absolute(), "The generated project location must be absolute.")
+    project_directory = project_directory.resolve()
+    require(project_directory.is_relative_to(build), "The generated project must belong to this embedded build.")
+    project = project_directory / "NoteLite.xcodeproj"
+    require(project.is_dir(), "The generated embedded Xcode project is missing.")
+    for name in ("embedded-project.json", "native-libraries.xcconfig"):
+        generated = name if name.endswith(".json") else "Generated/" + name
+        require(contained_file(evidence, name).read_bytes() == contained_file(project_directory, generated).read_bytes(),
+                f"Generated embedded configuration differs from its evidence: {name}.")
+    spec = json.loads((evidence / "embedded-project.json").read_text(encoding="utf-8"))
+    target = spec["targets"]["NoteLite"]
+    options = target["settings"]["base"]
+    require("EMBEDDED_OMR_RUNTIME" in shlex.split(options.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", "")),
+            "The embedded project does not enable the production engine.")
+    require(target.get("configFiles", {}).get("Release") == "Generated/native-libraries.xcconfig",
+            "The Release target does not use the composed native libraries.")
+    bridge = contained_file(project_directory, "EmbeddedRuntime/EmbeddedJVM.h")
+    contained_file(project_directory, "EmbeddedRuntime/EmbeddedJVM.mm")
+    contained_file(project_directory, "Generated/native-symbols.c")
+    require(Path(options.get("SWIFT_OBJC_BRIDGING_HEADER", "")).resolve() == bridge,
+            "The embedded project uses an unexpected JNI bridge header.")
+    inventory_file = contained_file(evidence, "app-inventory.json")
+    inventory = json.loads(inventory_file.read_text(encoding="utf-8"))
+    require(inventory.get("sdk") == "iphoneos" and inventory.get("architecture") == "arm64"
+            and inventory.get("embeddedRuntimeEnabled") is True
+            and set(inventory.get("deviceFamilies", [])) == {1, 2},
+            "Release requires a complete iphoneos/arm64 composition for iPhone and iPad.")
+    resources = project_directory / "Generated/OMRResources"
+    names = verify_resource_inventory(resources, inventory.get("resources"))
+    native = json.loads((resources / "build-inventory.json").read_text(encoding="utf-8"))
+    require(native.get("sdk") == "iphoneos" and native.get("architecture") == "arm64",
+            "The engine's native inventory belongs to another platform.")
+    archives = native.get("nativeArchives", [])
+    require(archives, "The composition has no native archive provenance.")
+    archive_paths = set()
+    for entry in archives:
+        path = Path(entry["path"])
+        require(path.is_absolute() and path.is_file() and path.suffix == ".a",
+                "A composed native archive is unavailable; retain the downloaded dependencies.")
+        require(digest(path) == entry["sha256"], "A native archive changed after composition.")
+        require(path.as_posix() not in archive_paths, "Duplicate native archive provenance.")
+        archive_paths.add(path.as_posix())
+    config = {}
+    for line in (evidence / "native-libraries.xcconfig").read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            config[key.strip()] = value.strip()
+    flags = shlex.split(config.get("OTHER_LDFLAGS", ""))
+    linked_archives = {token.removeprefix("-Wl,-force_load,") for token in flags if token.endswith(".a")}
+    require(config.get("ARCHS") == "arm64" and linked_archives == archive_paths,
+            "The native link configuration does not match its archive provenance.")
+    headers = [Path(token) for token in shlex.split(config.get("HEADER_SEARCH_PATHS", "")) if token != "$(inherited)"]
+    require(headers and all(path.is_absolute() and path.is_dir() for path in headers)
+            and any((path / "jni.h").is_file() for path in headers)
+            and any((path / "jni_md.h").is_file() for path in headers), "The target JNI headers are missing.")
+    missing_classes = set(REQUIRED_ENGINE_CLASSES)
+    for name in sorted(names):
+        if name.startswith("java/") and name.endswith(".jar"):
+            try:
+                with zipfile.ZipFile(resources / name) as jar:
+                    missing_classes.difference_update(jar.namelist())
+            except zipfile.BadZipFile:
+                raise ReleaseError(f"Invalid embedded Java archive: {name}.") from None
+    require(not missing_classes, "The embedded Java bundle lacks the engine, PDFBox, or OCR APIs.")
+    settings_output = json.loads(run([
+        "xcodebuild", "-project", str(project), "-scheme", "NoteLite", "-configuration", "Release",
+        "-destination", "generic/platform=iOS", "-showBuildSettings", "-json",
+    ], capture=True))
+    app_settings = [item["buildSettings"] for item in settings_output if item.get("target") == "NoteLite"]
+    require(len(app_settings) == 1, "Cannot resolve the embedded application's Release build settings.")
+    effective = app_settings[0]
+    require("EMBEDDED_OMR_RUNTIME" in shlex.split(effective.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", ""))
+            and effective.get("PLATFORM_NAME") == "iphoneos"
+            and shlex.split(effective.get("ARCHS", "")) == ["arm64"],
+            "Effective Release settings disable the engine or target a different platform.")
+    require(linked_archives <= {token.removeprefix("-Wl,-force_load,")
+                               for token in shlex.split(effective.get("OTHER_LDFLAGS", ""))},
+            "Effective Release settings lost composed native libraries.")
+    require(effective.get("STRIP_INSTALLED_PRODUCT") == "NO" and effective.get("COPY_PHASE_STRIP") == "NO",
+            "Embedded Release builds must preserve native exports required by JNI and FFM lookup.")
+    cpp_flags = verify_embedded_cpp_flags(effective.get("OTHER_CPLUSPLUSFLAGS", ""))
+    return {"project": project, "resources": inventory["resources"], "inventorySHA256": digest(inventory_file),
+            "nativeCPlusPlusFlags": cpp_flags}
+
+
+def verify_preset_bindings(app, symbols, report_file):
+    """Compare bundled API declarations with this executable's actual exports."""
+    jars = sorted(path for path in (app / "OMRResources/java").glob("*.jar")
+                  if path.name.startswith(("leptonica-", "tesseract-")))
+    require(len(jars) == 2 and {jar.name.split("-")[0] for jar in jars} == {"leptonica", "tesseract"},
+            "Expected one bundled Leptonica and one Tesseract API JAR.")
+    auditor = Path(__file__).resolve().parents[2] / "tools/audiveris-port/verify-jni-bindings.py"
+    spec = importlib.util.spec_from_file_location("notelite_jni_bindings", auditor)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result = module.audit(jars, set(re.findall(r"\b_?(Java_[A-Za-z0-9_]+)$", symbols, re.M)))
+    report = {"jars": [{"name": jar.name, "sha256": digest(jar)} for jar in jars],
+              "linked": result, "passed": result["passed"]}
+    report_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    require(report["passed"], "The executable lacks native preset bindings; see " + report_file.name + ".")
+    return report
+
+
+def verify_embedded_archive(app, composition, output, *, report_name="embedded-archive-inventory.json"):
+    """Check the actual archived app before export, validation or upload."""
+    verify_resource_inventory(app / "OMRResources", composition["resources"])
+    practice_files = sorted(path for path in PRACTICE_SOURCE.rglob("*") if path.is_file())
+    require(practice_files, "Build the bundled practice resources before archiving.")
+    for original in practice_files:
+        relative = original.relative_to(PRACTICE_SOURCE).as_posix()
+        installed = contained_file(app / "practice", relative)
+        require(digest(installed) == digest(original),
+                f"Archived practice resource differs from its source: {relative}.")
+    assets = contained_file(app, "Assets.car")
+    require(assets.stat().st_size > 0, "The archived asset catalog is empty.")
+    info = plistlib.loads((app / "Info.plist").read_bytes())
+    require(set(info.get("UIDeviceFamily", [])) == {1, 2}, "The archive must support iPhone and iPad.")
+    binary = contained_file(app, info["CFBundleExecutable"])
+    run(["xcrun", "lipo", str(binary), "-verify_arch", "arm64"])
+    commands = run(["xcrun", "vtool", "-show-build", str(binary)], capture=True)
+    require(re.search(r"\bplatform\s+IOS\b", commands) and "IOSSIMULATOR" not in commands,
+            "The archived executable is not an iOS device binary.")
+    symbols = run(["xcrun", "nm", "-gU", str(binary)], capture=True)
+    require(all(re.search(r"\b_" + re.escape(name) + r"$", symbols, re.M) for name in NATIVE_ENGINE_ENTRIES),
+            "The archived executable lacks required embedded JNI entry points.")
+    binding_report = verify_preset_bindings(app, symbols,
+        output / (Path(report_name).stem.removesuffix("-inventory") + "-jni-bindings.json"))
+    report = {"sdk": "iphoneos", "architecture": "arm64", "embeddedRuntimeEnabled": True,
+              "bundleIdentifier": info.get("CFBundleIdentifier"),
+              "version": info.get("CFBundleShortVersionString"), "build": info.get("CFBundleVersion"),
+              "compositionInventorySHA256": composition["inventorySHA256"],
+              "practiceResourceCount": len(practice_files), "assetCatalogSHA256": digest(assets),
+              "nativePresetBindings": binding_report,
+              "nativeCPlusPlusFlags": composition["nativeCPlusPlusFlags"],
+              "nativeEntryPoints": list(NATIVE_ENGINE_ENTRIES), "resources": composition["resources"]}
+    (output / report_name).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+
+def verify_exported_ipa(ipa, composition, private, output, archived_info):
+    """Validate the actual exported Payload before permitting an upload."""
+    extracted = private / "export-verification"
+    require(not extracted.exists(), "IPA verification directory already exists; use a fresh release job.")
+    extracted.mkdir()
+    try:
+        with zipfile.ZipFile(ipa) as archive:
+            names = set()
+            for entry in archive.infolist():
+                name = PurePosixPath(entry.filename)
+                require(entry.filename and "\\" not in entry.filename and ":" not in entry.filename
+                        and not name.is_absolute() and ".." not in name.parts,
+                        "Exported IPA contains an invalid ZIP path.")
+                require((entry.external_attr >> 16) & 0o170000 != 0o120000,
+                        "Exported IPA contains a symbolic link; its contents cannot be verified safely.")
+                require(name.as_posix().casefold() not in names, "Exported IPA contains duplicate ZIP paths.")
+                names.add(name.as_posix().casefold())
+            archive.extractall(extracted)
+    except zipfile.BadZipFile:
+        raise ReleaseError("The exported IPA is not a valid ZIP archive.") from None
+    apps = [path for path in (extracted / "Payload").glob("*.app") if path.is_dir()]
+    require(len(apps) == 1, "Exported IPA must contain exactly one Payload application.")
+    info = plistlib.loads(contained_file(apps[0], "Info.plist").read_bytes())
+    for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion"):
+        require(info.get(key) == archived_info.get(key), "Exported IPA identity/version differs from its archive.")
+    verify_embedded_archive(apps[0], composition, output, report_name="embedded-ipa-inventory.json")
+
+
 def archive():
     mode, upload, bundle, team, version, build = settings()
     private, output = paths()
@@ -182,13 +440,13 @@ def archive():
                     "ASC_API_KEY_ID", "ASC_API_ISSUER_ID", "ASC_API_PRIVATE_KEY_BASE64")
     # Remove secrets from the environment inherited by Xcode and other subprocesses.
     credentials = {name: os.environ.pop(name, "") for name in secret_names}
-    project = Path(__file__).resolve().parents[1] / "NoteLite.xcodeproj"
     archive_path = output / "Yinban.xcarchive"
-    command = ["xcodebuild", "archive", "-project", str(project), "-scheme", "NoteLite", "-configuration", "Release",
-               "-destination", "generic/platform=iOS", "-archivePath", str(archive_path),
-               "-derivedDataPath", str(private / "DerivedData"), f"PRODUCT_BUNDLE_IDENTIFIER={bundle}",
-               f"MARKETING_VERSION={version}", f"CURRENT_PROJECT_VERSION={build}"]
     try:
+        composition = embedded_build()
+        command = ["xcodebuild", "archive", "-project", str(composition["project"]), "-scheme", "NoteLite", "-configuration", "Release",
+                   "-destination", "generic/platform=iOS", "-archivePath", str(archive_path),
+                   "-derivedDataPath", str(private / "DerivedData"), f"PRODUCT_BUNDLE_IDENTIFIER={bundle}",
+                   f"MARKETING_VERSION={version}", f"CURRENT_PROJECT_VERSION={build}"]
         if upload:
             require(re.fullmatch(r"[A-Z0-9]{10}", credentials["ASC_API_KEY_ID"]), "Missing or invalid ASC_API_KEY_ID.")
             require(re.fullmatch(r"[a-fA-F0-9-]{36}", credentials["ASC_API_ISSUER_ID"]), "Missing or invalid ASC_API_ISSUER_ID.")
@@ -210,6 +468,7 @@ def archive():
         require("iPhoneOS" in info.get("CFBundleSupportedPlatforms", []), "Archive is not an iOS device build.")
         sdk_match = re.fullmatch(r"iphoneos(\d+)(?:\.\d+)*", info.get("DTSDKName", ""))
         require(sdk_match and int(sdk_match[1]) >= 26, "Archive was not built with the iOS 26 SDK or later.")
+        verify_embedded_archive(apps[0], composition, output)
         if mode == "export":
             run(["codesign", "--verify", "--deep", "--strict", str(apps[0])])
             options = {"method": "app-store-connect", "destination": "export", "teamID": team,
@@ -222,6 +481,7 @@ def archive():
                  "-exportPath", str(output / "export"), "-exportOptionsPlist", str(export_options)])
             ipas = list((output / "export").glob("*.ipa"))
             require(len(ipas) == 1, "Export did not produce exactly one IPA.")
+            verify_exported_ipa(ipas[0], composition, private, output, info)
             if upload:
                 keys = private / "private_keys"
                 keys.mkdir(mode=0o700)

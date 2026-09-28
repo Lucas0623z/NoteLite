@@ -14,8 +14,17 @@
 | `upload: true` | 必须选择 `export`；先调用 Apple 验证，再上传 App Store Connect。上传后仍需等待处理和 App Review。 |
 | `bundle_id` / `team_id` | 必须与 Apple Developer 注册的 App ID、描述文件及 App Store Connect 记录一致。导出时必填 Team ID。 |
 | `version` / `build_number` | 默认版本 `1.0.0`；空构建号使用工作流 run number。已上传的版本/构建号组合不能重复；重跑旧任务时请改用新的构建号。 |
+| `acceptance_run_id` | `export` 必填：同一源码提交的 **Audiveris embedded iPhone and iPad acceptance** 成功运行编号。其运行时和 OCR 构建来源也必须与本次一致。 |
 
-工作流使用 GitHub 的 `macos-26` runner，选择已安装的最高稳定 Xcode，并在构建前后验证 Xcode 26 / iOS SDK 26 最低要求。产物在 Actions 中保留 7 天，正式版本请下载保存。`verify` 包含网页练习模块测试及无签名设备构建；真机交互、麦克风、MIDI 和服务器识谱仍须验收，已有 Apple clients 工作流继续负责模拟器测试。
+工作流使用 GitHub 的 `macos-26` runner，选择已安装的最高稳定 Xcode，并在构建前后验证 Xcode 26 / iOS SDK 26 最低要求。产物在 Actions 中保留 7 天，正式版本请下载保存。`verify` 包含网页练习模块测试及完整离线引擎的无签名设备构建；真机交互、麦克风和 MIDI 仍须验收。完整嵌入式工作流负责 iPhone / iPad 模拟器整谱识别和练习页面测试，Apple clients 工作流继续负责基础客户端测试。
+
+## 防止发布包遗漏识谱引擎
+
+发布流程从 `tools/audiveris-port/native-artifact-runs.json` 取得已成功构建的真机运行时和 OCR 产物，在当前 runner 重新组合完整工程，再由发布脚本归档。原始静态库、Java 模块、识谱代码、分类模型、OCR 模型、字体和练习资源都进入应用。产物缺失、过期或验证失败会中止构建。
+
+`release.py` 要求 `RELEASE_EMBEDDED_BUILD` 指向 `build-embedded-app.sh iphoneos` 的完整输出目录；不能用普通 `apple/project.yml` 生成的工程代替。导出前还会检查实际 archive 中的资源校验和、设备平台和 JNI 入口。`embedded-archive-inventory.json` 与归档一起保存，构建来源和组合日志保存在单独的证据产物中。
+
+先对准备发布的同一提交运行完整嵌入式验收，再把成功运行编号填入 `acceptance_run_id`。改变源码提交或原生构建来源后，需要重新验收；基础客户端构建成功不能满足正式导出的条件。若固定的原生产物已过期，重新运行对应构建，更新编号，再执行验收。
 
 ## 一次性配置 GitHub Secrets
 

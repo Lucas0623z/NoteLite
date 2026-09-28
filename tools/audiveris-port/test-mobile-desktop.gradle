@@ -1,0 +1,27 @@
+// Host regression test of the iOS headless Java platform classes. This does
+// not validate Apple native binaries; the embedded iOS probe does that.
+// Run on JDK21 with -I oracle.gradle -I test-mobile-desktop.gradle and invoke
+// :app:portProbe :app:embeddedOmrTest. Supply the original tessdata directory.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def sources = new File(gradle.rootProject.projectDir,
+                           'tools/audiveris-port/mobile-desktop')
+    def classes = new File(app.buildDir, 'mobile-desktop-classes')
+    def compile = app.tasks.register('compileMobileDesktop', JavaCompile) {
+        source app.fileTree(sources) { include '**/*.java' }
+        classpath = app.files()
+        destinationDirectory = classes
+        sourceCompatibility = '21'
+        targetCompatibility = '21'
+        options.encoding = 'UTF-8'
+        options.compilerArgs += ['--patch-module', "java.desktop=${sources.absolutePath}"]
+    }
+    ['portProbe', 'embeddedOmrTest'].each { name ->
+        app.tasks.named(name).configure {
+            dependsOn compile
+            jvmArgs '--patch-module', "java.desktop=${classes.absolutePath}",
+                    '-Dsun.font.fontmanager=sun.font.MobileFontManager',
+                    "-Dnotelite.omr.fontDirectory=${new File(app.projectDir, 'res').absolutePath}"
+        }
+    }
+}

@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Apply with oracle.gradle to stage the actual Java engine and probe into the iOS bundle.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def root = gradle.rootProject.projectDir
+    def classes = new File(app.buildDir, 'embedded-probe-classes')
+    def oracleClasses = new File(app.buildDir, 'port-oracle-classes')
+    app.tasks.register('compileEmbeddedProbe', JavaCompile) {
+        dependsOn app.tasks.named('compilePortOracle')
+        source new File(root, 'apple/EmbeddedOMRProbe/Java/EmbeddedNativeProbe.java')
+        classpath = app.files(oracleClasses) + app.sourceSets.main.runtimeClasspath
+        destinationDirectory = classes
+        sourceCompatibility = '21'
+        targetCompatibility = '21'
+        options.encoding = 'UTF-8'
+    }
+    app.tasks.register('embeddedProbeJar', Jar) {
+        dependsOn app.tasks.named('compileEmbeddedProbe')
+        archiveFileName = 'embedded-probe.jar'
+        destinationDirectory = new File(app.buildDir, 'embedded-probe')
+        from(classes)
+        from(oracleClasses) { include 'PortabilityProbe*.class' }
+    }
+    app.tasks.register('stageEmbeddedProbe', Sync) {
+        dependsOn app.tasks.named('jar'), app.tasks.named('embeddedProbeJar')
+        into app.providers.gradleProperty('embeddedProbeStage').orElse(
+                new File(app.buildDir, 'embedded-probe/resources').absolutePath)
+        into('java') {
+            from app.tasks.named('jar').flatMap { it.archiveFile }
+            from app.tasks.named('embeddedProbeJar').flatMap { it.archiveFile }
+            from(app.configurations.runtimeClasspath) {
+                // Keep Java API jars; native code is linked statically into the app itself.
+                exclude { element -> element.file.name ==~ /.*-(windows|linux|macosx|android|ios)-[^\/]+\.jar/ }
+            }
+        }
+        into('assets') {
+            from(new File(app.projectDir, 'res')) {
+                include '*.otf', '*.ttf', 'basic-classifier.zip'
+            }
+        }
+        into('examples') {
+            from new File(root, 'data/examples/chula.png')
+            from(new File(root, 'tools/audiveris-port/fixtures')) {
+                include 'chula-two-page.pdf', 'chula-two-page.tiff'
+            }
+        }
+        into('licenses') {
+            from(new File(root, 'apple/AudiverisCore/LICENSE')) { rename { 'AGPL-3.0.txt' } }
+            from new File(root, 'docs/development/embedded-omr.md')
+            into('fonts') {
+                from(new File(root, 'tools/audiveris-port/font-licenses')) { exclude '.gitattributes' }
+            }
+        }
+    }
+    app.tasks.register('embeddedNativeProbeDesktop', JavaExec) {
+        description = 'Validate the Java side of the iOS JNI probe using desktop native dependencies'
+        dependsOn app.tasks.named('embeddedProbeJar')
+        mainClass = 'EmbeddedNativeProbe'
+        classpath = app.files(app.tasks.named('embeddedProbeJar').flatMap { it.archiveFile }) + app.sourceSets.main.runtimeClasspath
+        workingDir = app.projectDir
+        args new File(app.buildDir, 'embedded-probe/resources').absolutePath,
+             new File(app.buildDir, 'embedded-probe/desktop-sandbox').absolutePath
+    }
+}

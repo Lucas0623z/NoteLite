@@ -1,0 +1,2 @@
+# Preserve the input and recorded reference hashes across all checkouts.
+chula-two-page* -text -whitespace linguist-generated=true

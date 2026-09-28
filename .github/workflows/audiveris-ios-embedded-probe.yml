@@ -1,0 +1,219 @@
+name: Audiveris embedded iPhone and iPad acceptance
+
+on:
+  push:
+    branches: [codex/audiveris-ios-probe-builds]
+  workflow_dispatch:
+    inputs:
+      runtime_run_id:
+        description: Completed Mobile Runtime workflow run containing real headless artifacts
+        required: false
+        type: string
+      ocr_run_id:
+        description: Completed Native OCR workflow run containing real static JNI artifacts
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: audiveris-embedded-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  bridge-interface-check:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test native build provenance gates
+        run: |
+          python3 tools/audiveris-port/test_download_native_artifacts.py
+          python3 -B tools/audiveris-port/test_manage_embedded_simulators.py
+          python3 -B tools/audiveris-port/test_verify_embedded_score.py
+          python3 -B apple/release/test_release.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile the shared Objective-C++ and Swift interfaces against the actual iOS SDK
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          xcrun --sdk iphonesimulator clang++ -fsyntax-only -std=c++17 -fobjc-arc \
+            -target arm64-apple-ios16.0-simulator -isysroot "$sdk" \
+            -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/darwin" \
+            apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.mm
+          xcrun swiftc -typecheck -parse-as-library -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
+            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
+            apple/EmbeddedOMRProbe/Sources/EmbeddedOMRProbeApp.swift
+          xcrun swiftc -typecheck -parse-as-library -D EMBEDDED_OMR_RUNTIME \
+            -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
+            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
+            apple/NoteLite/Models.swift apple/NoteLite/EmbeddedOMRInputPreparation.swift \
+            apple/NoteLite/EmbeddedRecognitionService.swift
+  compose-and-test:
+    runs-on: macos-26
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: iphoneos
+            runtime: device
+            family: device
+            artifact_suffix: ''
+          - sdk: iphonesimulator
+            runtime: simulator
+            family: iPhone
+            artifact_suffix: '-iPhone'
+          - sdk: iphonesimulator
+            runtime: simulator
+            family: iPad
+            artifact_suffix: '-iPad'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Prepare XcodeGen
+        run: |
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+      - name: Download and verify the native builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_RUN_INPUT: ${{ inputs.runtime_run_id }}
+          OCR_RUN_INPUT: ${{ inputs.ocr_run_id }}
+          RUNTIME_PLATFORM: ${{ matrix.runtime }}
+        run: |
+          python3 tools/audiveris-port/download-native-artifacts.py \
+            --platform "$RUNTIME_PLATFORM" --destination build/incoming \
+            --runtime-run "$RUNTIME_RUN_INPUT" --ocr-run "$OCR_RUN_INPUT"
+      - name: Preserve native build provenance for release verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-omr-provenance-${{ matrix.sdk }}${{ matrix.artifact_suffix }}
+          if-no-files-found: error
+          path: build/incoming/source-runs.json
+      - name: Build actual same-process JNI app
+        env:
+          PROBE_SDK: ${{ matrix.sdk }}
+        run: |
+          bash tools/audiveris-port/build-embedded-probe.sh "$PROBE_SDK" \
+            "$EMBEDDED_RUNTIME" "$EMBEDDED_OCR" "build/embedded-probe/$PROBE_SDK-arm64"
+      - name: Create dedicated fresh iPhone and iPad simulators
+        if: matrix.sdk == 'iphonesimulator'
+        run: |
+          python3 tools/audiveris-port/manage-embedded-simulators.py create \
+            build/embedded-probe/iphonesimulator-arm64/simulator-results
+      - name: Run full recognition on ${{ matrix.family }}
+        if: matrix.sdk == 'iphonesimulator'
+        env:
+          SIMULATOR_FAMILY: ${{ matrix.family }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          app = 'build/embedded-probe/iphonesimulator-arm64/EmbeddedOMRProbe.app'
+          for family in [os.environ['SIMULATOR_FAMILY']]:
+              assert family in ('iPhone', 'iPad')
+              output = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
+              device = json.loads((output / 'device.json').read_text())['udid']
+              try:
+                  subprocess.run(['bash', 'tools/audiveris-port/run-embedded-probe.sh', app, device, str(output)], check=True)
+              finally:
+                  subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
+          PY
+      - name: Preserve completed recognition evidence before production app testing
+        if: always() && matrix.sdk == 'iphonesimulator'
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-omr-score-evidence-${{ matrix.family }}
+          if-no-files-found: warn
+          path: build/embedded-probe/iphonesimulator-arm64/simulator-results/${{ matrix.family }}/
+      - name: Compose the actual offline NoteLite app from the same runtime and resources
+        env:
+          APP_SDK: ${{ matrix.sdk }}
+        run: |
+          bash tools/audiveris-port/build-embedded-app.sh "$APP_SDK" \
+            "build/embedded-probe/$APP_SDK-arm64/embedding" "build/embedded-app/$APP_SDK-arm64"
+      - name: Verify the standard release archive contains the complete offline engine
+        if: matrix.sdk == 'iphoneos'
+        env:
+          RELEASE_MODE: verify
+          RELEASE_UPLOAD: 'false'
+          RELEASE_BUNDLE_ID: com.lucas0623z.yinban
+          RELEASE_VERSION: '1.0.0'
+          RELEASE_BUILD_NUMBER: ${{ github.run_number }}
+          RELEASE_EMBEDDED_BUILD: ${{ github.workspace }}/build/embedded-app/iphoneos-arm64
+        run: |
+          set -o pipefail
+          python3 apple/release/release.py archive 2>&1 | tee build/embedded-app/iphoneos-arm64/evidence/standard-release.log
+          mkdir -p build/embedded-app/iphoneos-arm64/standard-release
+          cp "$RUNNER_TEMP/yinban-release-output/Yinban.xcarchive.zip" \
+            "$RUNNER_TEMP/yinban-release-output/embedded-archive-inventory.json" \
+            build/embedded-app/iphoneos-arm64/standard-release/
+      - name: Clean up interrupted release state
+        if: always() && matrix.sdk == 'iphoneos'
+        run: python3 apple/release/release.py cleanup
+      - name: Preserve JNI release verification diagnostics after archive rejection
+        if: always() && matrix.sdk == 'iphoneos'
+        run: |
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP']) / 'yinban-release-output'
+          destination = Path('build/embedded-app/iphoneos-arm64/evidence')
+          for report in source.glob('embedded-*-jni-bindings.json'):
+              destination.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(report, destination / report.name)
+          PY
+      - name: Exercise offline recognition and practice in the actual ${{ matrix.family }} app
+        if: matrix.sdk == 'iphonesimulator'
+        env:
+          SIMULATOR_FAMILY: ${{ matrix.family }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          for family in [os.environ['SIMULATOR_FAMILY']]:
+              assert family in ('iPhone', 'iPad')
+              probe = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
+              device = json.loads((probe / 'device.json').read_text())['udid']
+              output = Path('build/embedded-app/iphonesimulator-arm64/ui-results') / family
+              try:
+                  subprocess.run(['bash', 'tools/audiveris-port/run-embedded-app-tests.sh',
+                                  'build/embedded-app/iphonesimulator-arm64', device, str(output)], check=True)
+              finally:
+                  subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
+          PY
+      - name: Remove dedicated simulators after both acceptance phases
+        if: always() && matrix.sdk == 'iphonesimulator'
+        run: |
+          python3 tools/audiveris-port/manage-embedded-simulators.py cleanup \
+            build/embedded-probe/iphonesimulator-arm64/simulator-results
+      - name: Preserve app, actual scores, logs, and semantic comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-omr-probe-${{ matrix.sdk }}-arm64${{ matrix.artifact_suffix }}
+          if-no-files-found: warn
+          path: |
+            build/incoming/source-runs.json
+            build/embedded-probe/${{ matrix.sdk }}-arm64/EmbeddedOMRProbe.app/
+            build/embedded-probe/${{ matrix.sdk }}-arm64/evidence/
+            build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-symbols.c
+            build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-libraries.xcconfig
+            build/embedded-probe/${{ matrix.sdk }}-arm64/simulator-results/
+            build/embedded-app/${{ matrix.sdk }}-arm64/NoteLite.app/
+            build/embedded-app/${{ matrix.sdk }}-arm64/NoteLite.xcarchive.zip
+            build/embedded-app/${{ matrix.sdk }}-arm64/standard-release/
+            build/embedded-app/${{ matrix.sdk }}-arm64/evidence/
+            build/embedded-app/${{ matrix.sdk }}-arm64/ui-results/

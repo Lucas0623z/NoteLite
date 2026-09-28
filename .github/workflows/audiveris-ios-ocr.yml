@@ -1,0 +1,110 @@
+name: Audiveris iOS native OCR
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/audiveris-ios-builds, codex/audiveris-ios-ocr-builds]
+    paths:
+      - tools/audiveris-port/build-ios-ocr.sh
+      - tools/audiveris-port/ocr-smoke.cpp
+      - tools/audiveris-port/oracle.gradle
+      - tools/audiveris-port/verify-jni-bindings.py
+      - tools/audiveris-port/test_jni_bindings.py
+      - .github/workflows/audiveris-ios-ocr.yml
+  pull_request:
+    paths:
+      - tools/audiveris-port/build-ios-ocr.sh
+      - tools/audiveris-port/ocr-smoke.cpp
+      - tools/audiveris-port/oracle.gradle
+      - tools/audiveris-port/verify-jni-bindings.py
+      - tools/audiveris-port/test_jni_bindings.py
+      - .github/workflows/audiveris-ios-ocr.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audiveris-ios-ocr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  cross-build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [iphoneos, iphonesimulator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Prepare native build tools
+        run: |
+          xcodebuild -version
+          if ! command -v cmake >/dev/null; then brew install cmake; fi
+          if ! command -v ninja >/dev/null; then brew install ninja; fi
+      - name: Test complete JNI binding audits
+        run: python3 -B tools/audiveris-port/test_jni_bindings.py
+      - name: Build OCR dependencies and force-link JNI for arm64
+        run: |
+          set -o pipefail
+          mkdir -p build/ios-ocr/${{ matrix.sdk }}-arm64/evidence
+          bash tools/audiveris-port/build-ios-ocr.sh '${{ matrix.sdk }}' 2>&1 \
+            | tee build/ios-ocr/${{ matrix.sdk }}-arm64/evidence/build.log
+      - name: Boot iPhone simulator
+        if: matrix.sdk == 'iphonesimulator'
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          def data(*args):
+              return json.loads(subprocess.check_output(['xcrun', 'simctl', *args, '--json']))
+          runtimes = {r['identifier']: tuple(map(int, r['version'].split('.')))
+                      for r in data('list', 'runtimes')['runtimes']
+                      if r.get('isAvailable') and '.iOS-' in r['identifier']}
+          # The device-type catalog is not chronologically sorted and includes
+          # retired iPhones. Existing available devices already have a runtime
+          # that supports that device type.
+          candidates = [(runtimes[runtime], d['name'], d['udid'], d['state'])
+                        for runtime, devices in data('list', 'devices', 'available')['devices'].items()
+                        if runtime in runtimes
+                        for d in devices if d.get('isAvailable') and d['name'].startswith('iPhone')]
+          if not candidates:
+              raise SystemExit('No available iPhone simulator is installed')
+          version, name, device, state = max(candidates)
+          print(f'Using {name} on iOS {".".join(map(str, version))}: {device}')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('OCR_SIMULATOR_ID=' + device + '\n')
+          if state != 'Booted':
+              subprocess.run(['xcrun', 'simctl', 'boot', device], check=True)
+          subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
+          PY
+      - name: Run real OCR and codec round-trips inside iOS simulator
+        if: matrix.sdk == 'iphonesimulator'
+        run: |
+          set -o pipefail
+          root="$GITHUB_WORKSPACE/build/ios-ocr/iphonesimulator-arm64"
+          xcrun simctl spawn "$OCR_SIMULATOR_ID" "$root/install/bin/ocr-smoke" \
+            "$root/install/share/tessdata" 2>&1 | tee "$root/evidence/smoke.log"
+      - name: Collect native package and diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-ocr-${{ matrix.sdk }}-arm64
+          if-no-files-found: warn
+          path: |
+            build/ios-ocr/${{ matrix.sdk }}-arm64/install/lib/*.a
+            build/ios-ocr/${{ matrix.sdk }}-arm64/install/include/
+            build/ios-ocr/${{ matrix.sdk }}-arm64/install/share/licenses/
+            build/ios-ocr/${{ matrix.sdk }}-arm64/install/share/tessdata/
+            build/ios-ocr/${{ matrix.sdk }}-arm64/install/bin/ocr-smoke
+            build/ios-ocr/${{ matrix.sdk }}-arm64/evidence/
+            build/ios-ocr/${{ matrix.sdk }}-arm64/build/**/CMakeConfigureLog.yaml
+            app/build/ios-jni/*.cpp
+            app/build/ios-jni/binding-jars.json

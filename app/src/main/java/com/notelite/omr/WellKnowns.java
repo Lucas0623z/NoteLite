@@ -140,6 +140,9 @@ public abstract class WellKnowns
     public static final URI RES_URI = RUNNING_FROM_JAR ? toURI(
             WellKnowns.class.getClassLoader().getResource("res")) : Paths.get("res").toUri();
 
+    /** Explicit application sandbox, set before class initialization by an embedded host. */
+    public static final Path APP_HOME = getAppHome();
+
     //-------------// read-write area
     // USER CONFIG // Configuration files the user can edit on his own
     //-------------//
@@ -302,6 +305,10 @@ public abstract class WellKnowns
     //-----------//
     private static Path getFolder (FolderKind kind)
     {
+        if (APP_HOME != null) {
+            return APP_HOME.resolve(kind.name().toLowerCase(Locale.ROOT));
+        }
+
         if (WINDOWS) {
             return getFolderForWindows(kind);
         } else if (MAC_OS_X) {
@@ -313,6 +320,19 @@ public abstract class WellKnowns
 
             return null;
         }
+    }
+
+    private static Path getAppHome ()
+    {
+        final String override = System.getProperty("notelite.appHome");
+        if (override == null) {
+            return null; // Preserve the desktop's existing platform paths.
+        }
+        final Path home = Paths.get(override);
+        if (override.isBlank() || !home.isAbsolute()) {
+            throw new IllegalArgumentException("notelite.appHome must be an absolute sandbox path");
+        }
+        return home.normalize();
     }
 
     //-------------------//

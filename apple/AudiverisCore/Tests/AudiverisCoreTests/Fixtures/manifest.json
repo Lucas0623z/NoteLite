@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "caseCount": 19,
+  "sourceSHA256": {
+    "app/src/main/java/com/notelite/omr/image/AdaptiveFilter.java": "37737a922e561eff67c02744df910bc9fab0ef6863dedae8a0b68f763a7f2ca9",
+    "app/src/main/java/com/notelite/omr/image/VerticalFilter.java": "fa5f067a1e00045e1dec7c25848459f834c7f1fb61193a0a6affa7137e1cee15",
+    "app/src/main/java/com/notelite/omr/image/GlobalFilter.java": "d97b86cdce928be12cdc0fa8fecc41a3c9a3973d95ab4940453c1300478073dc",
+    "app/src/main/java/com/notelite/omr/run/RunsRetriever.java": "07f9aa77f5e01fbfadba50258c93e57a94521ee9b97c90f83f30a7772bccd8df",
+    "app/src/main/java/com/notelite/omr/run/RunTableFactory.java": "04de3e56d4d6048f753466f59d971d885ed371d853ec4756b955a3ccdde69a93",
+    "app/src/main/java/com/notelite/omr/run/RunTable.java": "0591b8879de9834fefa5a1258e9f98b9369747644af1a0f18055b18cd7bf8915",
+    "data/examples/chula.png": "a5dce91498d98a54a50e9624c12c2d90891d1c77d8b5934038df42d5d62eb00f"
+  }
+}

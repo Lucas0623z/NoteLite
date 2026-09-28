@@ -1,0 +1,61 @@
+name: EmbeddedOMRProbe
+options:
+  minimumXcodeGenVersion: 2.42.0
+  deploymentTarget:
+    iOS: "16.0"
+configs:
+  Debug: debug
+  Release: release
+configFiles:
+  Debug: Generated/native-libraries.xcconfig
+  Release: Generated/native-libraries.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    CLANG_CXX_LANGUAGE_STANDARD: c++17
+    GCC_SYMBOLS_PRIVATE_EXTERN: NO
+    DEAD_CODE_STRIPPING: NO
+    ENABLE_DEBUG_DYLIB: NO
+targets:
+  EmbeddedOMRProbe:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: RuntimeSources
+      - path: Generated/native-symbols.c
+      - path: Generated/ProbeResources
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notelite.embeddedprobe
+        PRODUCT_NAME: EmbeddedOMRProbe
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_OBJC_BRIDGING_HEADER: RuntimeSources/EmbeddedJVM.h
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: Audiveris Probe
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - sdk: Foundation.framework
+      - sdk: UIKit.framework
+      - sdk: Security.framework
+      - sdk: CoreFoundation.framework
+      - sdk: CoreGraphics.framework
+      - sdk: CoreText.framework
+      - sdk: libc++.tbd
+      - sdk: libiconv.tbd
+      - sdk: libz.tbd

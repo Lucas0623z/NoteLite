@@ -3,10 +3,10 @@ import WebKit
 
 /// SwiftUI owns navigation and storage; the bundled renderer/matcher is shared with desktop NoteLite.
 struct PracticeView: View {
-    @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var history: PracticeHistoryStore
     @Environment(\.scenePhase) private var scenePhase
     let record: ScoreRecord
+    let part: PracticePart
     let onDismiss: () -> Void
     @StateObject private var controller = PracticeWebController()
 
@@ -25,7 +25,7 @@ struct PracticeView: View {
                 }
             }
             .background(NoteLiteTheme.window)
-            .navigationTitle(record.filename)
+            .navigationTitle(part.title.map { record.displayTitle + " · " + $0 } ?? record.filename)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { controller.close(completion: onDismiss) } label: {
@@ -47,9 +47,9 @@ struct PracticeView: View {
     }
 
     private func prepare() {
-        controller.onReport = { report in history.save(report: report, for: record) }
+        controller.onReport = { report in history.save(report: report, for: record, part: part) }
         controller.onClose = onDismiss
-        controller.open(score: record, url: library.practiceURL(record))
+        controller.open(score: record, url: part.url, partID: part.id)
     }
 }
 
@@ -60,9 +60,9 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
     var onReport: (([String: Any]) -> Void)?
     var onClose: (() -> Void)?
     private let input = NativePracticeInput()
-    private var source: (data: String, title: String, id: String)?
+    private(set) var source: (data: String, title: String, id: String)?
     private var inputTask: Task<Void, Never>?
-    private var documentID: UUID?
+    private var documentID: String?
     private var forwardingAudio = false
     private var pageURL: URL?
     private var isClosing = false
@@ -100,8 +100,9 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         }
     }
 
-    func open(score: ScoreRecord, url: URL?) {
-        guard documentID != score.id || errorMessage != nil else { return }
+    func open(score: ScoreRecord, url: URL?, partID: String = "source") {
+        let identity = score.id.uuidString + "/" + partID
+        guard documentID != identity || errorMessage != nil else { return }
         inputTask?.cancel()
         input.stop()
         forwardingAudio = false
@@ -119,8 +120,8 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
                 throw NoteLiteError.server("陪练乐谱需要小于 15 MB，请拆分后导入。")
             }
             let data = try Data(contentsOf: url)
-            source = (data.base64EncodedString(), score.filename, score.id.uuidString)
-            documentID = score.id
+            source = (data.base64EncodedString(), score.filename, identity)
+            documentID = identity
             pageURL = page.standardizedFileURL
             webView.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
         } catch { errorMessage = error.localizedDescription }

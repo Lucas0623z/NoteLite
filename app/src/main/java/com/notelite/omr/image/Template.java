@@ -213,6 +213,11 @@ public class Template
         final double foreWeight = constants.foreWeight.getValue();
         final double backWeight = constants.backWeight.getValue();
         final double holeWeight = constants.holeWeight.getValue();
+        final short[] nativeValues = NativeTemplateScorer.supportedValues(distances);
+        if (nativeValues != null) {
+            return NativeTemplateScorer.evaluate(this, distances, nativeValues, ul,
+                    foreWeight, backWeight, holeWeight);
+        }
         double weights = 0; // Sum of weights
         double total = 0; // Sum of weighted distances
 
@@ -231,9 +236,9 @@ public class Template
                     // pix.d > 0 for expected background, expected distance to nearest foreground
                     double weight = (pix.d == 0) ? foreWeight
                             : ((pix.d > 0) ? backWeight : holeWeight);
-                    double expected = (pix.d == 0) ? 0 : 1;
-                    double actual = (actualDist == 0) ? 0 : 1;
-                    double dist = Math.abs(actual - expected);
+                    // Both classifications are binary. Keep the same 0.0/1.0 distance without
+                    // Math.abs(double), whose bit conversions cross JNI in the Zero interpreter.
+                    double dist = ((actualDist == 0) == (pix.d == 0)) ? 0.0 : 1.0;
 
                     total += (weight * dist);
                     weights += weight;
@@ -267,6 +272,10 @@ public class Template
                                 DistanceTable distances)
     {
         final Point ul = upperLeft(x, y, anchor);
+        final short[] nativeValues = NativeTemplateScorer.supportedValues(distances);
+        if (nativeValues != null) {
+            return NativeTemplateScorer.evaluateHole(this, distances, nativeValues, ul);
+        }
 
         // Loop through template key positions and read related distance.
         // Compute the mean value on all distances read

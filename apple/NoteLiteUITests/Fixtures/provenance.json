@@ -1,0 +1,36 @@
+{
+  "kind": "desktop-exports-for-ui-navigation-tests",
+  "source": "EmbeddedOmrEngineTest two-page export, JDK28 host evidence r2, job-579312251409336752",
+  "note": "Both exported movements contain the same 19-measure source page; tests distinguish the saved file identity. No recognition is performed by this UI fixture importer.",
+  "files": [
+    {
+      "file": "chula.png",
+      "bytes": 66260,
+      "sha256": "a5dce91498d98a54a50e9624c12c2d90891d1c77d8b5934038df42d5d62eb00f"
+    },
+    {
+      "file": "multipage.mvt1.mid",
+      "bytes": 1835,
+      "sha256": "af3929076eb427d0fccffc8a7388a69667266a4cfbd8032d4c9627b01be7e074"
+    },
+    {
+      "file": "multipage.mvt1.mxl",
+      "bytes": 4449,
+      "sha256": "1f3f8bb6e92644596830f5093945b0f2c486de5a5d6e41621a512a77bc0b7da4",
+      "measureCount": 19,
+      "pitchedNotes": 151
+    },
+    {
+      "file": "multipage.mvt2.mid",
+      "bytes": 1835,
+      "sha256": "af3929076eb427d0fccffc8a7388a69667266a4cfbd8032d4c9627b01be7e074"
+    },
+    {
+      "file": "multipage.mvt2.mxl",
+      "bytes": 4449,
+      "sha256": "3975bac0d6c5c3763aa67c8a535a00b862da2568384b471e9835b2cd36d70269",
+      "measureCount": 19,
+      "pitchedNotes": 151
+    }
+  ]
+}
