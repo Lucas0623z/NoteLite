@@ -38,7 +38,12 @@ gradle.projectsEvaluated {
                 include '*.otf', '*.ttf', 'basic-classifier.zip'
             }
         }
-        into('examples') { from new File(root, 'data/examples/chula.png') }
+        into('examples') {
+            from new File(root, 'data/examples/chula.png')
+            from(new File(root, 'tools/audiveris-port/fixtures')) {
+                include 'chula-two-page.pdf', 'chula-two-page.tiff'
+            }
+        }
         into('licenses') {
             from(new File(root, 'apple/AudiverisCore/LICENSE')) { rename { 'AGPL-3.0.txt' } }
             from new File(root, 'docs/development/embedded-omr.md')

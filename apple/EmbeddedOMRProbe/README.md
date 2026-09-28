@@ -112,17 +112,29 @@ desktop semantic reference using `verify_embedded_score.py`. A difference in
 notes, timing, voices, staves, musical attributes, or MIDI events fails the run
 and is recorded in `semantic-parity.json`.
 The second job is independently checked in `reuse-semantic-parity.json`.
+After PNG reuse, two additional native workers recognize the fixed two-page
+PDF and TIFF fixtures. Each produces a fresh job with both movements exported
+to MusicXML and MIDI. The runner compares every movement against the matching
+desktop reference in `pdf-semantic-parity.json` and `tiff-semantic-parity.json`.
+It also verifies the actual input bytes copied from the app's Documents folder
+against the reference source hash. Missing pages, changed notes or reused jobs
+fail the run. No network service participates in these recognitions.
 
 ### Output contract
 
 - `Documents/embedded-probe-result.json`: success/failure marker and metrics.
 - `Documents/embedded-probe-primary-result.json`: original successful first-run
   result, preserved before cancellation/reuse checks begin.
+- `Documents/embedded-probe-reuse-result.json`: successful PNG reuse report,
+  preserved before multipage checks.
+- `Documents/embedded-probe-{pdf,tiff}-result.json`: each completed document
+  result, also preserved if a later format fails.
 - `Documents/omr/probe-report.json`: successful Java component/full-score report.
 - `Documents/omr/component-probe/portability-probe.json`: all component outcomes,
   including original exception stacks when a component fails.
 - `Documents/omr/jobs/job-*/chula.mxl` and `chula.mid`: actual exports.
 - `Documents/omr/jobs/job-*/embedded-result.json`: report beside those exports.
+- `Documents/omr/chula-two-page.{pdf,tiff}`: the exact tested document inputs.
 - `Documents/omr/log`: engine logs; fatal VM logs also stay under `Documents/omr`.
 
 The report records Java VM/version, elapsed time, pitched-note count and MIDI
@@ -134,7 +146,10 @@ maxima may miss shorter spikes; simulator memory is not device memory evidence.
 Memory samples and the original Java elapsed time cover VM initialization,
 components and the first recognition only. `vmReuse.recognition` contains the
 second job's Java timing, and `totalProbeElapsedMilliseconds` covers the entire
-native sequence. A reuse failure preserves the original report and exports.
+native sequence. Each `multipageDocuments` record includes the document's Java
+recognition time and native wall time. Document recognition occurs after the
+first memory sampler stops, so its memory use is not included in the reported
+first-run maximum. A later failure preserves completed reports and exports.
 Counts demonstrate that output exists; they do not establish
 transcription accuracy. Platform execution and score comparisons must be
 reported from a real completed run, not inferred from a successful build.

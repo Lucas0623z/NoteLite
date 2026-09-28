@@ -81,6 +81,7 @@ final class ProbeModel: ObservableObject {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let resultURL = documents.appendingPathComponent("embedded-probe-result.json")
         let primaryURL = documents.appendingPathComponent("embedded-probe-primary-result.json")
+        let reuseURL = documents.appendingPathComponent("embedded-probe-reuse-result.json")
         let startedAt = ProcessInfo.processInfo.systemUptime
         var phase = "initial-recognition"
         var firstScoreRecognitionCompleted = false
@@ -127,6 +128,39 @@ final class ProbeModel: ObservableObject {
             }
             complete["vmReuse"] = ["status": "SUCCESS", "cancelledOnExistingVM": true,
                                     "workerCompletionObserved": true, "recognition": reuse]
+            try Data(reportText(complete).utf8).write(to: reuseURL, options: .atomic)
+            var jobs = Set([firstJob, secondJob])
+            var documentRuns: [[String: Any]] = []
+            for format in ["pdf", "tiff"] {
+                phase = "two-page-\(format)-recognition"
+                status = "Recognizing both pages of the \(format.uppercased()) score…"
+                let fixture = "chula-two-page.\(format)"
+                let documentStarted = ProcessInfo.processInfo.systemUptime
+                let documentText = try await onWorker(named: "Embedded OMR two-page \(format)") {
+                    let input = sandbox.appendingPathComponent(fixture)
+                    let source = resources.appendingPathComponent("examples").appendingPathComponent(fixture)
+                    if FileManager.default.fileExists(atPath: input.path) {
+                        try FileManager.default.removeItem(at: input)
+                    }
+                    try FileManager.default.copyItem(at: source, to: input)
+                    return try EmbeddedJVM.recognize(resourceRoot: resources.path, sandbox: sandbox.path,
+                                                      input: input.path, cancellation: EmbeddedOMRCancellation())
+                }
+                let result = try reportObject(documentText)
+                guard result["status"] as? String == "SUCCESS",
+                      let job = result["outputDirectory"] as? String, jobs.insert(job).inserted,
+                      let xml = result["musicXML"] as? [String], !xml.isEmpty,
+                      let midi = result["midi"] as? [String], !midi.isEmpty else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+                let record: [String: Any] = ["format": format, "inputFile": fixture,
+                    "recognition": result, "nativeElapsedMilliseconds":
+                        Int((ProcessInfo.processInfo.systemUptime - documentStarted) * 1000)]
+                documentRuns.append(record)
+                try Data(reportText(record).utf8).write(
+                    to: documents.appendingPathComponent("embedded-probe-\(format)-result.json"), options: .atomic)
+            }
+            complete["multipageDocuments"] = documentRuns
             complete["totalProbeElapsedMilliseconds"] = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
             let text = try reportText(complete)
             try Data(text.utf8).write(to: resultURL, options: .atomic)

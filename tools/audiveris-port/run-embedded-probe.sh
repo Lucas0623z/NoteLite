@@ -52,7 +52,8 @@ PY
 }
 trap 'result=$?; if [ "$result" -ne 0 ]; then preserve_failure_evidence; fi; exit "$result"' EXIT
 # Clear only previous completion reports, so stale results cannot satisfy this run.
-for marker in embedded-probe-result.json embedded-probe-primary-result.json; do
+for marker in embedded-probe-result.json embedded-probe-primary-result.json \
+              embedded-probe-reuse-result.json embedded-probe-pdf-result.json embedded-probe-tiff-result.json; do
   if [ -f "$container/Documents/$marker" ]; then
     mv "$container/Documents/$marker" "$output/previous-$marker"
   fi
@@ -134,6 +135,16 @@ if (reuse.get('status') != 'SUCCESS' or not reuse.get('cancelledOnExistingVM')
         or not repeated.get('musicXML') or not repeated.get('midi')
         or repeated.get('outputDirectory') == report.get('outputDirectory')):
     raise SystemExit('Cross-thread cancellation and repeated real recognition did not pass')
+documents = report.get('multipageDocuments', [])
+if len(documents) != 2 or {record.get('format') for record in documents} != {'pdf', 'tiff'}:
+    raise SystemExit('Both full multipage PDF and TIFF recognition results are required')
+for record in documents:
+    recognition = record.get('recognition', {})
+    if (record.get('inputFile') != 'chula-two-page.' + record['format']
+            or recognition.get('status') != 'SUCCESS'
+            or not recognition.get('musicXML') or not recognition.get('midi')
+            or record.get('nativeElapsedMilliseconds', 0) <= 0):
+        raise SystemExit('A multipage document did not complete actual recognition and export')
 if report.get('pitchedNotes', 0) <= 0 or report.get('midiNoteOnEvents', 0) <= 0:
     raise SystemExit('No real musical output was validated')
 memory = report.get('nativeMemory', {})
@@ -146,22 +157,35 @@ jobs=$(python3 - "$output/result.json" <<'PY'
 import json, re, sys
 from pathlib import PurePosixPath
 report = json.load(open(sys.argv[1]))
-names = [PurePosixPath(record['outputDirectory']).name
-         for record in (report, report['vmReuse']['recognition'])]
-if len(set(names)) != 2 or any(not re.fullmatch(r'job-[A-Za-z0-9_-]+', name) for name in names):
+records = [('primary', report), ('reuse', report['vmReuse']['recognition'])]
+records += [(record['format'], record['recognition']) for record in report['multipageDocuments']]
+names = [PurePosixPath(record['outputDirectory']).name for _, record in records]
+if len(set(names)) != 4 or any(not re.fullmatch(r'job-[A-Za-z0-9_-]+', name) for name in names):
     raise SystemExit('Unexpected or reused job directory in completion report')
-print('\n'.join(names))
+for (label, _), name in zip(records, names):
+    print(label, name, sep='\t')
 PY
 )
-job=${jobs%%$'\n'*}
-repeated_job=${jobs##*$'\n'}
-python3 "$repo/tools/audiveris-port/verify_embedded_score.py" \
-  "$output/Documents/omr/jobs/$job" \
-  --reference "$repo/tools/audiveris-port/fixtures/chula-semantic-reference.json" \
-  --source-image "$repo/data/examples/chula.png" \
-  --report "$output/semantic-parity.json"
-python3 "$repo/tools/audiveris-port/verify_embedded_score.py" \
-  "$output/Documents/omr/jobs/$repeated_job" \
-  --reference "$repo/tools/audiveris-port/fixtures/chula-semantic-reference.json" \
-  --source-image "$repo/data/examples/chula.png" \
-  --report "$output/reuse-semantic-parity.json"
+while IFS=$'\t' read -r label job; do
+  case "$label" in
+    primary|reuse)
+      reference=chula-semantic-reference.json
+      input=chula.png
+      movements=1
+      if [ "$label" = primary ]; then report=semantic-parity.json; else report=reuse-semantic-parity.json; fi
+      ;;
+    pdf|tiff)
+      reference="chula-two-page-$label-semantic-reference.json"
+      input="chula-two-page.$label"
+      movements=2
+      report="$label-semantic-parity.json"
+      ;;
+    *) echo "Unexpected recognition label: $label" >&2; exit 1 ;;
+  esac
+  python3 "$repo/tools/audiveris-port/verify_embedded_score.py" \
+    "$output/Documents/omr/jobs/$job" \
+    --reference "$repo/tools/audiveris-port/fixtures/$reference" \
+    --source-image "$output/Documents/omr/$input" \
+    --expected-movements "$movements" \
+    --report "$output/$report"
+done <<< "$jobs"
