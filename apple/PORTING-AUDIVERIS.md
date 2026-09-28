@@ -121,7 +121,7 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 随后 [CI 36414189845](https://github.com/Lucas0623z/NoteLite/actions/runs/36414189845) 完成真机和模拟器应用链接，并在模拟器真正创建了 Zero JVM。字体排版继续暴露了下一处问题：JDK 28 的 HarfBuzz 桥接使用 FFM，`LibFallback` 因缺少 `JNI_OnLoad_fallbackLinker` 静态注册入口而加载失败。实际 `libfallbackLinker.a` 已有 28 个 JNI 实现，嵌入桥接层补充了与 OpenJDK `DEF_STATIC_JNI_OnLoad` 等效的 JNI 1.8 注册；真实初始化仍由 `LibFallback.init` 完成。实际 libffi 归档含已编译的 Darwin 回调跳板表，FFM 回调使用该实现，不生成机器码。修复后的完整识别需要重新执行验证。
 
-[下一轮 CI 36415195241](https://github.com/Lucas0623z/NoteLite/actions/runs/36415195241) 确认 FFM 注册已生效，随后发现 `malloc` 符号不可见。上游两个进程句柄入口使用 `dlopen(NULL, RTLD_FIRST)`；[Apple 文档](https://github.com/apple-oss-distributions/dyld/blob/main/doc/man/man3/dlopen.3) 明确说明此组合只查询主程序，无法找到其依赖 libSystem 中的函数。适配现仅对 iOS 静态构建使用包含依赖的进程查询范围，保留真实系统 `malloc/free` 和 HarfBuzz 调用。固定源码补丁已验证，待重新构建并执行完整识别。
+[下一轮 CI 36415195241](https://github.com/Lucas0623z/NoteLite/actions/runs/36415195241) 确认 FFM 注册已生效，随后发现 `malloc` 符号不可见。上游两个进程句柄入口使用 `dlopen(NULL, RTLD_FIRST)`；[Apple 文档](https://github.com/apple-oss-distributions/dyld/blob/main/doc/man/man3/dlopen.3) 明确说明此组合只查询主程序，无法找到其依赖 libSystem 中的函数。适配现仅对 iOS 静态构建使用包含依赖的进程查询范围，保留真实系统 `malloc/free` 和 HarfBuzz 调用。[CI 36416328770](https://github.com/Lucas0623z/NoteLite/actions/runs/36416328770) 已通过两种目标的重建；实际 device / simulator 二进制中，两处 `dlopen` 调用的参数均由 256（`RTLD_FIRST`）改为 1（`RTLD_LAZY`）。完整识别仍需执行验证。
 
 发布归档还必须保留 JVM 动态查询的导出符号。实际归档检查发现，Xcode 的安装后符号清理会删除这些入口，即使普通 Release 构建可以链接也不能据此认定归档可用。嵌入目标禁用 `STRIP_INSTALLED_PRODUCT` 与 `COPY_PHASE_STRIP`，并对最终归档检查所需导出；验收应使用实际归档产物，检查入口保留情况并运行识别测试。
 
