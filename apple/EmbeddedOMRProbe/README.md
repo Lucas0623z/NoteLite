@@ -13,6 +13,15 @@ after it has rasterized the Bravura font, round-tripped TIFF through ImageIO and
 Leptonica, initialized legacy Tesseract, exercised JAXB/ProxyMusic, recognized
 the bundled `chula.png`, and parsed pitched notes and sounding MIDI events from
 the actual MusicXML/MIDI exports.
+Component diagnostics run as separate gates and record their stage, elapsed
+time, and original exception stacks. A font failure therefore leaves the
+independent image, PDF, JAXB, JavaCPP, and OCR diagnostics available. Codec
+checks use a deterministic grayscale raster without font rendering. The font
+gate still renders the actual Bravura glyph and preserves its pixels and hash.
+PDF and OCR diagnostics use that glyph when available; after a font failure
+they use an explicitly identified diagnostic raster. This cannot satisfy the
+font gate. Any failed component causes an aggregate exception before full
+score recognition starts; no partial result is reported as success.
 Before starting the VM, the native worker also submits an already-cancelled
 request with a nonexistent input. It must return the cancellation error before
 reading that input. The following full probe must still initialize and run.
@@ -81,6 +90,8 @@ and is recorded in `semantic-parity.json`.
 
 - `Documents/embedded-probe-result.json`: success/failure marker and metrics.
 - `Documents/omr/probe-report.json`: successful Java component/full-score report.
+- `Documents/omr/component-probe/portability-probe.json`: all component outcomes,
+  including original exception stacks when a component fails.
 - `Documents/omr/jobs/job-*/chula.mxl` and `chula.mid`: actual exports.
 - `Documents/omr/jobs/job-*/embedded-result.json`: report beside those exports.
 - `Documents/omr/log`: engine logs; fatal VM logs also stay under `Documents/omr`.
