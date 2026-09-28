@@ -6,6 +6,8 @@
 
 当前完整引擎路线是：在应用内静态链接 OpenJDK Mobile 的 Zero 解释器，保留原有 Java 识别算法、模型和 MusicXML 导出；移植它实际依赖的软件图像处理、字体和 OCR 库。Java 代码与运行时随应用打包，不要求用户安装 Java、配置 OMR 服务或下载可执行代码。
 
+实际模拟器验收已通过全部 13 项独立平台检查，包括原字体排版、图像与 PDF、XML 和完整 legacy OCR。完整曲谱目前进入 BEAMS 步骤后超过原有 120 秒单步期限，尚未在 iOS 导出通过语义验收的完整乐谱。下一步用真实工作线程栈、CPU 时间和 GC 统计定位耗时，再验证必要的等价优化与取消行为。
+
 `apple/AudiverisCore` 是已经独立实现的 Swift 二值化与游程核心。游程是同一行或列中连续的黑色像素段。它输出二值图和游程，**尚不能识别音符、节奏或生成 MusicXML**。应用中的“本地引擎移植测试”验证这部分处理；完整引擎必须通过后文的嵌入式运行与导出验收。
 
 本阶段的算法来源：
@@ -132,6 +134,10 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 [模拟器 CI 36420435044](https://github.com/Lucas0623z/NoteLite/actions/runs/36420435044) 随后实际通过混合 JNI 参数的静态与实例调用、原 ImageIO JPEG 和 JavaCPP JPEG 测试，确认上述 ABI 修复生效。13 个独立检查中 12 个通过：真实音乐字体、PNG / JPEG / TIFF、PDF 栅格化、JAXB / ProxyMusic 与库加载均已执行。剩余 legacy OCR 在 `TessBaseAPI.allocate()` 处报告缺失 JNI 方法。原生成器只扫描 global 包，遗漏 C++ 对象包装类；独立使用 `javap` 读取锁定 API JAR，并直接检查旧 Mach-O 归档，确认 100 个类的 6,836 个 native 声明中缺失 1,620 个绑定。新生成器扫描完整包，构建与最终链接均增加全量声明覆盖检查；仍需用重建产物执行 OCR 和完整曲谱识别。
 
 [OCR 重建 CI 36421470400](https://github.com/Lucas0623z/NoteLite/actions/runs/36421470400) 已通过 device / simulator 构建及模拟器原生 smoke 测试。对两种实际下载的 JNI 归档再用独立的 `javap` 与 Mach-O 解析器复核，6,836 个声明全部有对应的编译符号，缺失数为零；各 9 个归档校验值、6 个固定上游源码提交、API JAR 与完整 OCR 模型校验值均与构建证据相符。模拟器 9 个归档内的全部 573 个对象及 smoke 可执行文件均标记 arm64 iOS Simulator、最低版本 16.0。真实 smoke 日志确认 PNG / JPEG / TIFF 通过，legacy 与 LSTM 两种 OCR 均识别出 `HELLO WORLD 123`。此 smoke 直接调用原生库，完整嵌入 JVM 的 OCR 与曲谱验收仍需继续执行。
+
+[完整嵌入验收 CI 36422667123](https://github.com/Lucas0623z/NoteLite/actions/runs/36422667123) 随后在模拟器真正通过全部 13 项检查，包含通过 JavaCPP 对象绑定调用的 legacy OCR。完整 chula 曲谱继续进入 BEAMS，但触发原有 120 秒单步超时；线程池在取消后 30 秒内没有结束，后续调用按安全边界被拒绝。应用日志中的实际 VM 启动至失败约为 237 秒；模拟器此前的启动时间不属于引擎耗时。
+
+当前源码中，BEAMS 的中值滤波、Gaussian 滤波和灰度闭运算均包含不检查中断的逐像素 Java 循环；仅 `Future.cancel(true)` 不能保证这些循环立即停止。chula 的闭运算结构元含 61 个邻域点，约需 5.84 亿次邻域访问与 960 万次小数组分配。这是需要实测的候选热点，不能仅凭源码认定为该次超时根因。固定 Zero 构建已包含 management / JVMTI，Apple 平台线程 CPU 统计由 `thread_info` 实现，可在应用内记录栈、CPU 与 GC 增量；栈采集放在独立 daemon 中，避免等待 VM safepoint 时阻塞取消路径。该 Zero 构建未启用 JFR。
 
 ### 已执行的宿主适配测试
 
