@@ -89,6 +89,7 @@ jobs:
           from pathlib import Path
           import json
           import os
+          import re
           import subprocess
           import xml.etree.ElementTree as ET
           suites = [ET.parse(path).getroot() for path in Path('app/build/test-results/embeddedOmrTest').glob('TEST-*.xml')]
@@ -142,6 +143,16 @@ jobs:
                               '--reference', 'tools/audiveris-port/fixtures/chula-semantic-reference.json',
                               '--source-image', 'data/examples/chula.png',
                               '--report', str(score.parent / 'semantic-parity.json')], check=True)
+          output = '\n'.join(text for suite in suites for text in suite.itertext())
+          documents = re.findall(r'EMBEDDED_MULTIPAGE_RESULT input=multipage\.(tiff|pdf) notes=302 noteOnEvents=440 output=([^\r\n]+)', output)
+          if len(documents) != 2 or {kind for kind, path in documents} != {'tiff', 'pdf'} or len({path for kind, path in documents}) != 2:
+              raise SystemExit('Both independent two-page document jobs must complete')
+          for kind, path in documents:
+              directory = Path(path.strip())
+              subprocess.run(['python3', 'tools/audiveris-port/verify_embedded_score.py', str(directory),
+                              '--reference', f'tools/audiveris-port/fixtures/chula-two-page-{kind}-semantic-reference.json',
+                              '--expected-movements', '2',
+                              '--report', str(directory / 'semantic-parity.json')], check=True)
           PY
       - uses: actions/upload-artifact@v4
         if: always()
