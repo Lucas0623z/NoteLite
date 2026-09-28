@@ -58,6 +58,66 @@ def main() -> None:
             "                                 executable,\n"
             "                                 mtCode);")
 
+    # The shared arm64 W^X bookkeeping now expects definitions from the native
+    # bsd_aarch64 port, but Zero builds bsd_zero instead. Its old W^X hook does
+    # not provide DefaultWXWriteMode/_jit_exec_enabled/the write-state helper.
+    # For iOS Zero the code cache above is RW data, so exclude the complete W^X
+    # feature consistently, including its two legacy raw platform guards.
+    # Other Apple/VM configurations retain their original behavior.
+    replace(root, "src/hotspot/share/utilities/macros.hpp",
+            "#define MACOS_AARCH64_ONLY(x) MACOS_ONLY(AARCH64_ONLY(x))\n"
+            "#if defined(__APPLE__) && defined(AARCH64)\n"
+            "#define MACOS_AARCH64 1\n"
+            "#endif\n",
+            "// iOS Zero only uses RW interpreter-entry data, never JIT pages.\n"
+            "#if defined(__IOS__) && defined(ZERO)\n"
+            "#define MACOS_AARCH64_ONLY(x)\n"
+            "#else\n"
+            "#define MACOS_AARCH64_ONLY(x) MACOS_ONLY(AARCH64_ONLY(x))\n"
+            "#if defined(__APPLE__) && defined(AARCH64)\n"
+            "#define MACOS_AARCH64 1\n"
+            "#endif\n"
+            "#endif\n")
+    replace(root, "src/hotspot/share/runtime/thread.inline.hpp",
+            "#if defined(__APPLE__) && defined(AARCH64)\n",
+            "#ifdef MACOS_AARCH64\n")
+    replace(root, "src/hotspot/os_cpu/bsd_zero/os_bsd_zero.cpp",
+            "#if defined(AARCH64) && defined(__APPLE__)\n",
+            "#ifdef MACOS_AARCH64\n")
+
+    # A static iOS JVM has no libjvm.dylib location to infer java.home from.
+    # Its stock layout assumes app/lib/lib/modules. The embedding bridge sets
+    # JAVA_HOME to its bundled runtime before JNI_CreateJavaVM; -Djava.home is
+    # parsed too late for this initial boot-path lookup. Validate the actual
+    # module image before honoring that explicit static-runtime location.
+    replace(root, "src/hotspot/os/bsd/os_bsd.cpp",
+            "#endif\n"
+            "    Arguments::set_java_home(buf);\n"
+            "    if (!set_boot_path('/', ':')) {\n"
+            "        vm_exit_during_initialization(\"Failed setting boot class path.\", nullptr);\n",
+            "#endif\n"
+            "    Arguments::set_java_home(buf);\n"
+            "#if defined(__IOS__) && defined(STATIC_BUILD)\n"
+            "    const char* embedded_home = ::getenv(\"JAVA_HOME\");\n"
+            "    if (is_vm_statically_linked() && embedded_home != nullptr) {\n"
+            "      if (embedded_home[0] != '/' ||\n"
+            "          strlen(embedded_home) > bufsize - sizeof(\"/lib/modules\")) {\n"
+            "        vm_exit_during_initialization(\"Invalid embedded JAVA_HOME.\", nullptr);\n"
+            "      }\n"
+            "      os::snprintf_checked(buf, bufsize, \"%s/lib/modules\", embedded_home);\n"
+            "      struct stat embedded_modules;\n"
+            "      if (os::stat(buf, &embedded_modules) != 0 ||\n"
+            "          !S_ISREG(embedded_modules.st_mode) || ::access(buf, R_OK) != 0) {\n"
+            "        vm_exit_during_initialization(\"Embedded JAVA_HOME has no readable module image.\", nullptr);\n"
+            "      }\n"
+            "      Arguments::set_java_home(embedded_home);\n"
+            "      os::snprintf_checked(buf, bufsize, \"%s/lib\", embedded_home);\n"
+            "      Arguments::set_dll_dir(buf);\n"
+            "    }\n"
+            "#endif\n"
+            "    if (!set_boot_path('/', ':')) {\n"
+            "        vm_exit_during_initialization(\"Failed setting boot class path.\", nullptr);\n")
+
     replace(root, "make/modules/java.desktop/Lib.gmk",
             "ifeq ($(call isTargetOs, android ios), false)",
             "ifeq ($(call isTargetOs, android), false)")
@@ -105,8 +165,9 @@ def main() -> None:
 
     # The OCR bundle contains libjpeg-turbo, while javajpeg contains IJG6b.
     # A static process must not interpose one implementation's functions onto
-    # the other's private state. Prefix the bundled JDK C symbols, preserving
-    # its JNI entry points and original pixel behavior.
+    # the other's private state. Upstream already enables short external names
+    # for every IJG symbol (jpeg_CreateDecompress -> jCreaDecompress, etc.).
+    # Check that complete mapping instead of injecting conflicting definitions.
     jpeg = root / "src/java.desktop/share/native/libjavajpeg"
     symbols = set()
     for source in jpeg.glob("*.c"):
@@ -116,18 +177,21 @@ def main() -> None:
     symbols.update(("jpeg_std_message_table", "jpeg_zigzag_order", "jpeg_natural_order"))
     if len(symbols) != 102 or "jpeg_CreateDecompress" not in symbols:
         raise SystemExit(f"Unexpected pinned JPEG symbol inventory: {len(symbols)}")
-    prefix = jpeg / "notelite_jpeg_symbols.h"
-    prefix.write_text(
-        "/* SPDX-License-Identifier: GPL-2.0-only WITH Classpath-exception-2.0 */\n"
-        "/* Isolate bundled IJG6b from the independently linked OCR codec. */\n"
-        "#ifndef NOTELITE_JDK_JPEG_SYMBOLS_H\n#define NOTELITE_JDK_JPEG_SYMBOLS_H\n"
-        + "".join(f"#define {name} notelite_jdk_{name}\n" for name in sorted(symbols))
-        + "#endif\n", encoding="utf-8", newline="\n")
-    replace(root, "make/modules/java.desktop/lib/ClientLibraries.gmk",
-            "    NAME := javajpeg, \\\n",
-            "    NAME := javajpeg, \\\n"
-            "    CFLAGS_ios := -include $(TOPDIR)/src/java.desktop/share/native/"
-            "libjavajpeg/notelite_jpeg_symbols.h, \\\n")
+    if (jpeg / "jconfig.h").read_text().count("#define NEED_SHORT_EXTERNAL_NAMES\n") != 1:
+        raise SystemExit("Pinned JPEG short-name isolation is no longer enabled")
+    declarations = "\n".join(source.read_text(encoding="utf-8")
+                             for source in sorted(jpeg.iterdir())
+                             if source.suffix in {".c", ".h"})
+    aliases = set()
+    for name in sorted(symbols):
+        matches = re.findall(r"^#define[ \t]+" + re.escape(name) +
+                             r"[ \t]+([A-Za-z_]\w*)[ \t]*$", declarations, re.M)
+        if len(matches) != 1:
+            raise SystemExit(f"Unexpected pinned JPEG alias for {name}: {matches}")
+        aliases.add(matches[0])
+    if len(aliases) != len(symbols):
+        raise SystemExit("Pinned JPEG symbol aliases are not unique")
+    print("Verified 102 upstream JPEG aliases; JNI entry points remain unchanged")
 
     # iOS imports macosx/classes in upstream Modules.gmk. Keep all six classes
     # together there so the matching host build-JDK can also compile this tree.
@@ -150,8 +214,6 @@ def main() -> None:
     # Intent-to-add makes the saved git diff include the new platform classes.
     subprocess.run(["git", "-C", str(root), "add", "--intent-to-add", "--", *installed],
                    check=True)
-    subprocess.run(["git", "-C", str(root), "add", "--intent-to-add", "--",
-                    prefix.relative_to(root).as_posix()], check=True)
     print(f"Applied headless software raster/font adaptation to {commit}")
     print("\n".join(installed))
 
