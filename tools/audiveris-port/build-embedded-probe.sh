@@ -64,6 +64,12 @@ for archive in runtime_archives + ocr_jni + ocr_codecs:
 
 # Prefer the OCR build's ordinary zlib archive if OpenJDK also supplied one.
 runtime_archives = [p for p in runtime_archives if p.name != 'libz.a']
+# The iOS static image includes two alternative launcher implementations in
+# libjli.a. Force-loading both defines JVMInit/LoadJavaVM and others twice.
+# libinstrument still needs its independent JLI_ManifestIterate object, so let
+# the linker select required libjli members through ordinary archive linking.
+runtime_lazy = [p for p in runtime_archives if p.name == 'libjli.a']
+runtime_forced = [p for p in runtime_archives if p.name != 'libjli.a']
 symbols = set()
 for archive in runtime_archives + ocr_jni:
     listing = subprocess.check_output(['xcrun', 'nm', '-gU', str(archive)], text=True)
@@ -87,8 +93,8 @@ def quoted(value):
     if '\n' in value or '"' in value: raise SystemExit('Unsupported build path character')
     return '"' + value + '"'
 link = ['$(inherited)', '-Wl,-export_dynamic']
-link += [quoted('-Wl,-force_load,' + str(p)) for p in runtime_archives + ocr_jni]
-link += [quoted(p) for p in ocr_codecs]
+link += [quoted('-Wl,-force_load,' + str(p)) for p in runtime_forced + ocr_jni]
+link += [quoted(p) for p in runtime_lazy + ocr_codecs]
 settings = [
     'HEADER_SEARCH_PATHS = $(inherited) ' + quoted(runtime/'include') + ' ' + quoted(jni_md[0].parent),
     'OTHER_LDFLAGS = ' + ' '.join(link),

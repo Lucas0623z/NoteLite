@@ -16,6 +16,37 @@ xcrun simctl boot "$device" 2>/dev/null || true
 xcrun simctl bootstatus "$device" -b
 xcrun simctl install "$device" "$app"
 container=$(xcrun simctl get_app_container "$device" "$bundle_id" data)
+started=$(date +%s)
+preserve_failure_evidence() {
+  if [ -d "$container/Documents" ]; then
+    ditto "$container/Documents" "$output/Documents" || true
+  fi
+  python3 - "$output" "$device" "$started" <<'PY' || true
+import json, shutil, sys
+from pathlib import Path
+output, device, started = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+roots = {
+    'host': Path.home() / 'Library/Logs/DiagnosticReports',
+    'simulator': Path.home() / 'Library/Developer/CoreSimulator/Devices' / device / 'data/Library/Logs/CrashReporter',
+}
+copied = []
+for label, root in roots.items():
+    if not root.is_dir():
+        continue
+    for source in root.rglob('EmbeddedOMRProbe*'):
+        try:
+            if not source.is_file() or source.stat().st_mtime < started - 2:
+                continue
+            target = output / 'DiagnosticReports' / label / source.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            copied.append(str(target.relative_to(output)))
+        except OSError as error:
+            print('Could not preserve diagnostic:', source.name, str(error), file=sys.stderr)
+(output / 'diagnostics-index.json').write_text(json.dumps({'reports': copied}, indent=2) + '\n')
+PY
+}
+trap 'result=$?; if [ "$result" -ne 0 ]; then preserve_failure_evidence; fi; exit "$result"' EXIT
 # Clear only the previous completion marker, so stale results cannot satisfy this run.
 if [ -f "$container/Documents/embedded-probe-result.json" ]; then
   mv "$container/Documents/embedded-probe-result.json" "$output/previous-result.json"
@@ -23,10 +54,30 @@ fi
 xcrun simctl launch --terminate-running-process \
   --stdout="$output/stdout.log" --stderr="$output/stderr.log" "$device" "$bundle_id" \
   > "$output/launch.txt"
-started=$(date +%s)
+pid=$(python3 - "$output/launch.txt" "$bundle_id" <<'PY'
+import re, sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text()
+match = re.search(r'^' + re.escape(sys.argv[2]) + r':\s*([1-9][0-9]*)\s*$', text, re.M)
+if not match:
+    raise SystemExit('simctl did not report the launched app PID; see launch.txt')
+print(match.group(1))
+PY
+)
+printf '%s\n' "$pid" > "$output/process-id.txt"
 while [ ! -f "$container/Documents/embedded-probe-result.json" ]; do
-  if [ $(($(date +%s) - started)) -ge "$timeout" ]; then
-    ditto "$container/Documents" "$output/Documents" || true
+  elapsed=$(($(date +%s) - started))
+  if [ "$elapsed" -ge 10 ] && ! kill -0 "$pid" 2>/dev/null; then
+    # Allow atomic result writes and delayed crash reports to arrive. Check the
+    # completion marker and process again before declaring a premature exit.
+    sleep 3
+    if [ -f "$container/Documents/embedded-probe-result.json" ]; then break; fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "Probe process $pid exited before producing a completion report" >&2
+      exit 1
+    fi
+  fi
+  if [ "$elapsed" -ge "$timeout" ]; then
     echo "Probe did not produce a completion report within $timeout seconds" >&2
     exit 1
   fi
