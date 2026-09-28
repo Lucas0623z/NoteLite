@@ -61,15 +61,24 @@ jobs:
           import json, os, subprocess
           def data(*args):
               return json.loads(subprocess.check_output(['xcrun', 'simctl', *args, '--json']))
-          runtimes = [r for r in data('list', 'runtimes')['runtimes']
-                      if r.get('isAvailable') and r['identifier'].startswith('com.apple.CoreSimulator.SimRuntime.iOS-')]
-          runtime = max(runtimes, key=lambda r: tuple(map(int, r['version'].split('.'))))
-          types = [d for d in data('list', 'devicetypes')['devicetypes'] if d['name'].startswith('iPhone')]
-          device = subprocess.check_output(['xcrun', 'simctl', 'create', 'NoteLite OCR dependency test',
-                                            types[-1]['identifier'], runtime['identifier']], text=True).strip()
+          runtimes = {r['identifier']: tuple(map(int, r['version'].split('.')))
+                      for r in data('list', 'runtimes')['runtimes']
+                      if r.get('isAvailable') and '.iOS-' in r['identifier']}
+          # The device-type catalog is not chronologically sorted and includes
+          # retired iPhones. Existing available devices already have a runtime
+          # that supports that device type.
+          candidates = [(runtimes[runtime], d['name'], d['udid'], d['state'])
+                        for runtime, devices in data('list', 'devices', 'available')['devices'].items()
+                        if runtime in runtimes
+                        for d in devices if d.get('isAvailable') and d['name'].startswith('iPhone')]
+          if not candidates:
+              raise SystemExit('No available iPhone simulator is installed')
+          version, name, device, state = max(candidates)
+          print(f'Using {name} on iOS {".".join(map(str, version))}: {device}')
           with open(os.environ['GITHUB_ENV'], 'a') as output:
               output.write('OCR_SIMULATOR_ID=' + device + '\n')
-          subprocess.run(['xcrun', 'simctl', 'boot', device], check=True)
+          if state != 'Booted':
+              subprocess.run(['xcrun', 'simctl', 'boot', device], check=True)
           subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
           PY
       - name: Run real OCR and codec round-trips inside iOS simulator
