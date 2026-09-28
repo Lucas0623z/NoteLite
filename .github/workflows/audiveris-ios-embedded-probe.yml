@@ -144,6 +144,18 @@ jobs:
       - name: Clean up interrupted release state
         if: always() && matrix.sdk == 'iphoneos'
         run: python3 apple/release/release.py cleanup
+      - name: Preserve JNI release verification diagnostics after archive rejection
+        if: always() && matrix.sdk == 'iphoneos'
+        run: |
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP']) / 'yinban-release-output'
+          destination = Path('build/embedded-app/iphoneos-arm64/evidence')
+          for report in source.glob('embedded-*-jni-bindings.json'):
+              destination.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(report, destination / report.name)
+          PY
       - name: Exercise offline recognition and practice in the actual iPhone and iPad app
         if: matrix.sdk == 'iphonesimulator'
         run: |

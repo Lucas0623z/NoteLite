@@ -4,6 +4,7 @@
 import base64
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -326,6 +327,24 @@ def embedded_build():
     return {"project": project, "resources": inventory["resources"], "inventorySHA256": digest(inventory_file)}
 
 
+def verify_preset_bindings(app, symbols, report_file):
+    """Compare bundled API declarations with this executable's actual exports."""
+    jars = sorted(path for path in (app / "OMRResources/java").glob("*.jar")
+                  if path.name.startswith(("leptonica-", "tesseract-")))
+    require(len(jars) == 2 and {jar.name.split("-")[0] for jar in jars} == {"leptonica", "tesseract"},
+            "Expected one bundled Leptonica and one Tesseract API JAR.")
+    auditor = Path(__file__).resolve().parents[2] / "tools/audiveris-port/verify-jni-bindings.py"
+    spec = importlib.util.spec_from_file_location("notelite_jni_bindings", auditor)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result = module.audit(jars, set(re.findall(r"\b_?(Java_[A-Za-z0-9_]+)$", symbols, re.M)))
+    report = {"jars": [{"name": jar.name, "sha256": digest(jar)} for jar in jars],
+              "linked": result, "passed": result["passed"]}
+    report_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    require(report["passed"], "The executable lacks native preset bindings; see " + report_file.name + ".")
+    return report
+
+
 def verify_embedded_archive(app, composition, output, *, report_name="embedded-archive-inventory.json"):
     """Check the actual archived app before export, validation or upload."""
     verify_resource_inventory(app / "OMRResources", composition["resources"])
@@ -348,11 +367,14 @@ def verify_embedded_archive(app, composition, output, *, report_name="embedded-a
     symbols = run(["xcrun", "nm", "-gU", str(binary)], capture=True)
     require(all(re.search(r"\b_" + re.escape(name) + r"$", symbols, re.M) for name in NATIVE_ENGINE_ENTRIES),
             "The archived executable lacks required embedded JNI entry points.")
+    binding_report = verify_preset_bindings(app, symbols,
+        output / (Path(report_name).stem.removesuffix("-inventory") + "-jni-bindings.json"))
     report = {"sdk": "iphoneos", "architecture": "arm64", "embeddedRuntimeEnabled": True,
               "bundleIdentifier": info.get("CFBundleIdentifier"),
               "version": info.get("CFBundleShortVersionString"), "build": info.get("CFBundleVersion"),
               "compositionInventorySHA256": composition["inventorySHA256"],
               "practiceResourceCount": len(practice_files), "assetCatalogSHA256": digest(assets),
+              "nativePresetBindings": binding_report,
               "nativeEntryPoints": list(NATIVE_ENGINE_ENTRIES), "resources": composition["resources"]}
     (output / report_name).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 

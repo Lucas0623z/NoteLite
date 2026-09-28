@@ -4,12 +4,33 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
 
 import release
+
+
+def native_class(owner, methods):
+    """Small valid class files keep the release tests independent of a host JDK."""
+    constants = []
+
+    def utf8(value):
+        data = value.encode("utf-8")
+        constants.append(b"\x01" + struct.pack(">H", len(data)) + data)
+        return len(constants)
+
+    name = utf8(owner)
+    constants.append(b"\x07" + struct.pack(">H", name))
+    parent = utf8("java/lang/Object")
+    constants.append(b"\x07" + struct.pack(">H", parent))
+    encoded = []
+    for method, descriptor in methods:
+        encoded.append(struct.pack(">HHHH", 0x0101, utf8(method), utf8(descriptor), 0))
+    return (struct.pack(">IHHH", 0xCAFEBABE, 0, 65, len(constants) + 1) + b"".join(constants)
+            + struct.pack(">HHHHHH", 0x0021, 2, 4, 0, 0, len(methods)) + b"".join(encoded) + b"\0\0")
 
 
 class EmbeddedReleaseTests(unittest.TestCase):
@@ -70,6 +91,16 @@ class EmbeddedReleaseTests(unittest.TestCase):
         with zipfile.ZipFile(self.jar, "w") as jar:
             for name in release.REQUIRED_ENGINE_CLASSES:
                 jar.writestr(name, b"class fixture")
+        with zipfile.ZipFile(self.jar.parent / "tesseract-5.5.1-1.5.12.jar", "w") as jar:
+            owner = "org/bytedeco/tesseract/TessBaseAPI"
+            jar.writestr(owner + ".class", native_class(owner, [("allocate", "()V"), ("Init", "(I)I"), ("Init", "(J)I")]))
+        with zipfile.ZipFile(self.jar.parent / "leptonica-1.85.0-1.5.12.jar", "w") as jar:
+            owner = "org/bytedeco/leptonica/global/leptonica"
+            jar.writestr(owner + ".class", native_class(owner, [("pixRead", "(J)J")]))
+        self.native_symbols = ["Java_org_bytedeco_tesseract_TessBaseAPI_allocate",
+                               "Java_org_bytedeco_tesseract_TessBaseAPI_Init__I",
+                               "Java_org_bytedeco_tesseract_TessBaseAPI_Init__J",
+                               "Java_org_bytedeco_leptonica_global_leptonica_pixRead"]
         self.inventory = {"sdk": "iphoneos", "architecture": "arm64", "embeddedRuntimeEnabled": True,
                           "deviceFamilies": [1, 2], "resources": []}
         self.refresh_inventory()
@@ -112,7 +143,7 @@ class EmbeddedReleaseTests(unittest.TestCase):
         if "vtool" in arguments:
             return "platform IOS\nminos 16.0\n"
         if "nm" in arguments:
-            return "\n".join("00000000 T _" + name for name in release.NATIVE_ENGINE_ENTRIES)
+            return "\n".join("00000000 T _" + name for name in (*release.NATIVE_ENGINE_ENTRIES, *self.native_symbols))
         self.fail("Unexpected external command: " + repr(arguments))
 
     def make_archived_app(self):
@@ -160,6 +191,11 @@ class EmbeddedReleaseTests(unittest.TestCase):
         self.assertEqual(report["compositionInventorySHA256"], release.digest(self.evidence / "app-inventory.json"))
         self.assertEqual(report["practiceResourceCount"], 4)
         self.assertEqual(report["assetCatalogSHA256"], release.digest(app / "Assets.car"))
+        bindings = report["nativePresetBindings"]
+        self.assertTrue(bindings["passed"])
+        self.assertEqual(bindings["linked"]["nativeDeclarations"], 4)
+        self.assertEqual(bindings["linked"]["nativeClasses"], 2)
+        self.assertEqual(len(bindings["jars"]), 2)
 
     def test_missing_build_never_falls_back_to_baseline(self):
         with patch.dict(os.environ, {"RELEASE_EMBEDDED_BUILD": ""}):
@@ -272,6 +308,17 @@ class EmbeddedReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "JNI entry points"):
             release.verify_embedded_archive(app, composition, self.root)
 
+    def test_archive_rejects_missing_tesseract_constructor_with_all_entry_points_present(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+        self.native_symbols.remove("Java_org_bytedeco_tesseract_TessBaseAPI_allocate")
+        with self.assertRaisesRegex(release.ReleaseError, "native preset bindings"):
+            release.verify_embedded_archive(app, composition, self.root)
+        proof = json.loads((self.root / "embedded-archive-jni-bindings.json").read_text())
+        self.assertFalse(proof["passed"])
+        self.assertEqual([item["method"] for item in proof["linked"]["missing"]], ["allocate"])
+        self.assertFalse((self.root / "embedded-archive-inventory.json").exists())
+
     def test_actual_archive_missing_practice_resource_is_rejected(self):
         composition = release.embedded_build()
         app = self.make_archived_app()
@@ -312,6 +359,8 @@ class EmbeddedReleaseTests(unittest.TestCase):
         self.assertEqual(proof["bundleIdentifier"], "com.example.notelite")
         self.assertEqual(proof["version"], "1.0.0")
         self.assertEqual(proof["build"], "7")
+        self.assertTrue(proof["nativePresetBindings"]["passed"])
+        self.assertTrue((self.root / "embedded-ipa-jni-bindings.json").is_file())
         self.assertEqual((self.root / "embedded-archive-inventory.json").read_bytes(), original_proof)
 
     def test_exported_ipa_missing_engine_resource_fails(self):
@@ -350,6 +399,22 @@ class EmbeddedReleaseTests(unittest.TestCase):
         self.mock_run.side_effect = lambda args, **kwargs: "" if "nm" in args else previous(args, **kwargs)
         with self.assertRaisesRegex(release.ReleaseError, "JNI entry points"):
             self.verify_ipa(self.make_ipa(app), composition, app)
+
+    def test_exported_ipa_rejects_missing_tesseract_overload_even_with_short_alias(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+        self.native_symbols.remove("Java_org_bytedeco_tesseract_TessBaseAPI_Init__J")
+        self.native_symbols.append("Java_org_bytedeco_tesseract_TessBaseAPI_Init")
+        with self.assertRaisesRegex(release.ReleaseError, "native preset bindings"):
+            self.verify_ipa(self.make_ipa(app), composition, app)
+        proof = json.loads((self.root / "embedded-ipa-jni-bindings.json").read_text())
+        self.assertFalse(proof["passed"])
+        missing = proof["linked"]["missing"]
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0]["method"], "Init")
+        self.assertEqual(missing[0]["descriptor"], "(J)I")
+        self.assertTrue(missing[0]["requiresLongName"])
+        self.assertFalse((self.root / "embedded-ipa-inventory.json").exists())
 
     def test_exported_ipa_cannot_write_outside_verification_directory(self):
         composition = release.embedded_build()

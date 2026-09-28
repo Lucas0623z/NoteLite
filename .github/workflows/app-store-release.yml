@@ -120,6 +120,18 @@ jobs:
       - name: Remove temporary signing credentials
         if: always()
         run: python3 apple/release/release.py cleanup
+      - name: Preserve JNI verification diagnostics even after a rejected archive or IPA
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP']) / 'yinban-release-output'
+          destination = Path('build/release-embedded-app/evidence')
+          for report in source.glob('embedded-*-jni-bindings.json'):
+              destination.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(report, destination / report.name)
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: yinban-ios-${{ env.RELEASE_MODE }}-${{ env.RELEASE_BUILD_NUMBER }}

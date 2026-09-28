@@ -146,6 +146,15 @@ for symbol in required:
         raise SystemExit('The app is missing a statically linked native entry point: ' + symbol)
 
 bundled = app / 'OMRResources'
+(evidence / 'linked-symbols.txt').write_text(symbols)
+binding_jars = sorted(path for path in (bundled / 'java').glob('*.jar')
+                      if path.name.startswith(('leptonica-', 'tesseract-')))
+(evidence / 'binding-jars.json').write_text(json.dumps([str(path) for path in binding_jars]))
+subprocess.run([sys.executable, str(repo / 'tools/audiveris-port/verify-jni-bindings.py'),
+                '--jars-manifest', str(evidence / 'binding-jars.json'),
+                '--symbols', str(evidence / 'linked-symbols.txt'),
+                '--report', str(evidence / 'linked-preset-bindings.json')], check=True)
+binding_report = json.loads((evidence / 'linked-preset-bindings.json').read_text())
 inventory = []
 for original in sorted((embedding / 'resources').rglob('*')):
     if not original.is_file(): continue
@@ -172,6 +181,7 @@ report = {
     'executableBytes':binary.stat().st_size, 'executableSHA256':digest(binary),
     'bundledResourceBytes':sum(item['bytes'] for item in inventory),
     'nativeEntryPoints':required, 'resources':inventory,
+    'nativePresetBindings':binding_report,
     'signedForDistribution':False, 'productionAppRecognitionExecuted':False,
 }
 (evidence / 'app-inventory.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -195,10 +205,10 @@ if [ "${NOTELITE_EMBEDDED_ARCHIVE:-0}" = 1 ]; then
       -destination 'generic/platform=iOS' -derivedDataPath "$work/DerivedData" \
       -archivePath "$archive" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO
   ) 2>&1 | tee "$output/evidence/archive.log"
-  python3 - "$archive" "$output/evidence" <<'PY'
+  python3 - "$archive" "$output/evidence" "$repo" <<'PY'
 import hashlib, json, plistlib, subprocess, sys
 from pathlib import Path
-archive, evidence = map(Path, sys.argv[1:])
+archive, evidence, repo = map(Path, sys.argv[1:])
 info = plistlib.loads((archive / 'Info.plist').read_bytes())
 relative = Path(info['ApplicationProperties']['ApplicationPath'])
 products = (archive / 'Products').resolve()
@@ -215,9 +225,19 @@ if set(app_info.get('UIDeviceFamily', [])) != {1, 2}:
     raise SystemExit('The archived app must support iPhone and iPad')
 binary = app / app_info['CFBundleExecutable']
 subprocess.run(['xcrun', 'lipo', str(binary), '-verify_arch', 'arm64'], check=True)
+symbols = subprocess.check_output(['xcrun', 'nm', '-gU', str(binary)], text=True)
+(evidence / 'archive-linked-symbols.txt').write_text(symbols)
+binding_jars = sorted(path for path in (app / 'OMRResources/java').glob('*.jar')
+                      if path.name.startswith(('leptonica-', 'tesseract-')))
+(evidence / 'archive-binding-jars.json').write_text(json.dumps([str(path) for path in binding_jars]))
+subprocess.run([sys.executable, str(repo / 'tools/audiveris-port/verify-jni-bindings.py'),
+                '--jars-manifest', str(evidence / 'archive-binding-jars.json'),
+                '--symbols', str(evidence / 'archive-linked-symbols.txt'),
+                '--report', str(evidence / 'archive-preset-bindings.json')], check=True)
 (evidence / 'archive-inventory.json').write_text(json.dumps({
     'applicationPath': str(relative), 'embeddedResourceCount': len(inventory['resources']),
     'bundleIdentifier': app_info['CFBundleIdentifier'], 'signedForDistribution': False,
+    'nativePresetBindings': json.loads((evidence / 'archive-preset-bindings.json').read_text()),
 }, indent=2) + '\n')
 PY
   ditto -c -k --sequesterRsrc --keepParent "$archive" "$output/NoteLite.xcarchive.zip"
