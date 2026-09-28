@@ -99,6 +99,24 @@ jobs:
           RUNTIME_PLATFORM: ${{ matrix.runtime }}
           OCR_SDK: ${{ matrix.sdk }}
         run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          evidence = {}
+          for key, workflow in [('RUNTIME_RUN', 'audiveris-mobile-runtime.yml'),
+                                ('OCR_RUN', 'audiveris-ios-ocr.yml')]:
+              run = json.loads(subprocess.check_output([
+                  'gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] +
+                  '/actions/runs/' + os.environ[key]], text=True))
+              if (run['status'] != 'completed' or run['conclusion'] != 'success'
+                      or run['path'] != '.github/workflows/' + workflow):
+                  raise SystemExit('Expected a successful completed ' + workflow + ': ' + run['html_url'])
+              evidence[key] = {name: run[name] for name in
+                              ('id', 'head_sha', 'path', 'html_url', 'status', 'conclusion')}
+          target = Path('build/incoming/source-runs.json')
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
           gh run download "$RUNTIME_RUN" --repo "$GITHUB_REPOSITORY" \
             --name "audiveris-ios-runtime-$RUNTIME_PLATFORM" --dir build/incoming/runtime
           gh run download "$OCR_RUN" --repo "$GITHUB_REPOSITORY" \
@@ -110,6 +128,19 @@ jobs:
           ocr = list(Path('build/incoming/ocr').rglob('install/lib/libjnitesseract.a'))
           if len(runtime) != 1 or len(ocr) != 1:
               raise SystemExit('Artifacts do not contain exactly one complete headless runtime and OCR installation')
+          inventories = list(Path('build/incoming/runtime').rglob('runtime-inventory.json'))
+          if len(inventories) != 1:
+              raise SystemExit('Expected one runtime build inventory')
+          import json
+          inventory = json.loads(inventories[0].read_text())
+          pinned = json.loads(Path('tools/audiveris-port/native-artifact-runs.json').read_text())
+          if (inventory.get('source_commit') != pinned['openjdk_source_commit']
+                  or inventory.get('platform') != os.environ['RUNTIME_PLATFORM']
+                  or inventory.get('vm') != 'zero'
+                  or inventory.get('headless_build_exit_code') != 0
+                  or not inventory.get('java_desktop_jmod')
+                  or not inventory.get('runtime_module_image')):
+              raise SystemExit('The downloaded runtime does not match the required source, platform, or complete build')
           with open(os.environ['GITHUB_ENV'], 'a') as output:
               output.write('EMBEDDED_RUNTIME=' + str(runtime[0].parents[2].resolve()) + '\n')
               output.write('EMBEDDED_OCR=' + str(ocr[0].parents[1].resolve()) + '\n')
@@ -182,6 +213,7 @@ jobs:
           name: embedded-omr-probe-${{ matrix.sdk }}-arm64
           if-no-files-found: warn
           path: |
+            build/incoming/source-runs.json
             build/embedded-probe/${{ matrix.sdk }}-arm64/EmbeddedOMRProbe.app/
             build/embedded-probe/${{ matrix.sdk }}-arm64/evidence/
             build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-symbols.c
