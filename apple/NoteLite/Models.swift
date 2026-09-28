@@ -33,6 +33,8 @@ enum ScorePhase: String, Codable {
     }
 }
 
+enum RecognitionLocation: String, Codable { case device, server }
+
 struct ScoreRecord: Identifiable, Codable, Equatable {
     let id: UUID
     let filename: String
@@ -41,13 +43,24 @@ struct ScoreRecord: Identifiable, Codable, Equatable {
     var phase: ScorePhase = .imported
     var job: RemoteJob?
     var serverURL: String?
+    var recognitionLocation: RecognitionLocation?
     var downloadedArtifacts: [String] = []
     var lastError: String?
     var paused = false
 
     var isMusicXML: Bool { FileRules.musicXMLExtensions.contains((sourceName as NSString).pathExtension.lowercased()) }
 
+    mutating func prepareForLocalRecognition() {
+        job = nil
+        serverURL = nil
+        recognitionLocation = .device
+        phase = .running
+        lastError = nil
+        paused = false
+    }
+
     mutating func prepareForUpload(serverURL: String) {
+        recognitionLocation = .server
         job = nil
         downloadedArtifacts = []
         phase = .uploading

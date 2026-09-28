@@ -2,7 +2,7 @@ name: Apple clients
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, codex/audiveris-apple-builds]
     paths:
       - "apple/**"
       - "practice-web/**"
@@ -28,6 +28,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  embedded-bridge-interface:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Check embedded runtime interfaces and enabled production service
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          xcrun --sdk iphonesimulator clang++ -fsyntax-only -std=c++17 -fobjc-arc \
+            -target arm64-apple-ios16.0-simulator -isysroot "$sdk" \
+            -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/darwin" \
+            apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.mm
+          xcrun swiftc -typecheck -parse-as-library -D EMBEDDED_OMR_RUNTIME \
+            -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
+            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
+            apple/NoteLite/Models.swift apple/NoteLite/EmbeddedRecognitionService.swift
+
   native-clients:
     runs-on: macos-26
     timeout-minutes: 30

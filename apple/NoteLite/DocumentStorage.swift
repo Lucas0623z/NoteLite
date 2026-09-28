@@ -79,6 +79,41 @@ final class DocumentStorage: @unchecked Sendable {
         return folder.appendingPathComponent(name)
     }
 
+    func installEmbeddedArtifacts(_ artifacts: [EmbeddedArtifact], for record: ScoreRecord) throws {
+        var names = Set<String>()
+        var total = 0
+        for artifact in artifacts {
+            try FileRules.validateFilename(artifact.name)
+            guard names.insert(artifact.name.lowercased()).inserted, !artifact.data.isEmpty,
+                  artifact.data.count <= 32 * 1024 * 1024 - total else {
+                throw EmbeddedRecognitionError.invalidResult
+            }
+            total += artifact.data.count
+        }
+        guard artifacts.contains(where: { FileRules.musicXMLExtensions.contains(($0.name as NSString).pathExtension.lowercased()) }),
+              artifacts.contains(where: { ($0.name as NSString).pathExtension.lowercased() == "mid" }) else {
+            throw EmbeddedRecognitionError.invalidResult
+        }
+        let owner = directory(for: record.id)
+        let staged = owner.appendingPathComponent("results-\(UUID().uuidString)", isDirectory: true)
+        let backup = owner.appendingPathComponent("previous-results-\(UUID().uuidString)", isDirectory: true)
+        let destination = owner.appendingPathComponent("results", isDirectory: true)
+        try fileManager.createDirectory(at: staged, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: staged) }
+        for artifact in artifacts {
+            try artifact.data.write(to: staged.appendingPathComponent(artifact.name), options: [.atomic, .completeFileProtection])
+        }
+        let hadResults = fileManager.fileExists(atPath: destination.path)
+        if hadResults { try fileManager.moveItem(at: destination, to: backup) }
+        do {
+            try fileManager.moveItem(at: staged, to: destination)
+        } catch {
+            if hadResults { try? fileManager.moveItem(at: backup, to: destination) }
+            throw error
+        }
+        if hadResults { try? fileManager.removeItem(at: backup) }
+    }
+
     func remove(_ record: ScoreRecord) throws {
         let folder = directory(for: record.id)
         if fileManager.fileExists(atPath: folder.path) { try fileManager.removeItem(at: folder) }

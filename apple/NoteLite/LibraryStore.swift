@@ -17,19 +17,28 @@ final class LibraryStore: ObservableObject {
     private var workers: [UUID: Worker] = [:]
     private var storage: DocumentStorage?
     private let defaults: UserDefaults
+    private let localRecognizer: any EmbeddedRecognizing
     private static let serverKey = "NoteLite.serverURL"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, storageRoot: URL? = nil,
+         localRecognizer: any EmbeddedRecognizing = EmbeddedRecognitionService.shared) {
         self.defaults = defaults
+        self.localRecognizer = localRecognizer
         serverAddress = defaults.string(forKey: Self.serverKey) ?? ""
         do {
-            let storage = try DocumentStorage()
+            let storage = try DocumentStorage(root: storageRoot)
             var loaded = try storage.load()
             // A POST interrupted before its response cannot be resumed without risking a duplicate.
             for index in loaded.indices where loaded[index].phase == .uploading {
                 loaded[index].phase = .imported
                 loaded[index].paused = true
                 loaded[index].lastError = "上次上传已中断。服务器可能已接收文件，重新识别可能创建另一项任务。"
+            }
+            for index in loaded.indices where loaded[index].recognitionLocation == .device &&
+                [.queued, .running, .downloading].contains(loaded[index].phase) {
+                loaded[index].phase = .imported
+                loaded[index].paused = true
+                loaded[index].lastError = "上次本地识谱已中断，可以重新开始。"
             }
             try storage.save(loaded)
             self.storage = storage
@@ -42,6 +51,8 @@ final class LibraryStore: ObservableObject {
 
     var canImport: Bool { storage != nil && !isImporting }
     var isConfigured: Bool { (try? ServerConfiguration(serverAddress)) != nil }
+    var hasLocalEngine: Bool { localRecognizer.isAvailable }
+    var canRecognize: Bool { hasLocalEngine || isConfigured }
 
     func record(_ id: UUID) -> ScoreRecord? { records.first { $0.id == id } }
 
@@ -107,6 +118,10 @@ final class LibraryStore: ObservableObject {
         guard let storage, let record = record(id), workers[id] == nil else { return }
         // Structured scores can be practised directly and must not be sent to the image recognizer.
         guard !record.isMusicXML else { return }
+        if hasLocalEngine && record.job == nil {
+            startLocal(id, storage: storage)
+            return
+        }
         do {
             // Existing tasks stay attached to their original server and that server's Keychain token.
             let address = !newJob && record.job != nil ? (record.serverURL ?? serverAddress) : serverAddress
@@ -140,7 +155,11 @@ final class LibraryStore: ObservableObject {
         uploadProgress.removeValue(forKey: id)
         do {
             try update(id) { value in
-                if value.phase == .uploading {
+                if value.recognitionLocation == .device {
+                    value.phase = .imported
+                    value.paused = true
+                    value.lastError = userInitiated ? "本地识谱已停止；正在执行的图像处理会在安全结束后释放。" : "本地识谱已中断，可以重新开始。"
+                } else if value.phase == .uploading {
                     value.phase = .imported
                     value.paused = true
                     value.lastError = "上传已中断。服务器可能已接收文件，重新识别可能创建另一项任务。"
@@ -202,6 +221,42 @@ final class LibraryStore: ObservableObject {
         }
         workers[id] = Worker(generation: generation, task: task)
         activeIDs.insert(id)
+    }
+
+    private func startLocal(_ id: UUID, storage: DocumentStorage) {
+        do {
+            try update(id) { $0.prepareForLocalRecognition() }
+            let generation = UUID()
+            let task = Task { [weak self] in
+                guard let self else { return }
+                defer {
+                    if self.workers[id]?.generation == generation {
+                        self.workers.removeValue(forKey: id)
+                        self.activeIDs.remove(id)
+                    }
+                }
+                do {
+                    guard let initial = self.record(id) else { return }
+                    let artifacts = try await self.localRecognizer.recognize(source: storage.sourceURL(for: initial))
+                    try self.ensureCurrent(id, generation: generation)
+                    // Native engine exports are owned by this job; persist them before marking ready.
+                    try storage.installEmbeddedArtifacts(artifacts, for: initial)
+                    try self.update(id) {
+                        $0.downloadedArtifacts = artifacts.map(\.name)
+                        $0.phase = .ready
+                        $0.paused = false
+                        $0.lastError = nil
+                    }
+                } catch {
+                    guard self.workers[id]?.generation == generation, !Task.isCancelled else { return }
+                    do {
+                        try self.update(id) { $0.phase = .failed; $0.lastError = error.localizedDescription }
+                    } catch { self.errorMessage = "无法保存本地识谱状态：\(error.localizedDescription)" }
+                }
+            }
+            workers[id] = Worker(generation: generation, task: task)
+            activeIDs.insert(id)
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private func process(_ id: UUID, generation: UUID, api: NoteLiteAPI,

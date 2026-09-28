@@ -418,12 +418,12 @@ struct ScoreDetailView: View {
                 .noteLiteSheetSize(idealWidth: 560, idealHeight: 590)
                 #endif
         }
-        .confirmationDialog("重新上传原稿并创建新的识谱任务？",
+        .confirmationDialog(library.hasLocalEngine && record.job == nil ? "重新识别这份原稿？" : "重新上传原稿并创建新的识谱任务？",
                             isPresented: $confirmingRestart, titleVisibility: .visible) {
             Button("重新识别") { library.start(record.id, newJob: true) }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("先清理原服务器上的旧任务，再使用当前服务器设置重新上传。服务器仍在运行旧任务时需要等待。")
+            Text(library.hasLocalEngine && record.job == nil ? "识别成功后会替换之前的导出结果。" : "先清理原服务器上的旧任务，再使用当前服务器设置重新上传。服务器仍在运行旧任务时需要等待。")
         }
         .confirmationDialog("清理服务器上的原稿、任务和结果？",
                             isPresented: $confirmingCleanup, titleVisibility: .visible) {
@@ -462,7 +462,7 @@ struct ScoreDetailView: View {
                 Text("识谱与转换").font(.headline)
                 Spacer()
                 if active { ProgressView().controlSize(.small) }
-                Text(record.paused ? "已暂停跟踪" : record.phase.title)
+                Text(record.paused ? (record.recognitionLocation == .device ? "已停止" : "已暂停跟踪") : record.phase.title)
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             }
             if record.phase == .uploading {
@@ -472,26 +472,26 @@ struct ScoreDetailView: View {
                 Text(error).font(.subheadline).foregroundStyle(NoteLiteTheme.wrong).textSelection(.enabled)
             }
             if active {
-                Button(record.phase == .uploading ? "停止上传" : "暂停跟踪") { library.pause(record.id) }
-                Text("暂停跟踪不会取消服务器识谱，之后可以继续获取结果。")
+                Button(record.recognitionLocation == .device ? "停止识谱" : (record.phase == .uploading ? "停止上传" : "暂停跟踪")) { library.pause(record.id) }
+                Text(record.recognitionLocation == .device ? "停止后可以重新识别；当前图像处理会在安全结束后释放。" : "暂停跟踪不会取消服务器识谱，之后可以继续获取结果。")
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             } else if record.phase != .ready {
                 VStack(alignment: .leading, spacing: 12) {
                     Button(actionTitle) { library.start(record.id) }
-                        .buttonStyle(.bordered).disabled(!library.isConfigured && record.serverURL == nil)
-                    if !library.isConfigured { Button("连接识谱服务器") { showingSettings = true } }
+                        .buttonStyle(.bordered).disabled(!library.canRecognize && record.serverURL == nil)
+                    if !library.hasLocalEngine && !library.isConfigured { Button("连接识谱服务器") { showingSettings = true } }
                 }
             }
             if (record.job != nil || record.phase == .ready) && !active {
                 Menu("更多识谱操作") {
-                    Button("重新提交识别") { confirmingRestart = true }.disabled(!library.isConfigured)
+                    Button("重新识别") { confirmingRestart = true }.disabled(!library.canRecognize)
                     if record.job != nil {
                         Button("清理服务器任务", role: .destructive) { confirmingCleanup = true }
                     }
                 }
             }
             if !canPractice {
-                Text("点选开始识别时，原稿将上传到你配置的识谱服务器。")
+                Text(library.hasLocalEngine && record.job == nil ? "识谱在设备内完成，无需网络。" : "点选开始识别时，原稿将上传到你配置的识谱服务器。")
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             }
             if let server = record.serverURL {
@@ -517,7 +517,7 @@ struct ScoreDetailView: View {
     private var actionTitle: String {
         if record.job?.state == .failed { return "重新识别" }
         if record.job != nil { return record.phase == .failed ? "重试获取结果" : "继续获取结果" }
-        return record.phase == .failed ? "重新上传识别" : "开始识别"
+        return record.phase == .failed ? (library.hasLocalEngine ? "重新识别" : "重新上传识别") : "开始识别"
     }
 }
 
