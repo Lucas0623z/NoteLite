@@ -1,0 +1,56 @@
+name: Audiveris iOS interpreted runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Apple target for the runtime build
+        required: true
+        default: device
+        type: choice
+        options: [device, simulator]
+  pull_request:
+    paths:
+      - "tools/audiveris-port/build-mobile-jdk.sh"
+      - ".github/workflows/audiveris-mobile-runtime.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-jdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform || 'device' }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      MOBILE_JDK_WORK_DIR: ${{ github.workspace }}/build/mobile-jdk
+      MOBILE_JDK_JOBS: "3"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build tools
+        run: brew install autoconf make
+      - name: Set up bootstrap JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "26"
+      - name: Build Zero runtime and attempt headless java.desktop
+        env:
+          MOBILE_PLATFORM: ${{ inputs.platform || 'device' }}
+        run: bash tools/audiveris-port/build-mobile-jdk.sh "$MOBILE_PLATFORM"
+      - name: Preserve compiler diagnostics and produced runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-ios-runtime-${{ inputs.platform || 'device' }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/mobile-jdk/logs/
+            build/mobile-jdk/artifacts/
+            build/mobile-jdk/openjdk-mobile/build/**/configure.log
+            build/mobile-jdk/openjdk-mobile/build/**/make-support/failure-summary
