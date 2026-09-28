@@ -178,3 +178,44 @@ ditto "$product" "$output/NoteLite.app"
 xcodebuild -version > "$output/evidence/xcode-version.txt"
 printf 'Built offline NoteLite app: %s\n' "$output/NoteLite.app"
 printf 'Build evidence: %s. Production-app recognition still requires an actual run.\n' "$output/evidence"
+
+if [ "${NOTELITE_EMBEDDED_ARCHIVE:-0}" = 1 ]; then
+  if [ "$sdk" != iphoneos ]; then
+    echo "A device archive requires the iphoneos target." >&2; exit 2
+  fi
+  archive="$output/NoteLite.xcarchive"
+  if [ -e "$archive" ]; then mv "$archive" "$work/previous-archive"; fi
+  (
+    cd "$project"
+    xcodebuild archive -project NoteLite.xcodeproj -scheme NoteLite -configuration Release \
+      -destination 'generic/platform=iOS' -derivedDataPath "$work/DerivedData" \
+      -archivePath "$archive" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO
+  ) 2>&1 | tee "$output/evidence/archive.log"
+  python3 - "$archive" "$output/evidence" <<'PY'
+import hashlib, json, plistlib, subprocess, sys
+from pathlib import Path
+archive, evidence = map(Path, sys.argv[1:])
+info = plistlib.loads((archive / 'Info.plist').read_bytes())
+relative = Path(info['ApplicationProperties']['ApplicationPath'])
+products = (archive / 'Products').resolve()
+app = (products / relative).resolve()
+if not app.is_relative_to(products) or not app.is_dir():
+    raise SystemExit('The archive does not contain its declared application')
+inventory = json.loads((evidence / 'app-inventory.json').read_text())
+for entry in inventory['resources']:
+    resource = app / 'OMRResources' / entry['path']
+    if not resource.is_file() or hashlib.sha256(resource.read_bytes()).hexdigest() != entry['sha256']:
+        raise SystemExit('The archive lost or changed an embedded resource: ' + entry['path'])
+app_info = plistlib.loads((app / 'Info.plist').read_bytes())
+if set(app_info.get('UIDeviceFamily', [])) != {1, 2}:
+    raise SystemExit('The archived app must support iPhone and iPad')
+binary = app / app_info['CFBundleExecutable']
+subprocess.run(['xcrun', 'lipo', str(binary), '-verify_arch', 'arm64'], check=True)
+(evidence / 'archive-inventory.json').write_text(json.dumps({
+    'applicationPath': str(relative), 'embeddedResourceCount': len(inventory['resources']),
+    'bundleIdentifier': app_info['CFBundleIdentifier'], 'signedForDistribution': False,
+}, indent=2) + '\n')
+PY
+  ditto -c -k --sequesterRsrc --keepParent "$archive" "$output/NoteLite.xcarchive.zip"
+  printf 'Created unsigned offline device archive: %s\n' "$output/NoteLite.xcarchive.zip"
+fi

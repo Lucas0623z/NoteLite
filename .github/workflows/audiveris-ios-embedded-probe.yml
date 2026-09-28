@@ -155,6 +155,7 @@ jobs:
       - name: Compose the actual offline NoteLite app from the same runtime and resources
         env:
           APP_SDK: ${{ matrix.sdk }}
+          NOTELITE_EMBEDDED_ARCHIVE: ${{ matrix.sdk == 'iphoneos' && '1' || '0' }}
         run: |
           bash tools/audiveris-port/build-embedded-app.sh "$APP_SDK" \
             "build/embedded-probe/$APP_SDK-arm64/embedding" "build/embedded-app/$APP_SDK-arm64"
@@ -187,5 +188,6 @@ jobs:
             build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-libraries.xcconfig
             build/embedded-probe/${{ matrix.sdk }}-arm64/simulator-results/
             build/embedded-app/${{ matrix.sdk }}-arm64/NoteLite.app/
+            build/embedded-app/${{ matrix.sdk }}-arm64/NoteLite.xcarchive.zip
             build/embedded-app/${{ matrix.sdk }}-arm64/evidence/
             build/embedded-app/${{ matrix.sdk }}-arm64/ui-results/
