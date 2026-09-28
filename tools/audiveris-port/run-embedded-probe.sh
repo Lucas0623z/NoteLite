@@ -18,6 +18,10 @@ xcrun simctl install "$device" "$app"
 container=$(xcrun simctl get_app_container "$device" "$bundle_id" data)
 started=$(date +%s)
 preserve_failure_evidence() {
+  if [ -f "$output/stderr.log" ]; then
+    echo "Final probe stderr (complete log is preserved with the artifacts):" >&2
+    tail -n 120 "$output/stderr.log" >&2 || true
+  fi
   if [ -d "$container/Documents" ]; then
     ditto "$container/Documents" "$output/Documents" || true
   fi

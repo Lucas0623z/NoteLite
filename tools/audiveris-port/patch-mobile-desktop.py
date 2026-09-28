@@ -118,6 +118,28 @@ def main() -> None:
             "    if (!set_boot_path('/', ':')) {\n"
             "        vm_exit_during_initialization(\"Failed setting boot class path.\", nullptr);\n")
 
+    # Apple's RTLD_FIRST process handle searches only the executable image.
+    # A statically embedded syslookup library must also resolve libSystem's
+    # malloc/free for real HarfBuzz FFM calls. Apple's documented null-path
+    # RTLD_LAZY handle provides that process-wide scope. Keep the narrower
+    # original behavior for dynamic JVMs and other Apple targets.
+    replace(root, "src/java.base/unix/native/libjava/jni_util_md.c",
+            "#ifdef __APPLE__\n"
+            "    procHandle = (void*)dlopen(NULL, RTLD_FIRST);\n",
+            "#if defined(__IOS__) && defined(STATIC_BUILD)\n"
+            "    // Builtin libraries also depend on symbols in libSystem.\n"
+            "    procHandle = (void*)dlopen(NULL, RTLD_LAZY);\n"
+            "#elif defined(__APPLE__)\n"
+            "    procHandle = (void*)dlopen(NULL, RTLD_FIRST);\n")
+    replace(root, "src/hotspot/os/posix/os_posix.cpp",
+            "void* os::get_default_process_handle() {\n"
+            "#ifdef __APPLE__\n",
+            "void* os::get_default_process_handle() {\n"
+            "#if defined(__IOS__) && defined(STATIC_BUILD)\n"
+            "  // Include dependencies of the statically embedded runtime.\n"
+            "  return (void*)::dlopen(nullptr, RTLD_LAZY);\n"
+            "#elif defined(__APPLE__)\n")
+
     replace(root, "make/modules/java.desktop/Lib.gmk",
             "ifeq ($(call isTargetOs, android ios), false)",
             "ifeq ($(call isTargetOs, android), false)")
