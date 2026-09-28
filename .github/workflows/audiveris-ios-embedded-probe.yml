@@ -34,6 +34,7 @@ jobs:
       - name: Test native build provenance gates
         run: |
           python3 tools/audiveris-port/test_download_native_artifacts.py
+          python3 -B tools/audiveris-port/test_manage_embedded_simulators.py
           python3 -B apple/release/test_release.py
       - uses: actions/setup-java@v4
         with:
@@ -98,33 +99,21 @@ jobs:
         run: |
           bash tools/audiveris-port/build-embedded-probe.sh "$PROBE_SDK" \
             "$EMBEDDED_RUNTIME" "$EMBEDDED_OCR" "build/embedded-probe/$PROBE_SDK-arm64"
+      - name: Create dedicated fresh iPhone and iPad simulators
+        if: matrix.sdk == 'iphonesimulator'
+        run: |
+          python3 tools/audiveris-port/manage-embedded-simulators.py create \
+            build/embedded-probe/iphonesimulator-arm64/simulator-results
       - name: Run full recognition on iPhone and iPad simulators
         if: matrix.sdk == 'iphonesimulator'
         run: |
           python3 - <<'PY'
           import json, subprocess
           from pathlib import Path
-          def data(*arguments):
-              return json.loads(subprocess.check_output(['xcrun', 'simctl', *arguments, '--json']))
-          sdk_major = int(subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-version'],
-                                                  text=True).split('.')[0])
-          runtimes = {r['identifier']: r for r in data('list', 'runtimes')['runtimes']
-                      if r.get('isAvailable') and r['identifier'].startswith('com.apple.CoreSimulator.SimRuntime.iOS-')
-                      and 26 <= int(r['version'].split('.')[0]) <= sdk_major}
-          available = data('list', 'devices', 'available')['devices']
           app = 'build/embedded-probe/iphonesimulator-arm64/EmbeddedOMRProbe.app'
           for family in ['iPhone', 'iPad']:
-              candidates = [(tuple(map(int, runtimes[runtime]['version'].split('.'))),
-                             d['name'], d['udid'], runtime, d)
-                            for runtime, devices in available.items() if runtime in runtimes
-                            for d in devices if d.get('isAvailable') and d['name'].startswith(family)]
-              if not candidates:
-                  raise SystemExit('No compatible available ' + family + ' simulator is installed')
-              _, _, device, runtime_id, details = max(candidates, key=lambda entry: entry[:3])
-              runtime = runtimes[runtime_id]
               output = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
-              output.mkdir(parents=True, exist_ok=True)
-              (output / 'device.json').write_text(json.dumps({'udid':device, 'device':details, 'runtime':runtime}, indent=2))
+              device = json.loads((output / 'device.json').read_text())['udid']
               try:
                   subprocess.run(['bash', 'tools/audiveris-port/run-embedded-probe.sh', app, device, str(output)], check=True)
               finally:
@@ -171,6 +160,11 @@ jobs:
               finally:
                   subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
           PY
+      - name: Remove dedicated simulators after both acceptance phases
+        if: always() && matrix.sdk == 'iphonesimulator'
+        run: |
+          python3 tools/audiveris-port/manage-embedded-simulators.py cleanup \
+            build/embedded-probe/iphonesimulator-arm64/simulator-results
       - name: Preserve app, actual scores, logs, and semantic comparisons
         if: always()
         uses: actions/upload-artifact@v4
