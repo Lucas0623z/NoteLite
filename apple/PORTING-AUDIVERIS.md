@@ -111,9 +111,13 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 第四轮 [CI 36406804700](https://github.com/Lucas0623z/NoteLite/actions/runs/36406804700) 已实际构建匹配的 macOS JDK 28 工具，以及 device / simulator 两种 arm64 各 24 个运行时静态库（包括原始 Zero）。追加图形适配时，Java 编译因两个必须实现的旧 Toolkit 方法触发 deprecation 警告而失败；已对这两个方法分别添加抑制注解，并保留构建的严格警告检查。此轮尚未产出完整图形库和模块映像，不能作为完整引擎成功的证明。
 
-静态链接还隔离了 JDK 自带 IJG JPEG 与 OCR 的 libjpeg-turbo：JDK JPEG 的 102 个 C 符号加独立前缀，JNI 名称保留，防止同一进程中两种实现错误互相调用。JDK 使用外部 zlib API，避免重复打包到 `libzip.a`。
+静态链接必须隔离 JDK 自带 IJG JPEG 与 OCR 的 libjpeg-turbo。实际二进制检查确认，上游已通过 `NEED_SHORT_EXTERNAL_NAMES` 将 JDK JPEG 的 102 个 C 符号映射为 `jCreaDecompress` 等独立名称，JNI 名称保留；与 OCR 静态库没有 JPEG 符号冲突。补丁验证完整映射，移除了会被上游覆盖的多余前缀定义。JDK 使用外部 zlib API，避免重复打包到 `libzip.a`。
 
 固定上游的通用代码缓存仍请求可执行内存，但 Zero 不生成机器码：`assembler_zero.hpp` 说明其代码缓冲区保存入口记录，`zeroInterpreterGenerator.hpp` 写入 `ZeroEntry`，`entry_zero.hpp` 再调用已经编译的 C++ 函数。因此补丁仅在 `__IOS__ && ZERO` 条件下把 `CodeMemoryReserver` 的这块存储设为可读写，不请求执行权限，也不添加 JIT entitlement。其他平台和 VM 类型保留原行为；补丁检查原分配调用必须恰好出现一次。这项修改仍需随嵌入式运行时实际验证。
+
+[CI 36410992236](https://github.com/Lucas0623z/NoteLite/actions/runs/36410992236) 已同时完成 device / simulator arm64 的完整运行时编译与模块打包：31 个 JDK 静态库加 libffi、63 个模块，以及真实的 `runtime/lib/modules`；全部必需库存在。下载真机产物检查了 32 个归档中的 1,445 个 Mach-O 对象，均标记 arm64、最低 iOS 16.0，未发现弱导入符号；编译日志没有 API 可用性警告。这是构建和二进制元数据证据，尚不证明 iOS 16 实际运行通过。
+
+首轮嵌入式应用链接暴露了三个 W^X 状态符号缺失：共享 arm64 代码引用了原生 AArch64 VM 的实现，但 Zero 使用另一组平台源文件。补丁现仅在 iOS Zero 中一致关闭这组 JIT 页面状态管理，并保留上述只读写的数据缓存。源码检查还发现，静态 JVM 在解析 `-Djava.home` 之前查找模块；现允许嵌入桥接层预先设置 `JAVA_HOME`，验证其为绝对路径且含可读的真实 `lib/modules`，再设置引导路径。两项改动通过固定源码上下文验证，仍需新的运行时构建与应用执行验证。
 
 ### 已执行的宿主适配测试
 
