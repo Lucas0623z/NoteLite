@@ -6,6 +6,7 @@ gradle.projectsEvaluated {
     app.tasks.register('compilePortOracle', JavaCompile) {
         dependsOn app.tasks.named('classes')
         source new File(oracleRoot, 'GenerateOracle.java')
+        source new File(oracleRoot, 'PortabilityProbe.java')
         classpath = app.sourceSets.main.runtimeClasspath
         destinationDirectory = classes
         options.encoding = 'UTF-8'
@@ -28,5 +29,15 @@ gradle.projectsEvaluated {
         args '-Dplatform=ios-arm64', '-d', new File(app.buildDir, 'ios-jni').absolutePath,
              '-nocompile', 'org.bytedeco.leptonica.global.leptonica',
              'org.bytedeco.tesseract.global.tesseract'
+    }
+    app.tasks.register('portProbe', JavaExec) {
+        dependsOn app.tasks.named('compilePortOracle')
+        classpath = app.files(classes) + app.sourceSets.main.runtimeClasspath
+        mainClass = 'PortabilityProbe'
+        workingDir = gradle.rootProject.projectDir
+        jvmArgs '--enable-preview', '-Djava.awt.headless=true'
+        args new File(app.projectDir, 'res').absolutePath,
+             new File(app.buildDir, 'port-probe').absolutePath,
+             System.getenv('TESSDATA_PREFIX') ?: ''
     }
 }
