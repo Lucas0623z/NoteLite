@@ -5,9 +5,9 @@ import WebKit
 struct PracticeView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var history: PracticeHistoryStore
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     let record: ScoreRecord
+    let onDismiss: () -> Void
     @StateObject private var controller = PracticeWebController()
 
     var body: some View {
@@ -28,7 +28,7 @@ struct PracticeView: View {
             .navigationTitle(record.filename)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button { controller.close { dismiss() } } label: {
+                    Button { controller.close(completion: onDismiss) } label: {
                         Label("曲谱", systemImage: "chevron.left")
                     }
                     .accessibilityIdentifier("practice-close")
@@ -48,7 +48,7 @@ struct PracticeView: View {
 
     private func prepare() {
         controller.onReport = { report in history.save(report: report, for: record) }
-        controller.onClose = { dismiss() }
+        controller.onClose = onDismiss
         controller.open(score: record, url: library.practiceURL(record))
     }
 }

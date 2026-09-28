@@ -377,10 +377,13 @@ struct ScoreDetailView: View {
             }
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $practicing) { PracticeView(record: record) }
+        .fullScreenCover(isPresented: $practicing) {
+            PracticeView(record: record, onDismiss: { practicing = false })
+        }
         #else
         .sheet(isPresented: $practicing) {
-            PracticeView(record: record).noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
+            PracticeView(record: record, onDismiss: { practicing = false })
+                .noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
         }
         #endif
         .sheet(isPresented: $showingOriginal) {
