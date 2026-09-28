@@ -155,6 +155,15 @@ mkdir -p "$output/embedding"
 cp "$project/Generated/native-symbols.c" "$output/embedding/"
 cp "$project/Generated/native-libraries.xcconfig" "$output/embedding/"
 ditto "$resources" "$output/embedding/resources"
+# Multipage document inputs belong to the acceptance app only. Production
+# embedding keeps the original PNG UI fixture and every engine resource.
+python3 - "$output/embedding/resources/examples" <<'PY'
+import sys
+from pathlib import Path
+examples = Path(sys.argv[1])
+for name in ('chula-two-page.pdf', 'chula-two-page.tiff'):
+    (examples / name).unlink(missing_ok=True)
+PY
 ditto "$repo/apple/EmbeddedOMRRuntime/Sources" "$output/embedding/bridge"
 (
   cd "$project"
