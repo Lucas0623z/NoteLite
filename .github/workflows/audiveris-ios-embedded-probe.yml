@@ -1,0 +1,158 @@
+name: Audiveris embedded iPhone and iPad acceptance
+
+on:
+  push:
+    branches: [codex/audiveris-ios-probe-builds]
+  workflow_dispatch:
+    inputs:
+      runtime_run_id:
+        description: Completed Mobile Runtime workflow run containing real headless artifacts
+        required: false
+        type: string
+      ocr_run_id:
+        description: Completed Native OCR workflow run containing real static JNI artifacts
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: audiveris-embedded-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  bridge-interface-check:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile the shared Objective-C++ and Swift interfaces against the actual iOS SDK
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          xcrun --sdk iphonesimulator clang++ -fsyntax-only -std=c++17 -fobjc-arc \
+            -target arm64-apple-ios16.0-simulator -isysroot "$sdk" \
+            -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/darwin" \
+            apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.mm
+          xcrun swiftc -typecheck -parse-as-library -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
+            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
+            apple/EmbeddedOMRProbe/Sources/EmbeddedOMRProbeApp.swift
+          xcrun swiftc -typecheck -parse-as-library -D EMBEDDED_OMR_RUNTIME \
+            -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
+            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
+            apple/NoteLite/Models.swift apple/NoteLite/EmbeddedRecognitionService.swift
+  compose-and-test:
+    runs-on: macos-26
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: iphoneos
+            runtime: device
+          - sdk: iphonesimulator
+            runtime: simulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Prepare XcodeGen
+        run: |
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+      - name: Resolve explicit or pinned artifact workflow runs
+        env:
+          RUNTIME_RUN_INPUT: ${{ inputs.runtime_run_id }}
+          OCR_RUN_INPUT: ${{ inputs.ocr_run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path('tools/audiveris-port/native-artifact-runs.json')
+          pinned = json.loads(path.read_text()) if path.exists() else {}
+          values = {
+              'RUNTIME_RUN': os.environ.get('RUNTIME_RUN_INPUT') or pinned.get('runtime_run_id', ''),
+              'OCR_RUN': os.environ.get('OCR_RUN_INPUT') or pinned.get('ocr_run_id', ''),
+          }
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              for key, value in values.items():
+                  value = str(value)
+                  if not value.isdigit():
+                      raise SystemExit('Supply real successful artifact run IDs via inputs or native-artifact-runs.json')
+                  output.write(key + '=' + value + '\n')
+          PY
+      - name: Download compiled runtime and OCR artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_PLATFORM: ${{ matrix.runtime }}
+          OCR_SDK: ${{ matrix.sdk }}
+        run: |
+          gh run download "$RUNTIME_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "audiveris-ios-runtime-$RUNTIME_PLATFORM" --dir build/incoming/runtime
+          gh run download "$OCR_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "audiveris-ocr-$OCR_SDK-arm64" --dir build/incoming/ocr
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          runtime = list(Path('build/incoming/runtime').rglob('headless/runtime/lib/modules'))
+          ocr = list(Path('build/incoming/ocr').rglob('install/lib/libjnitesseract.a'))
+          if len(runtime) != 1 or len(ocr) != 1:
+              raise SystemExit('Artifacts do not contain exactly one complete headless runtime and OCR installation')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('EMBEDDED_RUNTIME=' + str(runtime[0].parents[2].resolve()) + '\n')
+              output.write('EMBEDDED_OCR=' + str(ocr[0].parents[1].resolve()) + '\n')
+          PY
+      - name: Build actual same-process JNI app
+        env:
+          PROBE_SDK: ${{ matrix.sdk }}
+        run: |
+          bash tools/audiveris-port/build-embedded-probe.sh "$PROBE_SDK" \
+            "$EMBEDDED_RUNTIME" "$EMBEDDED_OCR" "build/embedded-probe/$PROBE_SDK-arm64"
+      - name: Run full recognition on iPhone and iPad simulators
+        if: matrix.sdk == 'iphonesimulator'
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          def data(*arguments):
+              return json.loads(subprocess.check_output(['xcrun', 'simctl', *arguments, '--json']))
+          runtimes = [r for r in data('list', 'runtimes')['runtimes']
+                      if r.get('isAvailable') and r['identifier'].startswith('com.apple.CoreSimulator.SimRuntime.iOS-')]
+          runtime = max(runtimes, key=lambda r: tuple(map(int, r['version'].split('.'))))
+          device_types = data('list', 'devicetypes')['devicetypes']
+          app = 'build/embedded-probe/iphonesimulator-arm64/EmbeddedOMRProbe.app'
+          for family in ['iPhone', 'iPad']:
+              types = [d for d in device_types if d['name'].startswith(family)]
+              device = subprocess.check_output(['xcrun', 'simctl', 'create', 'Audiveris embedded ' + family,
+                                                types[-1]['identifier'], runtime['identifier']], text=True).strip()
+              output = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
+              output.mkdir(parents=True, exist_ok=True)
+              (output / 'device.json').write_text(json.dumps({'udid':device, 'type':types[-1], 'runtime':runtime}, indent=2))
+              try:
+                  subprocess.run(['bash', 'tools/audiveris-port/run-embedded-probe.sh', app, device, str(output)], check=True)
+              finally:
+                  subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
+          PY
+      - name: Preserve app, actual scores, logs, and semantic comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-omr-probe-${{ matrix.sdk }}-arm64
+          if-no-files-found: warn
+          path: |
+            build/embedded-probe/${{ matrix.sdk }}-arm64/EmbeddedOMRProbe.app/
+            build/embedded-probe/${{ matrix.sdk }}-arm64/evidence/
+            build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-symbols.c
+            build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-libraries.xcconfig
+            build/embedded-probe/${{ matrix.sdk }}-arm64/simulator-results/

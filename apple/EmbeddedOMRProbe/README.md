@@ -1,0 +1,74 @@
+# Embedded Audiveris iOS probe
+
+This separate test app links the real OpenJDK Mobile Zero interpreter, headless
+Java desktop libraries, and OCR/JavaCPP archives into one iOS process. It calls
+the complete Java recognition pipeline through JNI. It is not wired into the
+production recognition screen.
+
+The build fails if required native libraries, the target module image, or
+JavaCPP static initialization symbols are absent. The app reports success only
+after it has rasterized the Bravura font, round-tripped TIFF through ImageIO and
+Leptonica, initialized legacy Tesseract, exercised JAXB/ProxyMusic, recognized
+the bundled `chula.png`, and parsed pitched notes and sounding MIDI events from
+the actual MusicXML/MIDI exports.
+
+## Build on macOS
+
+Requires Xcode, XcodeGen, Python 3, and host JDK 21. Build the matching arm64
+runtime and OCR artifacts first; a simulator archive cannot be linked into a
+device app or vice versa.
+
+```sh
+tools/audiveris-port/build-embedded-probe.sh iphonesimulator \
+  /path/to/runtime-artifacts/headless \
+  /path/to/ocr-artifact/install \
+  build/embedded-probe/iphonesimulator-arm64
+```
+
+Runtime input must contain `static-libs/lib`, `include`, and `runtime/lib/modules`
+from the same OpenJDK build. The module image is made by that build's matching
+host JDK; this script does not try to link JDK 28 modules with JDK 21 tools.
+OCR input must contain static JavaCPP, Tesseract, Leptonica, TIFF, PNG, JPEG and
+zlib archives plus `share/tessdata/eng.traineddata` with legacy model data.
+
+The script generates native symbol retention references from the actual
+archives, force-links the class/JNI libraries, and exports their symbols for
+the VM's built-in library lookup. Desktop platform native JARs and preview
+bytecode are rejected. Java engine JARs, classifier data, fonts and traineddata
+are bundled before the app runs. There is no runtime network or subprocess
+request in the probe.
+
+## Run on iPhone and iPad simulators
+
+```sh
+tools/audiveris-port/run-embedded-probe.sh \
+  build/embedded-probe/iphonesimulator-arm64/EmbeddedOMRProbe.app \
+  SIMULATOR_UDID build/probe-results/iphone
+```
+
+Run the same command with an iPad simulator UDID and a separate output directory.
+The runner preserves stdout/stderr, a completion report, and the entire app
+Documents folder. A timeout or Java/native failure is a test failure. The
+default timeout is 1800 seconds because this VM uses an interpreter; override
+with `NOTELITE_PROBE_TIMEOUT_SECONDS` when needed.
+The runner also compares the exported MusicXML and MIDI against the committed
+desktop semantic reference using `verify_embedded_score.py`. A difference in
+notes, timing, voices, staves, musical attributes, or MIDI events fails the run
+and is recorded in `semantic-parity.json`.
+
+### Output contract
+
+- `Documents/embedded-probe-result.json`: success/failure marker and metrics.
+- `Documents/omr/probe-report.json`: successful Java component/full-score report.
+- `Documents/omr/jobs/job-*/chula.mxl` and `chula.mid`: actual exports.
+- `Documents/omr/jobs/job-*/embedded-result.json`: report beside those exports.
+- `Documents/omr/log`: engine logs; fatal VM logs also stay under `Documents/omr`.
+
+The report records Java VM/version, elapsed time, pitched-note count and MIDI
+note-on count. Counts demonstrate that output exists; they do not establish
+transcription accuracy. Platform execution and score comparisons must be
+reported from a real completed run, not inferred from a successful build.
+
+The `iphoneos` build is unsigned by default. Running it on a physical device
+requires the user's normal signing setup. No claim about App Store distribution
+or device performance follows from this harness.

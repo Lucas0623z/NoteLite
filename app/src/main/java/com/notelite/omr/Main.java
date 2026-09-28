@@ -81,7 +81,7 @@ public class Main
     private static final Constants constants = new Constants();
 
     /** CLI parameters. */
-    private static CLI cli;
+    private static volatile CLI cli;
 
     private static boolean embeddedLogInitialized;
 

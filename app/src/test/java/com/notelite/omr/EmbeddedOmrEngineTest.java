@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
 import java.util.zip.ZipFile;
 import javax.sound.midi.MidiEvent;
 import javax.sound.midi.MidiSystem;
@@ -93,6 +94,30 @@ public class EmbeddedOmrEngineTest
         assertTrue(result.midi().isEmpty());
         assertEquals(Main.BatchStatus.SUCCESS,
                 Main.runEmbeddedBatch(new String[] { "-batch", "-help" }).status());
+    }
+
+    @Test(timeout = 120_000)
+    public void nativeCancellationEntryCanBeCalledFromAnotherThread () throws Exception
+    {
+        assertNull(Main.getCli());
+        final var worker = Executors.newSingleThreadExecutor();
+        try {
+            final var result = worker.submit(() -> EmbeddedOmrEngine.recognizeToJSON(
+                    engine.appHome().toString(), input.toString()));
+            final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+            while (Main.getCli() == null && !result.isDone() && System.nanoTime() < deadline) {
+                Thread.sleep(2);
+            }
+            assertNotNull("The job must start before the cancellation request", Main.getCli());
+            EmbeddedOmrEngine.cancelCurrentRecognition();
+            assertTrue(result.get(90, TimeUnit.SECONDS).contains("\"status\":\"CANCELLED\""));
+            assertNull(Main.getCli());
+            assertEquals(Main.BatchStatus.SUCCESS,
+                    Main.runEmbeddedBatch(new String[] { "-batch", "-help" }).status());
+        } finally {
+            worker.shutdown();
+            assertTrue(worker.awaitTermination(10, TimeUnit.SECONDS));
+        }
     }
 
     @Test

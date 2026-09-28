@@ -22,6 +22,8 @@ public final class EmbeddedOmrEngine
 {
     private final Path appHome;
 
+    private static volatile Cancellation activeNativeCancellation;
+
     private EmbeddedOmrEngine (Path appHome)
     {
         this.appHome = appHome;
@@ -126,17 +128,35 @@ public final class EmbeddedOmrEngine
     /** Simple JNI entry: no Java Path/record marshalling is required in the native host. */
     public static String recognizeToJSON (String appHome, String input) throws IOException
     {
-        final long started = System.nanoTime();
-        final RecognitionResult result = open(Path.of(appHome)).recognize(Path.of(input));
-        final String json = "{\"status\":" + jsonString(result.batch().status().name())
+        synchronized (Main.class) {
+            final long started = System.nanoTime();
+            final Cancellation cancellation = new Cancellation();
+            activeNativeCancellation = cancellation;
+            final RecognitionResult result;
+            try {
+                result = open(Path.of(appHome)).recognize(Path.of(input), cancellation);
+            } finally {
+                activeNativeCancellation = null;
+            }
+            final String json = "{\"status\":" + jsonString(result.batch().status().name())
                 + ",\"completedTasks\":" + result.batch().completedTasks()
                 + ",\"elapsedMilliseconds\":" + (System.nanoTime() - started) / 1_000_000
                 + ",\"outputDirectory\":" + jsonString(result.outputDirectory().toString())
                 + ",\"musicXML\":" + jsonStrings(result.musicXML().stream().map(Path::toString).toList())
                 + ",\"midi\":" + jsonStrings(result.midi().stream().map(Path::toString).toList())
                 + ",\"errors\":" + jsonStrings(result.batch().errors()) + "}";
-        Files.writeString(result.outputDirectory().resolve("embedded-result.json"), json);
-        return json;
+            Files.writeString(result.outputDirectory().resolve("embedded-result.json"), json);
+            return json;
+        }
+    }
+
+    /** Called from another JNI thread; cancellation is observed at a safe image-job boundary. */
+    public static void cancelCurrentRecognition ()
+    {
+        final Cancellation cancellation = activeNativeCancellation;
+        if (cancellation != null) {
+            cancellation.cancel();
+        }
     }
 
     private static String jsonStrings (List<String> values)

@@ -68,6 +68,16 @@ public final class PortabilityProbe {
         if (!ImageIO.write(image, "PNG", output.resolve("bravura-notehead.png").toFile())) {
             throw new IllegalStateException("PNG encoder unavailable");
         }
+        BufferedImage png = ImageIO.read(output.resolve("bravura-notehead.png").toFile());
+        if (png == null || png.getWidth() != image.getWidth() || png.getHeight() != image.getHeight()) {
+            throw new IllegalStateException("PNG roundtrip failed");
+        }
+        ByteArrayOutputStream jpeg = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, "JPEG", jpeg)) throw new IllegalStateException("JPEG encoder unavailable");
+        BufferedImage jpegImage = ImageIO.read(new ByteArrayInputStream(jpeg.toByteArray()));
+        if (jpegImage == null || jpegImage.getWidth() != image.getWidth() || jpegImage.getHeight() != image.getHeight()) {
+            throw new IllegalStateException("ImageIO JPEG roundtrip failed");
+        }
         IIORegistry registry = IIORegistry.getDefaultInstance();
         registry.registerServiceProvider(new com.github.jaiimageio.impl.plugins.tiff.TIFFImageWriterSpi());
         registry.registerServiceProvider(new com.github.jaiimageio.impl.plugins.tiff.TIFFImageReaderSpi());
@@ -88,6 +98,20 @@ public final class PortabilityProbe {
         // Exercise the exact TIFF bridge and legacy OCR initialization the engine uses.
         org.bytedeco.javacpp.Loader.load(org.bytedeco.leptonica.global.leptonica.class);
         org.bytedeco.javacpp.Loader.load(org.bytedeco.tesseract.global.tesseract.class);
+        // Exercise both JPEG implementations in the same process. The JDK's
+        // private IJG symbols must not collide with Leptonica's libjpeg-turbo.
+        try (BytePointer data = new BytePointer(jpeg.toByteArray())) {
+            PIX pix = pixReadMem(data, jpeg.size());
+            if (pix == null || pix.isNull()) throw new IllegalStateException("Leptonica JPEG decoder failed");
+            try {
+                if (pixGetWidth(pix) != image.getWidth() || pixGetHeight(pix) != image.getHeight()) {
+                    throw new IllegalStateException("Leptonica JPEG dimensions changed");
+                }
+            } finally { pixDestroy(pix); }
+        }
+        if (ImageIO.read(new ByteArrayInputStream(jpeg.toByteArray())) == null) {
+            throw new IllegalStateException("JDK JPEG decoder failed after native OCR codec use");
+        }
         try (BytePointer data = new BytePointer(encoded.toByteArray()); TessBaseAPI ocr = new TessBaseAPI()) {
             PIX pix = pixReadMemTiff(data, encoded.size(), 0);
             if (pix == null || pix.isNull()) throw new IllegalStateException("Leptonica TIFF decoder failed");
@@ -104,6 +128,7 @@ public final class PortabilityProbe {
         return "{\"awtFontRaster\":true,\"foregroundPixels\":" + foreground
             + ",\"fontRasterSHA256\":\"" + hash + "\",\"imageIOTiff\":true,\"jaxbUnicode\":true"
             + ",\"musicXMLBinding\":true,\"javaCPPTiffBridge\":true,\"legacyOCRCall\":true"
+            + ",\"imageIOJpeg\":true,\"javaCPPJpegBridge\":true"
             + ",\"fullScoreRecognitionTested\":false}";
     }
 }
