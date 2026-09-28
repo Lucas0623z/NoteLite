@@ -71,6 +71,43 @@ class SemanticGateTests(unittest.TestCase):
         changed["events"].pop()
         self.assertTrue(verifier.differences(reference, changed))
 
+    def two_movements(self):
+        directory = self.root / "document"
+        directory.mkdir()
+        for index, (step, pitch) in enumerate([("C", 60), ("D", 62)], start=1):
+            self.xml(step=step)
+            self.midi(pitch=pitch)
+            (directory / f"document.mvt{index}.musicxml").write_bytes(
+                (self.root / f"score-{step}-4-4-10.musicxml").read_bytes())
+            (directory / f"document.mvt{index}.mid").write_bytes(
+                (self.root / f"score-{pitch}-96.mid").read_bytes())
+        return directory
+
+    def test_two_movements_compare_every_score_and_midi_event(self):
+        directory = self.two_movements()
+        reference = verifier.score_semantics(directory, 2)
+        self.assertEqual(verifier.semantic_summary(reference), {
+            "movement_count": 2, "musicxml_counts": {"pitched_notes": 2, "other_notes": 2, "measures": 2},
+            "midi_note_on_count": 2})
+        second = directory / "document.mvt2.musicxml"
+        second.write_text(second.read_text().replace("<step>D</step>", "<step>E</step>"))
+        actual = verifier.score_semantics(directory, 2)
+        self.assertEqual(verifier.semantic_summary(reference), verifier.semantic_summary(actual))
+        self.assertTrue(verifier.differences(reference, actual))
+
+    def test_missing_page_pair_fails_instead_of_accepting_first_page(self):
+        directory = self.two_movements()
+        (directory / "document.mvt2.musicxml").unlink()
+        (directory / "document.mvt2.mid").unlink()
+        with self.assertRaisesRegex(ValueError, "Expected 2 score/MIDI pairs"):
+            verifier.score_semantics(directory, 2)
+
+    def test_equal_counts_with_unpaired_midi_fail(self):
+        directory = self.two_movements()
+        (directory / "document.mvt2.mid").rename(directory / "unrelated.mid")
+        with self.assertRaisesRegex(ValueError, "matching MusicXML and MIDI"):
+            verifier.score_semantics(directory, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

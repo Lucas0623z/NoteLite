@@ -184,12 +184,27 @@ def midi_semantics(path):
     return {"note_on_count": count, "events": events}
 
 
-def score_semantics(directory):
+def score_semantics(directory, expected_movements=1):
     xml = sorted(p for p in directory.rglob("*") if p.suffix.lower() in {".mxl", ".musicxml"})
     midi = sorted(directory.rglob("*.mid"))
-    if len(xml) != 1 or len(midi) != 1:
-        raise ValueError(f"Expected one score and MIDI in {directory}, found {len(xml)} and {len(midi)}")
-    return {"musicxml": musicxml_semantics(xml[0]), "midi": midi_semantics(midi[0])}
+    if expected_movements < 1 or len(xml) != expected_movements or len(midi) != expected_movements:
+        raise ValueError(f"Expected {expected_movements} score/MIDI pairs in {directory}, found {len(xml)} and {len(midi)}")
+    xml_by_stem = {path.with_suffix("").relative_to(directory): path for path in xml}
+    midi_by_stem = {path.with_suffix("").relative_to(directory): path for path in midi}
+    if len(xml_by_stem) != expected_movements or xml_by_stem.keys() != midi_by_stem.keys():
+        raise ValueError("Every exported movement must have one matching MusicXML and MIDI file")
+    movements = [{"musicxml": musicxml_semantics(xml_by_stem[stem]),
+                  "midi": midi_semantics(midi_by_stem[stem])} for stem in sorted(xml_by_stem)]
+    return movements[0] if expected_movements == 1 else {"movements": movements}
+
+
+def semantic_summary(semantics):
+    movements = semantics.get("movements", [semantics])
+    counts = Counter()
+    for movement in movements:
+        counts.update(movement["musicxml"]["counts"])
+    return {"movement_count": len(movements), "musicxml_counts": dict(counts),
+            "midi_note_on_count": sum(movement["midi"]["note_on_count"] for movement in movements)}
 
 
 def differences(expected, actual, path="", limit=20):
@@ -220,12 +235,15 @@ def main():
     parser.add_argument("--write-reference", action="store_true")
     parser.add_argument("--source-image", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--expected-movements", type=int, default=1,
+                        help="Exact number of separately exported score/MIDI pairs (default: 1)")
     args = parser.parse_args()
-    actual = score_semantics(args.job_directory)
+    actual = score_semantics(args.job_directory, args.expected_movements)
     if args.write_reference:
         if not args.source_image:
             parser.error("--source-image is required when recording a desktop reference")
-        reference = {"schema": 1, "kind": "desktop-engine-parity-reference",
+        reference = {"schema": 1 if args.expected_movements == 1 else 2,
+                     "kind": "desktop-engine-parity-reference",
                      "source_sha256": hashlib.sha256(args.source_image.read_bytes()).hexdigest(),
                      "semantics": actual}
         args.reference.parent.mkdir(parents=True, exist_ok=True)
@@ -237,8 +255,7 @@ def main():
         raise ValueError("Input score differs from reference source")
     mismatch = differences(reference["semantics"], actual)
     report = {"passed": not mismatch, "comparison": "desktop-engine-semantic-parity",
-              "musicxml_counts": actual["musicxml"]["counts"],
-              "midi_note_on_count": actual["midi"]["note_on_count"], "differences": mismatch}
+              **semantic_summary(actual), "differences": mismatch}
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
