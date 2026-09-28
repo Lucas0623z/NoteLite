@@ -1,0 +1,58 @@
+name: Audiveris native port
+
+on:
+  pull_request:
+    paths: ['apple/**', 'tools/audiveris-port/**', 'app/src/main/java/com/notelite/omr/image/**', 'app/src/main/java/com/notelite/omr/run/**', '.github/workflows/audiveris-ios-port.yml']
+  push:
+    branches: [main]
+    paths: ['apple/AudiverisCore/**', 'tools/audiveris-port/**', '.github/workflows/audiveris-ios-port.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audiveris-port-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Regenerate reference outputs with the desktop engine
+        run: bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle :app:portOracle
+      - name: Compare every committed reference output
+        run: python3 tools/audiveris-port/verify_oracle.py app/build/port-oracle
+      - name: Record platform dependencies
+        run: python3 tools/audiveris-port/audit_dependencies.py --format json --output app/build/port-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-java-reference
+          path: |
+            app/build/port-oracle/
+            app/build/port-audit.json
+
+  native-core:
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test native algorithms against Java output
+        working-directory: apple/AudiverisCore
+        run: swift test --configuration release
+      - name: Measure an A4 synthetic page
+        working-directory: apple/AudiverisCore
+        run: swift run --configuration release audiveris-core-benchmark > benchmark.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-native-core-results
+          path: apple/AudiverisCore/benchmark.json

@@ -69,6 +69,15 @@ jobs:
             -configuration Release -destination 'platform=macOS' \
             -derivedDataPath Build \
             CODE_SIGNING_ALLOWED=NO
+      - name: Build iPhone and iPad arm64 app without signing
+        working-directory: apple
+        run: |
+          xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath Build-device \
+            CODE_SIGNING_ALLOWED=NO
+          lipo -verify_arch arm64 Build-device/Build/Products/Release-iphoneos/NoteLite.app/NoteLite
+          ditto -c -k --keepParent Build-device/Build/Products/Release-iphoneos/NoteLite.app NoteLite-iOS-device-unsigned.zip
       - name: Verify bundled practice resources
         working-directory: apple
         shell: bash
@@ -95,6 +104,7 @@ jobs:
           path: |
             apple/NoteLite-macOS-unsigned.zip
             apple/NoteLite-iOS-simulator.zip
+            apple/NoteLite-iOS-device-unsigned.zip
       - name: Test native macOS app
         if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_macos.outcome == 'success' }}
         working-directory: apple

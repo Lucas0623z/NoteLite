@@ -1,0 +1,14 @@
+{
+  "name": "random-13x11",
+  "width": 13,
+  "height": 11,
+  "mode": "adaptive",
+  "halfWindowSize": 18,
+  "meanCoefficient": 0.7,
+  "standardDeviationCoefficient": 0.9,
+  "threshold": 127,
+  "grayBase64": "MQYbrom843dYScMJ9ZZyGs0FoHyP4Tubdqn3QIJTBA6DMJ2F4PV8bnFS+tDE3PpxnTGa3M6KeUEB7+IpeoPECAvAVGYbuGdxu1oAgoUUmphiTG4Uq8vbv7kpYSq78a3WKAs4FHvAkf95hmpi+2PzT07fvgHRsOIuBYpkgIB6QD396Exitbfim1RysZl6C94=",
+  "binaryBase64": "AAAA/wD//wAAAP8A/wAAAP8A/wAA/wAAAP//AAAAAAAAAP8A//8AAAAA//////8A/wAA//8AAAAA//8AAAD/AAD/AAAA/wAA/wAAAAAAAAAAAAAA//////8AAAD/////AAAAAAD/AP8AAAAA/wD/AAD//wD///8AAAAAAAAAAAD//wAA////AAAA/wAAAP8=",
+  "horizontalRuns": [[[0,3],[4,1],[7,3],[11,1]],[[0,3],[4,1],[6,2],[9,3]],[[1,7],[9,1],[12,1]],[[0,3],[8,1],[10,2]],[[1,4],[7,3],[11,2]],[[1,3],[5,2],[8,5]],[[0,6],[11,2]],[[0,1],[5,5],[11,1]],[[0,4],[5,1],[7,2],[11,1]],[[2,9]],[[0,2],[5,3],[9,3]]],
+  "verticalRuns": [[[0,2],[3,1],[6,3],[10,1]],[[0,7],[8,1],[10,1]],[[0,7],[8,2]],[[2,1],[4,3],[8,2]],[[0,3],[4,1],[6,1],[9,1]],[[2,1],[5,6]],[[1,2],[5,1],[7,1],[9,2]],[[0,3],[4,1],[7,4]],[[0,1],[3,3],[7,3]],[[0,3],[4,2],[7,1],[9,2]],[[1,1],[3,1],[5,1],[9,2]],[[0,2],[3,6],[10,1]],[[2,1],[4,3]]]
+}

@@ -32,6 +32,9 @@ struct LibraryView: View {
     @State private var search = ""
     @State private var importing = false
     @State private var showingSettings = false
+    #if DEBUG
+    @State private var showingLocalOMR = false
+    #endif
     @State private var deleting: ScoreRecord?
     @State private var phonePath: [UUID] = []
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -104,6 +107,9 @@ struct LibraryView: View {
                 .noteLiteSheetSize(idealWidth: 560, idealHeight: 590)
                 #endif
         }
+        #if DEBUG
+        .sheet(isPresented: $showingLocalOMR) { LocalOMRDebugView() }
+        #endif
         .alert("无法完成操作", isPresented: Binding(
             get: { library.errorMessage != nil },
             set: { if !$0 { library.errorMessage = nil } }
@@ -223,7 +229,13 @@ struct LibraryView: View {
                         Divider()
                         Button("服务器设置") { showingSettings = true }
                     }
+                    #if DEBUG
+                    Divider()
+                    Button("本地引擎移植测试") { showingLocalOMR = true }
+                        .accessibilityIdentifier("local-omr-open")
+                    #endif
                 } label: { Label("排列与设置", systemImage: "line.3.horizontal.decrease") }
+                    .accessibilityIdentifier("library-menu")
                 Button { importing = true } label: { Label("导入乐谱", systemImage: "plus") }
                     .keyboardShortcut("o").disabled(!library.canImport)
             }
