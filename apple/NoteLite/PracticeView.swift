@@ -111,7 +111,7 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         errorMessage = nil
         guard let url else { errorMessage = "此乐谱还没有可用的 MusicXML。请先完成识谱，或直接导入 MusicXML 文件。"; return }
         guard let page = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "practice") else {
-            errorMessage = "练习资源未打包，请重新构建 NoteLite。"; return
+            errorMessage = "练习资源缺失，请重新安装应用。"; return
         }
         do {
             let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0

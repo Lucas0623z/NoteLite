@@ -28,7 +28,7 @@ struct ServerSettingsView: View {
                         #endif
                         .autocorrectionDisabled()
                 } header: {
-                    Text("NoteLite 识谱服务器")
+                    Text("识谱服务器")
                 } footer: {
                     Text("使用有效证书的 HTTPS 地址。访问令牌保存在这台设备的钥匙串中，并按服务器分别保存。")
                 }
@@ -51,9 +51,21 @@ struct ServerSettingsView: View {
                 }
 
                 Section("识谱与本地曲谱") {
-                    Text("原稿和识谱结果保存在此设备。PDF 和图片通过 NoteLite 服务器识谱；原稿只有在你点选“开始识别”时才上传。MusicXML 可直接导入练习。")
+                    Text("原稿和识谱结果保存在此设备。PDF 和图片通过你配置的服务器识谱；原稿只有在你点选“开始识别”时才上传。MusicXML 可直接导入练习。")
                     Text("应用进入后台时停止网络跟踪，回到前台后自动恢复已有任务。未完成的上传需要手动重试。")
                     Text("更换服务器不迁移已有任务。已有任务仍使用原服务器的地址和令牌。")
+                }
+
+                Section("隐私与支持") {
+                    NavigationLink {
+                        PrivacyPolicyView()
+                    } label: {
+                        Label("隐私政策", systemImage: "hand.raised")
+                    }
+                    Link(destination: AppSupport.issuesURL) {
+                        Label("支持与问题反馈", systemImage: "questionmark.circle")
+                    }
+                    Link("联系开发者", destination: AppSupport.emailURL)
                 }
             }
             .navigationTitle("服务器设置")

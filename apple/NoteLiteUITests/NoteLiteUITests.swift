@@ -7,6 +7,9 @@ final class NoteLiteUITests: XCTestCase {
     @MainActor
     func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() {
         continueAfterFailure = false
+        #if os(iOS)
+        XCUIDevice.shared.orientation = .portrait
+        #endif
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting-import-demo"]
         // The UI runner launches a separate process; pass the simulator runtime fix to it too.
@@ -21,6 +24,7 @@ final class NoteLiteUITests: XCTestCase {
         score.tap()
         let practice = app.buttons["practice-start"].firstMatch
         XCTAssertTrue(practice.waitForExistence(timeout: 10), "Imported structured scores need a practice entry")
+        attach(app, name: "Score-details")
         practice.tap()
         // WebKit exposes HTML text as `value` on macOS and `label` on iOS.
         let title = app.webViews.staticTexts.matching(NSPredicate(

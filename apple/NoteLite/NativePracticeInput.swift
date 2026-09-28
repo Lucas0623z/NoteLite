@@ -86,7 +86,7 @@ final class NativePracticeInput {
             let permitted = await AVCaptureDevice.requestAccess(for: .audio)
             guard current == generation else { throw CancellationError() }
             try Task.checkCancellation()
-            guard permitted else { throw NoteLiteError.server("麦克风未获授权。请在系统设置中允许 NoteLite 使用麦克风。") }
+            guard permitted else { throw NoteLiteError.server("麦克风未获授权。请在系统设置中允许此应用使用麦克风。") }
             #if os(iOS)
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth])
