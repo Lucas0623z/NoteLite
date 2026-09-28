@@ -40,8 +40,9 @@ final class PracticePartsUITests: XCTestCase {
             XCTAssertEqual(choice.label, "第 \(number) 部分")
             choice.tap()
             let loaded = app.webViews.staticTexts.matching(NSPredicate(
-                format: "label == %@ OR value == %@", "共 19 小节", "共 19 小节")).firstMatch
+                format: "label == %@ OR value == %@", "37 - CHULA PAROARA", "37 - CHULA PAROARA")).firstMatch
             XCTAssertTrue(loaded.waitForExistence(timeout: 45), "The selected saved MusicXML must load")
+            assertMeasureCount(app)
             let player = app.webViews.buttons.matching(identifier: "开始练习").firstMatch
             let ready = XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "exists == true AND enabled == true"), object: player)
@@ -53,6 +54,25 @@ final class PracticePartsUITests: XCTestCase {
             app.buttons["practice-close"].firstMatch.tap()
             XCTAssertTrue(start.waitForExistence(timeout: 10))
         }
+    }
+
+    @MainActor
+    private func assertMeasureCount(_ app: XCUIApplication) {
+        // The compact layout hides the footer and displays only two measures.
+        // Open the actual range control, which focuses its first number field,
+        // so the selected full-score range is visible on every screen size.
+        let fullRange = app.webViews.buttons.matching(identifier: "第 1–19 小节").firstMatch
+        let compactRange = app.webViews.buttons.matching(identifier: "第 1–2 小节").firstMatch
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            fullRange.exists || compactRange.exists
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
+        (fullRange.exists ? fullRange : compactRange).tap()
+        let end = app.webViews.descendants(matching: .any)
+            .matching(identifier: "结束小节序号").firstMatch
+        XCTAssertTrue(end.waitForExistence(timeout: 10))
+        XCTAssertEqual(end.value as? String, "19", "The saved part must contain all 19 measures")
+        app.webViews.buttons.matching(identifier: "完成").firstMatch.tap()
     }
 
     @MainActor

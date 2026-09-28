@@ -43,11 +43,21 @@ final class OfflineRecognitionUITests: XCTestCase {
         restoredPractice.tap()
 
         // The empty HTML already contains the start button. Require metadata
-        // loaded from this fixture's actual 19-measure MusicXML as well.
-        let loadedScore = app.webViews.staticTexts.matching(NSPredicate(
-            format: "label == %@ OR value == %@", "共 19 小节", "共 19 小节")).firstMatch
-        XCTAssertTrue(loadedScore.waitForExistence(timeout: 90),
-                      "The restored recognized MusicXML must load in the bundled practice renderer")
+        // loaded from this fixture's actual 19-measure MusicXML as well. The
+        // compact layout hides the footer, so inspect the full range in settings.
+        let fullRange = app.webViews.buttons.matching(identifier: "第 1–19 小节").firstMatch
+        let compactRange = app.webViews.buttons.matching(identifier: "第 1–2 小节").firstMatch
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            fullRange.exists || compactRange.exists
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 90), .completed,
+                       "The restored recognized MusicXML must load in the bundled practice renderer")
+        (fullRange.exists ? fullRange : compactRange).tap()
+        let end = app.webViews.descendants(matching: .any)
+            .matching(identifier: "结束小节序号").firstMatch
+        XCTAssertTrue(end.waitForExistence(timeout: 10))
+        XCTAssertEqual(end.value as? String, "19", "The restored recognized score must retain all 19 measures")
+        app.webViews.buttons.matching(identifier: "完成").firstMatch.tap()
         let player = app.webViews.buttons.matching(identifier: "开始练习").firstMatch
         let ready = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == true AND enabled == true"), object: player)
