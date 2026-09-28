@@ -60,6 +60,12 @@ jobs:
             https://raw.githubusercontent.com/tesseract-ocr/tessdata/4767ea922bcc460e70b87b1d303ebdfed0897da8/eng.traineddata \
             -o build/tessdata/eng.traineddata
           echo 'daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047  build/tessdata/eng.traineddata' | sha256sum --check
+      - name: Check the native scoring boundary with JNI diagnostics
+        if: matrix.scorer == 'native'
+        run: |
+          bash ./gradlew --no-daemon \
+            "-PnativeTemplateLibrary=$GITHUB_WORKSPACE/build/native-template/libnotelite_template.so" \
+            :app:nativeTemplateCheckedTest
       - name: Run actual image, font, OCR, serialization and recognition paths
         env:
           TESSDATA_PREFIX: ${{ github.workspace }}/build/tessdata
@@ -97,15 +103,31 @@ jobs:
           if evidence.get('requested') is not native or evidence.get('enabled') is not native:
               raise SystemExit('The requested scoring implementation was not exercised')
           if native:
-              if evidence.get('jniCheckEnabled') is not True:
-                  raise SystemExit('Native boundary checks must be enabled')
-              before, after = evidence['before'], evidence['after']
-              if len(before) != 4 or len(after) != 4:
-                  raise SystemExit('Incomplete native lifetime counters')
-              calls, pins, releases, copies = [end - start for start, end in zip(before, after)]
-              if calls <= 0 or pins <= 0 or pins != releases or not 0 <= copies <= pins:
-                  raise SystemExit('Full recognition did not execute and release actual native scoring')
-              diagnostics = '\n'.join(text for suite in suites for text in suite.itertext())
+              # Global JNI checking copies AWT raster buffers for each small draw.
+              # Check the scorer in a separate VM, then run full scores normally.
+              if evidence.get('jniCheckEnabled') is not False:
+                  raise SystemExit('Full-score parity must use normal runtime settings')
+              checked = [ET.parse(path).getroot() for path in Path('app/build/test-results/nativeTemplateCheckedTest').glob('TEST-*.xml')]
+              required = {'com.notelite.omr.image.TemplateEvaluationTest',
+                          'com.notelite.omr.image.NativeTemplateBoundaryTest'}
+              if {suite.get('name') for suite in checked} != required:
+                  raise SystemExit('Both checked native regression classes must execute')
+              if any(int(suite.get('tests', '0')) == 0 or any(int(suite.get(key, '0'))
+                     for key in ('failures', 'errors', 'skipped')) for suite in checked):
+                  raise SystemExit('Checked native regressions must pass without skips')
+              checked_evidence = json.loads(Path('app/build/embedded-tests/native-template-checked-statistics.json').read_text())
+              if any(checked_evidence.get(key) is not True for key in ('requested', 'enabled', 'jniCheckEnabled')):
+                  raise SystemExit('Checked scorer did not run under actual JNI checking')
+              if checked_evidence.get('scorePairs') != 21888:
+                  raise SystemExit('The complete template comparison set must execute')
+              for item in (evidence, checked_evidence):
+                  before, after = item['before'], item['after']
+                  if len(before) != 4 or len(after) != 4:
+                      raise SystemExit('Incomplete native lifetime counters')
+                  calls, pins, releases, copies = [end - start for start, end in zip(before, after)]
+                  if calls <= 0 or pins <= 0 or pins != releases or not 0 <= copies <= pins:
+                      raise SystemExit('Actual native scoring and balanced releases are required in both phases')
+              diagnostics = '\n'.join(text for suite in suites + checked for text in suite.itertext())
               if any(marker in diagnostics for marker in ('WARNING in native method',
                      'FATAL ERROR in native method', 'Calling other JNI functions in the scope')):
                   raise SystemExit('JNI checking reported a native boundary violation')
@@ -127,4 +149,5 @@ jobs:
             app/build/embedded-tests/
             app/build/port-probe/
             app/build/test-results/embeddedOmrTest/
+            app/build/test-results/nativeTemplateCheckedTest/
             build/native-template/
