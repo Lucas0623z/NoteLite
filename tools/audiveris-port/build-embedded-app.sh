@@ -69,6 +69,10 @@ spec = {
             'GCC_SYMBOLS_PRIVATE_EXTERN': 'NO',
             'DEAD_CODE_STRIPPING': 'NO',
             'ENABLE_DEBUG_DYLIB': 'NO',
+            # Xcode's archive strip -D removes these live JNI/FFM exports.
+            # The statically linked JVM resolves them through dlsym at runtime.
+            'STRIP_INSTALLED_PRODUCT': 'NO',
+            'COPY_PHASE_STRIP': 'NO',
         }},
         'dependencies': [{'sdk': name} for name in (
             'Foundation.framework', 'UIKit.framework', 'CoreFoundation.framework',

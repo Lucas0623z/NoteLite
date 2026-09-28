@@ -117,7 +117,11 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 [CI 36410992236](https://github.com/Lucas0623z/NoteLite/actions/runs/36410992236) 已同时完成 device / simulator arm64 的完整运行时编译与模块打包：31 个 JDK 静态库加 libffi、63 个模块，以及真实的 `runtime/lib/modules`；全部必需库存在。下载真机产物检查了 32 个归档中的 1,445 个 Mach-O 对象，均标记 arm64、最低 iOS 16.0，未发现弱导入符号；编译日志没有 API 可用性警告。这是构建和二进制元数据证据，尚不证明 iOS 16 实际运行通过。
 
-首轮嵌入式应用链接暴露了三个 W^X 状态符号缺失：共享 arm64 代码引用了原生 AArch64 VM 的实现，但 Zero 使用另一组平台源文件。补丁现仅在 iOS Zero 中一致关闭这组 JIT 页面状态管理，并保留上述只读写的数据缓存。源码检查还发现，静态 JVM 在解析 `-Djava.home` 之前查找模块；现允许嵌入桥接层预先设置 `JAVA_HOME`，验证其为绝对路径且含可读的真实 `lib/modules`，再设置引导路径。[修复后的 CI 36413078985](https://github.com/Lucas0623z/NoteLite/actions/runs/36413078985) 已同时通过 device / simulator 构建。实际真机 `libjvm.a` 的 840 个对象已无上述三个未定义引用，并包含新的引导路径检查；应用链接和执行仍需单独验证。
+首轮嵌入式应用链接暴露了三个 W^X 状态符号缺失：共享 arm64 代码引用了原生 AArch64 VM 的实现，但 Zero 使用另一组平台源文件。补丁现仅在 iOS Zero 中一致关闭这组 JIT 页面状态管理，并保留上述只读写的数据缓存。源码检查还发现，静态 JVM 在解析 `-Djava.home` 之前查找模块；现允许嵌入桥接层预先设置 `JAVA_HOME`，验证其为绝对路径且含可读的真实 `lib/modules`，再设置引导路径。[修复后的 CI 36413078985](https://github.com/Lucas0623z/NoteLite/actions/runs/36413078985) 已同时通过 device / simulator 构建。实际真机 `libjvm.a` 的 840 个对象已无上述三个未定义引用，并包含新的引导路径检查。端到端验收还包括后续的应用链接和真实曲谱识别。
+
+随后 [CI 36414189845](https://github.com/Lucas0623z/NoteLite/actions/runs/36414189845) 完成真机和模拟器应用链接，并在模拟器真正创建了 Zero JVM。字体排版继续暴露了下一处问题：JDK 28 的 HarfBuzz 桥接使用 FFM，`LibFallback` 因缺少 `JNI_OnLoad_fallbackLinker` 静态注册入口而加载失败。实际 `libfallbackLinker.a` 已有 28 个 JNI 实现，嵌入桥接层补充了与 OpenJDK `DEF_STATIC_JNI_OnLoad` 等效的 JNI 1.8 注册；真实初始化仍由 `LibFallback.init` 完成。实际 libffi 归档含已编译的 Darwin 回调跳板表，FFM 回调使用该实现，不生成机器码。修复后的完整识别需要重新执行验证。
+
+发布归档还必须保留 JVM 动态查询的导出符号。实际归档检查发现，Xcode 的安装后符号清理会删除这些入口，即使普通 Release 构建可以链接也不能据此认定归档可用。嵌入目标禁用 `STRIP_INSTALLED_PRODUCT` 与 `COPY_PHASE_STRIP`，并对最终归档检查所需导出；验收应使用实际归档产物，检查入口保留情况并运行识别测试。
 
 ### 已执行的宿主适配测试
 

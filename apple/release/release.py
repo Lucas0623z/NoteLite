@@ -321,10 +321,12 @@ def embedded_build():
     require(linked_archives <= {token.removeprefix("-Wl,-force_load,")
                                for token in shlex.split(effective.get("OTHER_LDFLAGS", ""))},
             "Effective Release settings lost composed native libraries.")
+    require(effective.get("STRIP_INSTALLED_PRODUCT") == "NO" and effective.get("COPY_PHASE_STRIP") == "NO",
+            "Embedded Release builds must preserve native exports required by JNI and FFM lookup.")
     return {"project": project, "resources": inventory["resources"], "inventorySHA256": digest(inventory_file)}
 
 
-def verify_embedded_archive(app, composition, output):
+def verify_embedded_archive(app, composition, output, *, report_name="embedded-archive-inventory.json"):
     """Check the actual archived app before export, validation or upload."""
     verify_resource_inventory(app / "OMRResources", composition["resources"])
     practice_files = sorted(path for path in PRACTICE_SOURCE.rglob("*") if path.is_file())
@@ -347,10 +349,40 @@ def verify_embedded_archive(app, composition, output):
     require(all(re.search(r"\b_" + re.escape(name) + r"$", symbols, re.M) for name in NATIVE_ENGINE_ENTRIES),
             "The archived executable lacks required embedded JNI entry points.")
     report = {"sdk": "iphoneos", "architecture": "arm64", "embeddedRuntimeEnabled": True,
+              "bundleIdentifier": info.get("CFBundleIdentifier"),
+              "version": info.get("CFBundleShortVersionString"), "build": info.get("CFBundleVersion"),
               "compositionInventorySHA256": composition["inventorySHA256"],
               "practiceResourceCount": len(practice_files), "assetCatalogSHA256": digest(assets),
               "nativeEntryPoints": list(NATIVE_ENGINE_ENTRIES), "resources": composition["resources"]}
-    (output / "embedded-archive-inventory.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (output / report_name).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+
+def verify_exported_ipa(ipa, composition, private, output, archived_info):
+    """Validate the actual exported Payload before permitting an upload."""
+    extracted = private / "export-verification"
+    require(not extracted.exists(), "IPA verification directory already exists; use a fresh release job.")
+    extracted.mkdir()
+    try:
+        with zipfile.ZipFile(ipa) as archive:
+            names = set()
+            for entry in archive.infolist():
+                name = PurePosixPath(entry.filename)
+                require(entry.filename and "\\" not in entry.filename and ":" not in entry.filename
+                        and not name.is_absolute() and ".." not in name.parts,
+                        "Exported IPA contains an invalid ZIP path.")
+                require((entry.external_attr >> 16) & 0o170000 != 0o120000,
+                        "Exported IPA contains a symbolic link; its contents cannot be verified safely.")
+                require(name.as_posix().casefold() not in names, "Exported IPA contains duplicate ZIP paths.")
+                names.add(name.as_posix().casefold())
+            archive.extractall(extracted)
+    except zipfile.BadZipFile:
+        raise ReleaseError("The exported IPA is not a valid ZIP archive.") from None
+    apps = [path for path in (extracted / "Payload").glob("*.app") if path.is_dir()]
+    require(len(apps) == 1, "Exported IPA must contain exactly one Payload application.")
+    info = plistlib.loads(contained_file(apps[0], "Info.plist").read_bytes())
+    for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion"):
+        require(info.get(key) == archived_info.get(key), "Exported IPA identity/version differs from its archive.")
+    verify_embedded_archive(apps[0], composition, output, report_name="embedded-ipa-inventory.json")
 
 
 def archive():
@@ -404,6 +436,7 @@ def archive():
                  "-exportPath", str(output / "export"), "-exportOptionsPlist", str(export_options)])
             ipas = list((output / "export").glob("*.ipa"))
             require(len(ipas) == 1, "Export did not produce exactly one IPA.")
+            verify_exported_ipa(ipas[0], composition, private, output, info)
             if upload:
                 keys = private / "private_keys"
                 keys.mkdir(mode=0o700)

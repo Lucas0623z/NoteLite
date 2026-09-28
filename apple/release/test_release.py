@@ -80,6 +80,7 @@ class EmbeddedReleaseTests(unittest.TestCase):
             "PLATFORM_NAME": "iphoneos", "ARCHS": "arm64",
             "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "EMBEDDED_OMR_RUNTIME",
             "OTHER_LDFLAGS": self.flags,
+            "STRIP_INSTALLED_PRODUCT": "NO", "COPY_PHASE_STRIP": "NO",
         }}]
         self.command_mock = patch.object(release, "run", side_effect=self.command)
         self.mock_run = self.command_mock.start()
@@ -128,9 +129,29 @@ class EmbeddedReleaseTests(unittest.TestCase):
         }))
         return app
 
+    def make_ipa(self, app, transform=None):
+        ipa = self.root / "export.ipa"
+        with zipfile.ZipFile(ipa, "w") as archive:
+            for file in app.rglob("*"):
+                if not file.is_file():
+                    continue
+                relative = file.relative_to(app).as_posix()
+                data = file.read_bytes()
+                if transform:
+                    data = transform(relative, data)
+                if data is not None:
+                    archive.writestr("Payload/NoteLite.app/" + relative, data)
+        return ipa
+
+    def verify_ipa(self, ipa, composition, app):
+        private = self.root / "ipa-private"
+        private.mkdir(exist_ok=True)
+        release.verify_exported_ipa(ipa, composition, private, self.root,
+                                    plistlib.loads((app / "Info.plist").read_bytes()))
+
     def test_complete_composition_and_archived_app_pass(self):
         composition = release.embedded_build()
-        self.assertEqual(composition["project"], self.project / "NoteLite.xcodeproj")
+        self.assertEqual(composition["project"], (self.project / "NoteLite.xcodeproj").resolve())
         app = self.make_archived_app()
         release.verify_embedded_archive(app, composition, self.root)
         report = json.loads((self.root / "embedded-archive-inventory.json").read_text(encoding="utf-8"))
@@ -234,6 +255,15 @@ class EmbeddedReleaseTests(unittest.TestCase):
             release.verify_embedded_archive(app, composition, self.root)
         self.assertFalse((self.root / "embedded-archive-inventory.json").exists())
 
+    def test_archive_stripping_cannot_remove_dynamic_jni_exports(self):
+        settings = self.settings[0]["buildSettings"]
+        for key in ("STRIP_INSTALLED_PRODUCT", "COPY_PHASE_STRIP"):
+            with self.subTest(setting=key):
+                settings[key] = "YES"
+                with self.assertRaisesRegex(release.ReleaseError, "preserve native exports"):
+                    release.embedded_build()
+                settings[key] = "NO"
+
     def test_actual_archive_missing_jni_symbol_is_rejected(self):
         composition = release.embedded_build()
         app = self.make_archived_app()
@@ -272,6 +302,65 @@ class EmbeddedReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "not an iOS device binary"):
             release.verify_embedded_archive(app, composition, self.root)
 
+    def test_exported_ipa_passes_and_keeps_separate_archive_proof(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+        release.verify_embedded_archive(app, composition, self.root)
+        original_proof = (self.root / "embedded-archive-inventory.json").read_bytes()
+        self.verify_ipa(self.make_ipa(app), composition, app)
+        proof = json.loads((self.root / "embedded-ipa-inventory.json").read_text(encoding="utf-8"))
+        self.assertEqual(proof["bundleIdentifier"], "com.example.notelite")
+        self.assertEqual(proof["version"], "1.0.0")
+        self.assertEqual(proof["build"], "7")
+        self.assertEqual((self.root / "embedded-archive-inventory.json").read_bytes(), original_proof)
+
+    def test_exported_ipa_missing_engine_resource_fails(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+        ipa = self.make_ipa(app, lambda name, data: None if name == "OMRResources/runtime/lib/modules" else data)
+        with self.assertRaisesRegex(release.ReleaseError, "Missing or escaped"):
+            self.verify_ipa(ipa, composition, app)
+        self.assertFalse((self.root / "embedded-ipa-inventory.json").exists())
+
+    def test_exported_ipa_changed_practice_resource_fails(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+        ipa = self.make_ipa(app, lambda name, data: b"changed" if name == "practice/app.js" else data)
+        with self.assertRaisesRegex(release.ReleaseError, "practice resource differs"):
+            self.verify_ipa(ipa, composition, app)
+
+    def test_exported_ipa_changed_bundle_identity_fails(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+
+        def renamed(name, data):
+            if name == "Info.plist":
+                info = plistlib.loads(data)
+                info["CFBundleIdentifier"] = "com.example.other"
+                return plistlib.dumps(info)
+            return data
+
+        with self.assertRaisesRegex(release.ReleaseError, "identity/version differs"):
+            self.verify_ipa(self.make_ipa(app, renamed), composition, app)
+
+    def test_exported_ipa_lost_native_exports_fails(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+        previous = self.command
+        self.mock_run.side_effect = lambda args, **kwargs: "" if "nm" in args else previous(args, **kwargs)
+        with self.assertRaisesRegex(release.ReleaseError, "JNI entry points"):
+            self.verify_ipa(self.make_ipa(app), composition, app)
+
+    def test_exported_ipa_cannot_write_outside_verification_directory(self):
+        composition = release.embedded_build()
+        app = self.make_archived_app()
+        ipa = self.make_ipa(app)
+        with zipfile.ZipFile(ipa, "a") as archive:
+            archive.writestr("../outside", b"unexpected")
+        with self.assertRaisesRegex(release.ReleaseError, "invalid ZIP path"):
+            self.verify_ipa(ipa, composition, app)
+        self.assertFalse((self.root / "ipa-private/outside").exists())
+
     def test_invalid_embedded_archive_stops_before_export_or_upload(self):
         app = self.make_archived_app()
         (app / "OMRResources/runtime/lib/modules").unlink()
@@ -296,7 +385,7 @@ class EmbeddedReleaseTests(unittest.TestCase):
         self.assertFalse(any("-exportArchive" in call.args[0] or "altool" in call.args[0]
                              for call in self.mock_run.call_args_list))
         archive_call = next(call.args[0] for call in self.mock_run.call_args_list if "archive" in call.args[0])
-        self.assertEqual(archive_call[archive_call.index("-project") + 1], str(self.project / "NoteLite.xcodeproj"))
+        self.assertEqual(archive_call[archive_call.index("-project") + 1], str((self.project / "NoteLite.xcodeproj").resolve()))
 
 
 if __name__ == "__main__":

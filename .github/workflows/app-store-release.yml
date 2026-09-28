@@ -1,6 +1,8 @@
 name: iOS App Store release
 
 on:
+  push:
+    branches: [codex/audiveris-release-builds]
   pull_request:
     paths:
       - "apple/**"
@@ -125,6 +127,7 @@ jobs:
             ${{ runner.temp }}/yinban-release-output/Yinban.xcarchive.zip
             ${{ runner.temp }}/yinban-release-output/export/*.ipa
             ${{ runner.temp }}/yinban-release-output/embedded-archive-inventory.json
+            ${{ runner.temp }}/yinban-release-output/embedded-ipa-inventory.json
           if-no-files-found: error
           retention-days: 7
       - name: Preserve embedded build evidence
