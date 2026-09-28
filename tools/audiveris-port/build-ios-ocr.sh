@@ -87,12 +87,25 @@ build_install tiff "${codec_paths[@]}" -Dtiff-tools=OFF -Dtiff-tests=OFF -Dtiff-
   -Dtiff-docs=OFF -Dtiff-install=ON -Dtiff-opengl=OFF -Dcxx=OFF \
   -Dzlib=ON -Djpeg=ON -Dlibdeflate=OFF -Djbig=OFF -Dlerc=OFF -Dlzma=OFF -Dzstd=OFF -Dwebp=OFF
 codec_paths+=("-DTIFF_INCLUDE_DIR=$prefix/include" "-DTIFF_LIBRARY=$prefix/lib/libtiff.a")
-build_install leptonica "${codec_paths[@]}" -DBUILD_PROG=OFF -DSW_BUILD=OFF -DSTRICT_CONF=ON \
+# TIFF's static export contains CMath::CMath, ZLIB::ZLIB and JPEG::JPEG.
+# Leptonica 1.85 copies that interface without finding CMath itself. Resolve
+# the real SDK math library through TIFF's own finder before importing it,
+# and preload the codec targets before Tesseract imports static Leptonica.
+cat > "$build_root/codec-dependencies.cmake" <<EOF
+list(APPEND CMAKE_MODULE_PATH "$source_root/tiff/cmake")
+find_package(CMath REQUIRED)
+find_package(ZLIB REQUIRED)
+find_package(JPEG REQUIRED)
+find_package(PNG REQUIRED)
+find_package(TIFF REQUIRED)
+EOF
+codec_imports=("-DCMAKE_PROJECT_INCLUDE=$build_root/codec-dependencies.cmake")
+build_install leptonica "${codec_paths[@]}" "${codec_imports[@]}" -DBUILD_PROG=OFF -DSW_BUILD=OFF -DSTRICT_CONF=ON \
   -DENABLE_ZLIB=ON -DENABLE_PNG=ON -DENABLE_JPEG=ON -DENABLE_TIFF=ON \
   -DENABLE_GIF=OFF -DENABLE_WEBP=OFF -DENABLE_OPENJPEG=OFF
 # A device binary cannot be run by CMake's host-side try_run. The supplied answer
 # is a cross-build assumption, checked by the simulator TIFF round-trip below.
-build_install tesseract "${codec_paths[@]}" "-DLeptonica_DIR=$prefix/lib/cmake/leptonica" \
+build_install tesseract "${codec_paths[@]}" "${codec_imports[@]}" "-DLeptonica_DIR=$prefix/lib/cmake/leptonica" \
   -DLEPT_TIFF_RESULT=0 -DBUILD_TRAINING_TOOLS=OFF -DBUILD_TESTS=OFF -DSW_BUILD=OFF \
   -DOPENMP_BUILD=OFF -DENABLE_NATIVE=OFF -DENABLE_LTO=OFF -DGRAPHICS_DISABLED=ON \
   -DDISABLE_TIFF=OFF -DDISABLE_ARCHIVE=ON -DDISABLE_CURL=ON
