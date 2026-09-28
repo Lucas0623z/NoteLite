@@ -26,6 +26,11 @@ data, and log directories inside this explicit sandbox. Existing desktop
 folder behavior is unchanged when `notelite.appHome` is absent. One sandbox
 is supported per JVM; switching it after initialization is rejected.
 
+In an explicit app sandbox, scanned PDFs render at 300 DPI, matching the iOS
+input-size check. A persisted desktop PDF resolution cannot increase that
+allocation. Desktop sessions without `notelite.appHome` retain their configured
+resolution.
+
 Both input and output paths are checked against canonical sandbox paths.
 Every recognition call creates a new job directory, so old exports cannot be
 mistaken for successful recognition. The public wrapper only accepts image/PDF
@@ -52,12 +57,14 @@ API alone does not establish that these dependencies run on iOS.
 TESSDATA_PREFIX=/path/to/bundled/tessdata ./gradlew :app:embeddedOmrTest
 ```
 
-This opt-in task runs ten integration tests in a fresh sandbox. It rejects
+This opt-in task runs eleven integration tests in a fresh sandbox. It rejects
 malformed arguments and outside paths, verifies cancellation and executor
 timeout handling, feeds a corrupt image followed by two complete recognitions
 of `data/examples/chula.png`, and exercises the JNI JSON entry. It parses the
 actual exported MusicXML and MIDI to require pitched notes and sounding MIDI
 note events. A two-page TIFF and a two-page scanned PDF each run through the
 complete pipeline and must export both copies of the fixture: 302 pitched
-notes and 440 MIDI note-on events. The tests do not claim transcription accuracy against a human-verified
+notes and 440 MIDI note-on events. A persisted 600 DPI setting is loaded and
+preserved while an embedded one-inch PDF page actually renders at 300 pixels.
+The tests do not claim transcription accuracy against a human-verified
 score or substitute for a device run.

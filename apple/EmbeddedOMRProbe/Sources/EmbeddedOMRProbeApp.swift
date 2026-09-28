@@ -53,7 +53,8 @@ final class ProbeModel: ObservableObject {
                         let cancellation = EmbeddedOMRCancellation()
                         cancellation.cancel()
                         do {
-                            _ = try EmbeddedJVM.recognize(resourceRoot: resources.path, sandbox: sandbox.path,
+                            _ = try EmbeddedJVM.recognize(resourceRoot: sandbox.appendingPathComponent("must-not-be-opened", isDirectory: true).path,
+                                                          sandbox: sandbox.path,
                                                           input: sandbox.appendingPathComponent("must-not-be-read.png").path,
                                                           cancellation: cancellation)
                             throw CocoaError(.coderInvalidValue)

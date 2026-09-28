@@ -21,6 +21,7 @@
 // </editor-fold>
 package com.notelite.omr.image;
 
+import com.notelite.omr.WellKnowns;
 import com.notelite.omr.constant.Constant;
 import com.notelite.omr.constant.ConstantSet;
 import com.notelite.omr.util.FileUtil;
@@ -76,6 +77,9 @@ public abstract class ImageLoading
     //~ Static fields/initializers -----------------------------------------------------------------
 
     private static final Constants constants = new Constants();
+
+    /** Must match the iOS input preflight; persisted desktop settings cannot raise this bound. */
+    public static final int EMBEDDED_PDF_RESOLUTION = 300;
 
     private static final Logger logger = LoggerFactory.getLogger(ImageLoading.class);
 
@@ -341,7 +345,7 @@ public abstract class ImageLoading
             renderer.setRenderingHints(renderingHints);
             return renderer.renderImageWithDPI(
                     pageIndex,
-                    constants.pdfResolution.getValue(),
+                    WellKnowns.APP_HOME != null ? EMBEDDED_PDF_RESOLUTION : constants.pdfResolution.getValue(),
                     ImageType.GRAY);
         }
     }

@@ -3,6 +3,8 @@
 package com.notelite.omr;
 
 import com.notelite.omr.text.tesseract.TesseractOCR;
+import com.notelite.omr.constant.Constant;
+import com.notelite.omr.image.ImageLoading;
 import com.notelite.omr.util.OmrExecutors;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -46,7 +48,13 @@ public class EmbeddedOmrEngineTest
     {
         final Path base = Path.of(System.getProperty("notelite.embeddedTestRoot"));
         Files.createDirectories(base);
-        engine = EmbeddedOmrEngine.open(Files.createTempDirectory(base, "sandbox-"));
+        final Path sandbox = Files.createTempDirectory(base, "sandbox-");
+        // Simulate an existing desktop/custom setting in this isolated embedded
+        // sandbox, before ConstantManager is initialized. No user config is touched.
+        Files.createDirectories(sandbox.resolve("config"));
+        Files.writeString(sandbox.resolve("config/run.properties"),
+                "com.notelite.omr.image.ImageLoading.pdfResolution=600\n");
+        engine = EmbeddedOmrEngine.open(sandbox);
         input = engine.appHome().resolve("chula.png");
         Files.copy(Path.of(System.getProperty("notelite.embeddedTestInput")), input,
                 StandardCopyOption.REPLACE_EXISTING);
@@ -201,6 +209,36 @@ public class EmbeddedOmrEngineTest
         }
         OmrExecutors.restartForEmbedded();
         assertTrue(OmrExecutors.shutdownForEmbedded(false, 10_000));
+    }
+
+    @Test(timeout = 600_000)
+    public void embeddedPdfRasterIgnoresPersistedDesktopResolution () throws Exception
+    {
+        final var field = ImageLoading.class.getDeclaredField("constants");
+        field.setAccessible(true);
+        final Object settings = field.get(null);
+        final var resolutionField = settings.getClass().getDeclaredField("pdfResolution");
+        resolutionField.setAccessible(true);
+        final Constant.Integer resolution = (Constant.Integer) resolutionField.get(settings);
+        assertEquals("The stored override must really be loaded", 600, resolution.getValue().intValue());
+        final Path pdf = engine.appHome().resolve("resolution-check.pdf");
+        try (var document = new PDDocument()) {
+            document.addPage(new PDPage(new PDRectangle(72, 72)));
+            document.save(pdf.toFile());
+        }
+        final var loader = ImageLoading.getLoader(pdf);
+        assertNotNull(loader);
+        try {
+            final var image = loader.getImage(1);
+            assertEquals(300, image.getWidth());
+            assertEquals(300, image.getHeight());
+            // The configurable value itself remains unchanged for ordinary
+            // desktop sessions; only the explicit embedded session fixes DPI.
+            assertEquals(600, resolution.getValue().intValue());
+        } finally {
+            loader.dispose();
+            Files.deleteIfExists(pdf);
+        }
     }
 
     @Test(timeout = 600_000)

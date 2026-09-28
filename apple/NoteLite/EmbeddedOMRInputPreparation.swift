@@ -154,8 +154,8 @@ enum EmbeddedOMRInputPreparer {
 
     private static func preflightPDF(_ document: PDFDocument, limits: EmbeddedOMRInputLimits,
                                      cancellationCheck: () throws -> Void) throws {
-        // ImageLoading.pdfResolution defaults to 300 DPI. The embedded engine
-        // does not expose a resolution override: keep this in sync if it gains one.
+        // ImageLoading.EMBEDDED_PDF_RESOLUTION enforces 300 DPI whenever the
+        // engine uses an explicit app sandbox, regardless of persisted settings.
         // PDFBox 3.0.6 PDFRenderer uses Float arithmetic, floors each dimension,
         // and swaps the raster dimensions for 90/270-degree page rotation.
         let scale: Float = 300 / 72
