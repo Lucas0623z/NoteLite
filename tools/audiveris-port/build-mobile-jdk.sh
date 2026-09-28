@@ -42,6 +42,48 @@ printf 'OpenJDK source: %s\nTarget: %s\nSDK: %s\n' "$mobile_ref" "$triple" "$sdk
 xcodebuild -version
 "$JAVA_HOME/bin/java" -version
 
+ffi_source="$work_root/libffi-$ffi_version"
+ffi_build="$work_root/libffi-build"
+ffi_library="$ffi_build/Release-$sdk/libffi.a"
+ffi_headers="$ffi_build/Release-$sdk/include/ffi"
+baseline_cache="${MOBILE_JDK_BASELINE_CACHE:-}"
+baseline_restored=false
+if [[ -n "$baseline_cache" ]]; then
+  mkdir -p "$(dirname "$baseline_cache")"
+  baseline_cache="$(cd "$(dirname "$baseline_cache")" && pwd)/$(basename "$baseline_cache")"
+  python3 - "$work_root" "$platform" "$mobile_ref" "$sdk_path" "$JAVA_HOME" \
+    "$MOBILE_JDK_HOST_HOME" "$repo_root/tools/audiveris-port/build-mobile-jdk.sh" <<'PY'
+import hashlib, json, subprocess, sys
+from pathlib import Path
+work, platform, source, sdk, boot, host, script = sys.argv[1:]
+manifest = {'workRoot':work, 'platform':platform, 'source':source, 'sdk':sdk,
+            'bootstrapJDK':boot, 'hostJDK':host,
+            'xcode':subprocess.check_output(['xcodebuild', '-version'], text=True),
+            'buildScriptSHA256':hashlib.sha256(Path(script).read_bytes()).hexdigest()}
+(Path(work) / 'baseline-expected.json').write_text(json.dumps(manifest, sort_keys=True) + '\n')
+PY
+  if [[ -f "$baseline_cache" ]]; then
+    # A baseline is captured before any headless patch. Never extract over an
+    # existing checkout or reuse a cache created for different absolute tool paths.
+    if [[ -e "$source_dir" || -e "$ffi_source" || -e "$ffi_build" ]]; then
+      echo "Restore requires a fresh MOBILE_JDK_WORK_DIR." >&2; exit 2
+    fi
+    if python3 - "$baseline_cache" "$work_root/baseline-expected.json" <<'PY'
+import json, sys, tarfile
+with tarfile.open(sys.argv[1]) as archive:
+    marker = archive.extractfile('baseline-manifest.json')
+    if marker is None or json.load(marker) != json.load(open(sys.argv[2])):
+        raise SystemExit('Cached baseline configuration differs; rebuilding')
+PY
+    then
+      tar -xzf "$baseline_cache" -C "$work_root"
+      baseline_restored=true
+      echo "Restored clean compiled baseline; current headless patches will still be applied and built."
+    fi
+  fi
+fi
+
+if [[ "$baseline_restored" != true ]]; then
 if [[ ! -d "$source_dir/.git" ]]; then
   git init "$source_dir"
   git -C "$source_dir" remote add origin https://github.com/openjdk/mobile.git
@@ -142,6 +184,21 @@ ffi_headers="$ffi_build/Release-$sdk/include/ffi"
     "--with-jobs=${MOBILE_JDK_JOBS:-3}"
   gmake "CONF=$conf_name" LOG=info static-libs-image java copy java.base-gendata release-file
 ) 2>&1 | tee "$logs/openjdk-baseline.log"
+
+  if [[ -n "$baseline_cache" ]]; then
+    [[ -z "$(git -C "$source_dir" status --porcelain)" ]] || {
+      echo "Refusing to cache a modified baseline source tree." >&2; exit 1;
+    }
+    cp "$work_root/baseline-expected.json" "$work_root/baseline-manifest.json"
+    tar -czf "$baseline_cache.pending" -C "$work_root" \
+      baseline-manifest.json openjdk-mobile "libffi-$ffi_version" libffi-build
+    mv "$baseline_cache.pending" "$baseline_cache"
+  fi
+fi
+[[ "$(git -C "$source_dir" rev-parse HEAD)" == "$mobile_ref" ]] || exit 2
+[[ -z "$(git -C "$source_dir" status --porcelain)" ]] || exit 2
+[[ -f "$ffi_library" && -f "$ffi_headers/ffi.h" ]] || exit 2
+cp "$source_dir/make/conf/version-numbers.conf" "$artifacts/version-numbers.conf"
 
 build_dir="$source_dir/build/$conf_name"
 mkdir -p "$artifacts/baseline"

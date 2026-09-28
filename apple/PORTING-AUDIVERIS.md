@@ -109,6 +109,8 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 第三次的 device / simulator 均越过 libffi，进入 OpenJDK C++ 编译；直接构建 iOS `jmods` 时触发了上游尚未适配的动态库与交叉宿主构建，Apple 链接器拒绝 Linux 风格的 `-soname`。构建已改为官方 ios-tools 的静态库加目标 class 文件路线，使用独立 macOS 工具生成模块映像；CI 保存失败日志并重新验证该路线。
 
+第四轮 [CI 36406804700](https://github.com/Lucas0623z/NoteLite/actions/runs/36406804700) 已实际构建匹配的 macOS JDK 28 工具，以及 device / simulator 两种 arm64 各 24 个运行时静态库（包括原始 Zero）。追加图形适配时，Java 编译因两个必须实现的旧 Toolkit 方法触发 deprecation 警告而失败；已对这两个方法分别添加抑制注解，并保留构建的严格警告检查。此轮尚未产出完整图形库和模块映像，不能作为完整引擎成功的证明。
+
 静态链接还隔离了 JDK 自带 IJG JPEG 与 OCR 的 libjpeg-turbo：JDK JPEG 的 102 个 C 符号加独立前缀，JNI 名称保留，防止同一进程中两种实现错误互相调用。JDK 使用外部 zlib API，避免重复打包到 `libzip.a`。
 
 固定上游的通用代码缓存仍请求可执行内存，但 Zero 不生成机器码：`assembler_zero.hpp` 说明其代码缓冲区保存入口记录，`zeroInterpreterGenerator.hpp` 写入 `ZeroEntry`，`entry_zero.hpp` 再调用已经编译的 C++ 函数。因此补丁仅在 `__IOS__ && ZERO` 条件下把 `CodeMemoryReserver` 的这块存储设为可读写，不请求执行权限，也不添加 JIT entitlement。其他平台和 VM 类型保留原行为；补丁检查原分配调用必须恰好出现一次。这项修改仍需随嵌入式运行时实际验证。
@@ -132,7 +134,14 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 设置 `TESSDATA_PREFIX` 为完整 tessdata 4.1.0 目录，至少包含支持 legacy 模式的 `eng.traineddata`。测试结果保存在 `app/build/port-probe/` 和 `app/build/test-results/embeddedOmrTest/`。
 
-另一个 CI 作业 `host_runtime_validation` 使用上述固定源码构建的 macOS JDK 28：Gradle 与引擎编译仍用 Java 21，六个平台适配类改用该 JDK 28 的 `javac` 编译，探针和完整识别测试改由该 JDK 28 执行。每组导出还要通过 MusicXML / MIDI 语义比较。此作业独立于 iOS 交叉编译，目前尚待实际运行结果。在已准备好 `MOBILE_JDK_HOST_HOME` 的 macOS 主机上，可切换 `JAVA_HOME` 到 Java 21 后运行：
+另一个 CI 作业 `host_runtime_validation` 使用上述固定源码构建的 macOS JDK 28：Gradle 与引擎编译仍用 Java 21，六个平台适配类改用该 JDK 28 的 `javac` 编译，探针和完整识别测试改由该 JDK 28 执行。此作业独立于 iOS 交叉编译；[CI 36409604644 的宿主作业](https://github.com/Lucas0623z/NoteLite/actions/runs/36409604644/job/108887214378) 已通过：
+
+- 8 个测试，0 个跳过、失败或错误；重复识别、故障恢复、取消、沙盒和 JSON 库入口均完成。
+- 单页重复导出各 151 个有音高音符 / 220 个 MIDI note-on；两页 TIFF 和 PDF 各导出 302 个有音高音符 / 440 个 MIDI note-on。
+- 4 组单页导出的完整 MusicXML / MIDI 语义比较通过，差异列表为空。
+- 图像、XML、legacy OCR 和真实 PDF 栅格化探针通过。Bravura 光栅为 197 个前景像素，SHA-256 为 `a38f07a0bc9d820d190c62b323bf642f005fb65aee56cbc62d5096f3133a749e`，与 Windows Java 21 的 200 像素结果不同。因此字体不是跨平台逐像素一致；这个完整曲谱样例的识别语义仍一致。
+
+在已准备好 `MOBILE_JDK_HOST_HOME` 的 macOS 主机上，可切换 `JAVA_HOME` 到 Java 21 后运行：
 
 ```sh
 ./gradlew -I tools/audiveris-port/oracle.gradle \

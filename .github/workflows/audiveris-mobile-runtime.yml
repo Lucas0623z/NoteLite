@@ -172,6 +172,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       MOBILE_JDK_WORK_DIR: ${{ github.workspace }}/build/mobile-jdk
+      MOBILE_JDK_BASELINE_CACHE: ${{ github.workspace }}/build/mobile-baseline/${{ matrix.platform }}.tar.gz
       MOBILE_JDK_JOBS: "3"
       MOBILE_JDK_HOST_HOME: ${{ github.workspace }}/build/mobile-tools/jdk
     steps:
@@ -186,14 +187,27 @@ jobs:
       - name: Install build tools
         run: brew install autoconf make
       - name: Set up bootstrap JDK
+        id: bootstrap
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "26"
+      - name: Restore clean compiled target baseline
+        id: baseline_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/mobile-baseline/${{ matrix.platform }}.tar.gz
+          key: mobile-baseline-c1ed06aaef34-Xcode26.6-${{ matrix.platform }}-${{ runner.arch }}-${{ steps.bootstrap.outputs.version }}-${{ hashFiles('tools/audiveris-port/build-mobile-jdk.sh') }}
       - name: Build Zero runtime and attempt headless java.desktop
         env:
           MOBILE_PLATFORM: ${{ matrix.platform }}
         run: bash tools/audiveris-port/build-mobile-jdk.sh "$MOBILE_PLATFORM"
+      - name: Preserve the clean baseline even if the headless adaptation fails
+        if: always() && steps.baseline_cache.outputs.cache-hit != 'true' && hashFiles(format('build/mobile-baseline/{0}.tar.gz', matrix.platform)) != ''
+        uses: actions/cache/save@v4
+        with:
+          path: build/mobile-baseline/${{ matrix.platform }}.tar.gz
+          key: ${{ steps.baseline_cache.outputs.cache-primary-key }}
       - name: Preserve compiler diagnostics and produced runtime
         if: always()
         uses: actions/upload-artifact@v4

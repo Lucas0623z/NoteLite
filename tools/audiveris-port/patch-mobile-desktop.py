@@ -90,6 +90,19 @@ def main() -> None:
             "else ifeq ($(call isTargetOs, macosx), true)",
             "else ifeq ($(call isTargetOs, macosx ios), true)")
 
+    # mediaLib otherwise selects Linux malloc.h/memalign because iOS does not
+    # define MACOSX. arm64 malloc already provides the required 8-byte
+    # alignment, and stdlib.h declares it on iOS. Do not enable Cocoa paths
+    # elsewhere by adding a global MACOSX define.
+    medialib = "src/java.desktop/share/native/common/awt/medialib/mlib_sys.c"
+    replace(root, medialib,
+            "#else\n#include <malloc.h>\n#endif",
+            "#elif !defined(__IOS__)\n#include <malloc.h>\n#endif")
+    replace(root, medialib,
+            "#if defined(_MSC_VER) || defined(AIX)\n",
+            "// iOS arm64 malloc also supplies at least 8-byte alignment.\n"
+            "#if defined(_MSC_VER) || defined(AIX) || defined(__IOS__)\n")
+
     # The OCR bundle contains libjpeg-turbo, while javajpeg contains IJG6b.
     # A static process must not interpose one implementation's functions onto
     # the other's private state. Prefix the bundled JDK C symbols, preserving
