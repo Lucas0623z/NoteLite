@@ -1,0 +1,67 @@
+name: Embedded Audiveris full recognition
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/audiveris-embedded-builds]
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'tools/audiveris-port/**'
+      - '.github/workflows/audiveris-embedded-engine.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: embedded-omr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-engine-with-mobile-desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Prepare pinned legacy OCR model
+        run: |
+          mkdir -p build/tessdata
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/tesseract-ocr/tessdata/4767ea922bcc460e70b87b1d303ebdfed0897da8/eng.traineddata \
+            -o build/tessdata/eng.traineddata
+          echo 'daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047  build/tessdata/eng.traineddata' | sha256sum --check
+      - name: Run actual image, font, OCR, serialization and recognition paths
+        env:
+          TESSDATA_PREFIX: ${{ github.workspace }}/build/tessdata
+        run: |
+          bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle \
+            -I tools/audiveris-port/test-mobile-desktop.gradle \
+            :app:portProbe :app:embeddedOmrTest
+      - name: Compare every exported score and verify acceptance gate
+        run: |
+          python3 tools/audiveris-port/test_verify_embedded_score.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          exports = sorted(Path('app/build/embedded-tests').rglob('chula.mxl'))
+          if len(exports) < 3:
+              raise SystemExit('Expected repeat recognition and JNI-entry exports')
+          for score in exports:
+              subprocess.run(['python3', 'tools/audiveris-port/verify_embedded_score.py', str(score.parent),
+                              '--reference', 'tools/audiveris-port/fixtures/chula-semantic-reference.json',
+                              '--source-image', 'data/examples/chula.png',
+                              '--report', str(score.parent / 'semantic-parity.json')], check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: embedded-engine-host-evidence
+          path: |
+            app/build/embedded-tests/
+            app/build/port-probe/
+            app/build/test-results/embeddedOmrTest/

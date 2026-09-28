@@ -1,10 +1,12 @@
 # Audiveris 在 iPhone / iPad 上的本地移植
 
-## 当前范围
+## 目标与当前实现
 
 目标是让应用在设备内完成 PDF / 图片到 MusicXML 的识别，用户无需安装 Java 或配置服务器。
 
-`apple/AudiverisCore` 是这个目标的第一阶段：把当前 NoteLite 分支中的 Audiveris 图像二值化和前景游程算法移植到 Swift。游程是同一行或列中连续的黑色像素段。此阶段输出二值图和游程，**尚不能识别音符、节奏或生成 MusicXML**。应用中的“本地引擎移植测试”用于验证这部分本地处理。
+当前完整引擎路线是：在应用内静态链接 OpenJDK Mobile 的 Zero 解释器，保留原有 Java 识别算法、模型和 MusicXML 导出；移植它实际依赖的软件图像处理、字体和 OCR 库。Java 代码与运行时随应用打包，不要求用户安装 Java、配置 OMR 服务或下载可执行代码。
+
+`apple/AudiverisCore` 是已经独立实现的 Swift 二值化与游程核心。游程是同一行或列中连续的黑色像素段。它输出二值图和游程，**尚不能识别音符、节奏或生成 MusicXML**。应用中的“本地引擎移植测试”验证这部分处理；完整引擎必须通过后文的嵌入式运行与导出验收。
 
 本阶段的算法来源：
 
@@ -15,7 +17,7 @@
 
 自适应阈值沿用 `meanCoefficient × mean + standardDeviationCoefficient × sqrt(abs(E[x²] − mean²))`，默认半窗口为 18 像素，两个系数为 0.7、0.9；像素值小于或等于阈值时为前景。边界裁剪、整数累加、浮点运算顺序和横纵坐标都需要与 Java 输出一致。
 
-完整识别入口仍有后续工作；调试页面运行成功不代表完整 OMR 已移植。派生代码保留仓库原有 AGPL-3.0-or-later 来源和许可说明。
+调试页面运行成功不代表完整 OMR 已移植。Audiveris 派生代码保留 AGPL-3.0-or-later 来源和许可；OpenJDK 适配代码使用 GPL-2.0 with Classpath Exception，并保留被修改上游文件的原有版权声明。
 
 ## 审计基线
 
@@ -65,37 +67,76 @@ python tools/audiveris-port/audit_dependencies.py --check-native-artifacts
 
 | 部分 | 源码证据 | 需要完成的工作 |
 | --- | --- | --- |
-| 图像与 PDF 输入 | `image/ImageLoading.java` 使用 ImageIO、PDFBox、BufferedImage；ImageJ 贯穿图像处理 | 将解码与栅格化放在 Apple 平台层，把稳定的灰度像素接口传给核心；明确 DPI、旋转、颜色转换和尺寸限制 |
-| 模板与字体 | `image/TemplateFactory.java` 的模板构造调用 `MusicFont`、`symbol.buildImage`、`BufferedImage`；并非仅在显示界面时使用字体 | 验证 CoreText / CoreGraphics 的模板栅格化，或预生成模板；比较字形边界、像素、距离表和匹配结果 |
-| 页面与符号图 | `sheet/Book.java`、`sheet/Sheet.java` 混用识别状态、桌面 UI 和持久化；AWT 几何类型广泛使用 | 提取页面、谱表、符号、关系与识别调度；用独立几何和像素类型取代桌面类型，隔离 UI 回调 |
-| 文字识别 | `text/tesseract/TesseractOrder.java` 通过 ImageIO 编码 TIFF，再交给 Leptonica；使用 `TessBaseAPI` 和 `OEM_TESSERACT_ONLY` | 为 iOS device 与 simulator 编译 Tesseract / Leptonica，提供 C 接口与 Swift 桥接；确保训练数据支持当前使用的 legacy 模式，并验证坐标与文字结果 |
-| 模型与资源 | `classifier/BasicClassifier.java`、`math/NeuralNetwork.java`，以及 `app/res/basic-classifier.zip`、音乐字体 | 移植相同特征提取、分类计算和模型加载；锁定资源版本；使用 Java 输出检查概率、类别和拒识行为 |
-| 反射与 XML | `constant/UnitManager.java` 扫描类；JAXB 用于模型、状态与导出；ProxyMusic 用于 MusicXML | 用显式注册替代扫描；若采用 AOT，维护反射和资源配置；若采用 Swift，建立模型/文件格式兼容层并验证导出语义 |
-| 生命周期 | `Main.java` 是桌面/命令行入口，含 `System.exit`；存在全局状态和线程池 | 提供可取消的库 API，避免退出进程；限定并发、内存和临时文件生命周期，覆盖前后台切换 |
+| 图像与 PDF 输入 | `image/ImageLoading.java` 使用 ImageIO、PDFBox、BufferedImage；ImageJ 贯穿图像处理 | 编译 OpenJDK 的软件 AWT、JPEG、色彩管理库；保持相同像素处理，验证 PNG / TIFF / PDF 的真实输入 |
+| 模板与字体 | `image/TemplateFactory.java` 调用 `MusicFont`、`symbol.buildImage`、`BufferedImage`；字体参与识别 | 用真实 FreeType / HarfBuzz 与原音乐字体生成模板；替换要求 Cocoa / X11 的平台字体发现与图形环境，验证字形和完整识别结果 |
+| 页面与符号图 | `sheet/Book.java`、`sheet/Sheet.java` 混用识别状态、桌面 UI 和持久化 | 保留 Java 模型与几何类，使用无窗口模式与库入口；测试每个识别步骤和状态保存 |
+| 文字识别 | `text/tesseract/TesseractOrder.java` 编码 TIFF，再交给 Leptonica；使用 `TessBaseAPI` 与 `OEM_TESSERACT_ONLY` | 为 device / simulator 编译 Tesseract、Leptonica、图像编解码库及 JavaCPP JNI；使用含 legacy 模型的 tessdata 4.1.0 |
+| 模型与资源 | `classifier/BasicClassifier.java`、`math/NeuralNetwork.java`、`app/res/basic-classifier.zip` | 保留相同代码和模型，打包资源并验证加载、分类与输出一致性 |
+| 反射与 XML | 常量扫描、JAXB 模型与 ProxyMusic 导出使用反射 | Zero 运行时保留反射；验证 JAXB Unicode 往返、真实 ProxyMusic 模型和 MusicXML 文件语义 |
+| 生命周期 | 桌面 `Main.java` 含 `System.exit`、全局状态和线程池 | 使用 `EmbeddedOmrEngine` 的进程内入口，验证沙盒、取消、错误恢复和重复调用，再测试移动端生命周期 |
 
 表中 Java 路径均相对于 `app/src/main/java/com/notelite/omr/`。仅启用 `-batch` 会省去桌面窗口，无法消除以上算法依赖。
 
 本轮实际查询的 [Tesseract 5.5.1-1.5.12](https://repo.maven.apache.org/maven2/org/bytedeco/tesseract/5.5.1-1.5.12/) 与 [Leptonica 1.85.0-1.5.12](https://repo.maven.apache.org/maven2/org/bytedeco/leptonica/1.85.0-1.5.12/) 包列表均包含 Android、Linux、macOS、Windows，没有 `ios-*` 包。`macosx-arm64` 不能作为 `iphoneos-arm64` 库链接。当前 [JavaCPP Tesseract 构建脚本](https://github.com/bytedeco/javacpp-presets/blob/master/tesseract/cppbuild.sh) 也没有 iOS 分支；需要增加对应构建，不能只修改 Gradle 的 `targetOS`。
 
-## Java 转原生路线的结论
+## 运行时路线与可重复构建
+
+选用官方 [OpenJDK Mobile](https://github.com/openjdk/mobile/tree/c1ed06aaef34c8dccf71e236d1ffa20918a77cfb)，固定提交 `c1ed06aaef34c8dccf71e236d1ffa20918a77cfb`。该源码版本是 JDK 28，允许 JDK 26 / 27 / 28 作为 bootstrap；本轮使用 JDK 26。NoteLite 当前构建输出的 Java 21 普通 class 文件可由后续 JVM 读取；开启编译器 preview 选项本身不等于每个输出 class 都使用 preview 格式，仍需检查实际产物。
+
+上游支持 iOS arm64 的 Zero 静态解释器，但 `make/modules/java.desktop/Lib.gmk` 在 iOS 上排除了 AWT / 2D 原生库；Java 类又沿用 macOS 的 Cocoa 字体与图形入口。因此仅编译官方 `libjvm.a` 不足以运行 Audiveris。
+
+本仓库提供：
+
+- `tools/audiveris-port/build-mobile-jdk.sh`：固定源码、libffi 3.5.2 及其 SHA-256；分别编译 iPhoneOS / iPhoneSimulator arm64，保留原始运行时基线和补丁后的产物。
+- `tools/audiveris-port/patch-mobile-desktop.py`：检查固定上游上下文，启用软件 AWT / FreeType / HarfBuzz / LCMS / JPEG；排除需要 X11、FontConfig、CUPS 和桌面窗口的路径。
+- `tools/audiveris-port/mobile-desktop/`：用 `MobileGraphicsEnvironment`、`MobileToolkit` 与 `MobileFontManager` 接入真实软件渲染和打包字体。字体轮廓来自原 `app/res` 文件，默认文本后备字体为 `FinaleJazzText.otf`。
+- `.github/workflows/audiveris-mobile-runtime.yml`：macOS 26 / Xcode 26.6 实际编译，上传每次日志与产物。构建成功和运行成功分开记录。
+
+在 macOS 的仓库根目录执行：
+
+```sh
+bash tools/audiveris-port/build-mobile-jdk.sh device
+bash tools/audiveris-port/build-mobile-jdk.sh simulator
+```
+
+默认输出在 `build/mobile-jdk/<platform>/artifacts/headless/`：`static-libs/lib/` 包含真实静态库，`include/` 为 JNI 头文件，`jmods/` 为目标模块，`runtime/` 包含 `lib/modules`、配置、许可和原字体。模块映像由源码构建出的匹配 JDK 28 工具生成，不能直接交给 bootstrap JDK 26 的 `jlink`。嵌入应用时必须保留并导出静态 JNI 符号；Zero 从应用进程中解析它们。
+
+第一次实际编译遇到 libffi 生成器仍配置 ARMv7、Xcode 26 已移除该目标；第二次发现项目文件仍引用 ARMv7 源与头文件。脚本已同时去除生成调用和对应项目记录，没有建立空源文件来掩盖缺失。修复后必须重新编译验证。
+
+### 已执行的宿主适配测试
+
+2026-09-28，在 Windows Java 21 上用相同的六个适配类替换 `java.desktop` 平台入口，实际执行了平台探针和完整进程内识别测试：
+
+- 原 Bravura 音符头渲染为 200 个前景像素；灰度像素 SHA-256 为 `eea016321d734c624626efc4dd5805dcf2fc9f47aceb1a3bd8642b79cec86c18`。
+- PNG 输出、ImageIO TIFF 往返、JAXB Unicode、ProxyMusic 上下文、JavaCPP TIFF 与 legacy OCR 调用通过。
+- 6 个嵌入式测试全部通过；`chula.png` 两次识别均导出 151 个有音高的音符和 220 个 MIDI note-on 事件，第三次通过 JNI 形式的 JSON 入口成功导出。
+
+这些结果说明平台 Java 适配没有阻断该样例的完整识别；它们使用宿主原生库，**不能证明 iOS 原生库或运行时已经通过**。可在 Java 21 宿主上重跑：
+
+```sh
+./gradlew -I tools/audiveris-port/oracle.gradle \
+  -I tools/audiveris-port/test-mobile-desktop.gradle \
+  :app:portProbe :app:embeddedOmrTest
+```
+
+设置 `TESSDATA_PREFIX` 为完整 tessdata 4.1.0 目录，至少包含支持 legacy 模式的 `eng.traineddata`。测试结果保存在 `app/build/port-probe/` 和 `app/build/test-results/embeddedOmrTest/`。
+
+## 其他路线的评估
 
 - **Gluon / GraalVM AOT**：官方文档支持把 Java 库构建为 iOS 静态库，值得用完整核心做后续可行性实验。但它不会自动替换 AWT、ImageJ、反射或 JNI 依赖。官方要求在 macOS 上生成 iOS 构建；需要先确定与 Java 21 preview 字节码兼容的工具链，再验证所有依赖的 iOS 链接。参见 [Gluon 平台与静态库文档](https://docs.gluonhq.com/)。
 - **J2ObjC**：能把 Java 业务代码转换为 Objective-C，支持多项 Java 语言与运行时特性，但不提供跨平台 UI 工具包。其官方构建要求 macOS、Xcode 和 JDK。上述桌面类型和原生绑定仍需适配；不能直接把整套 Audiveris JAR 转成可用引擎。参见 [J2ObjC 项目说明](https://github.com/google/j2objc)。
-- **OpenJDK Mobile**：官方项目把 iOS Java 库、原生桥接和框架打包列为发展方向，路线图还包含 Zero interpreter 和 AOT 探索。它可以继续观察，但当前文档不足以证明本项目有现成可交付的运行时。参见 [iOS Java 库](https://openjdk-mobile.github.io/ios/library/) 和 [路线图](https://openjdk-mobile.github.io/roadmap/)。
-
-本轮选择先移植可独立验证的 Swift 算法核心，以消除第一批 JVM 与桌面库依赖。后续可以按阶段比较直接移植和 AOT 的实际成本；不预先声称全量 AOT 不可能。
+- **Swift 全量重写**：已实现的像素算法适合逐项验证；但重写完整符号图、模板、音乐语义和导出会扩大行为差异。当前继续保留这部分测试，同时推进完整 Java 引擎在设备内运行。
 
 ## 阶段与验收条件
 
-1. **二值化与游程**：Swift 包在本机处理像素；使用当前分支的原始 Java 实现产生固定样例，逐像素比较二值图，逐项比较横向与纵向游程。覆盖边缘窗口、小图、均匀图、阈值相等、非方形图和噪声图；监测大图内存与取消。
-2. **谱表与基础几何**：移植尺度估计、去斜、线段和谱表构建，比较谱线坐标、间距和前景连通结果。输入包含不同扫描分辨率、倾斜与弱线条。
-3. **符号与文字**：移植特征、分类器、模板和符号关系，接入设备内的 Tesseract。验证音符头、符干、连梁、谱号、调号和文本；记录与 Java 的差异。
-4. **音乐语义与导出**：重建小节、声部、时值、连线和跨页关系，输出兼容 MusicXML。用人工校验曲谱衡量音高、时值、节奏完整性与导出可读性。
-5. **产品接入**：完整识别在飞行模式下通过，移除用户必须配置服务器的依赖；在 iPhone 和 iPad 真机验证时间、峰值内存、热状态、取消和后台中断，再开放正式入口。
+1. **编译与链接**：device / simulator 的 Zero、软件图形字体库和 OCR JNI 均以真实 Apple SDK 编译；应用实际链接全部必需符号。
+2. **平台能力运行**：在应用进程中创建 JVM，实际渲染 Bravura 音符头，完成 PNG / TIFF、JAXB / ProxyMusic 和 legacy OCR 探针。宿主 Windows 通过不能替代本步骤。
+3. **完整识别与导出**：同一张曲谱在设备内经过全部识别步骤，导出有真实音符的 MusicXML 与 MIDI；比较音高、时值、声部、节拍和 MIDI 事件，并验证失败后恢复、重复识别和取消。
+4. **产品接入**：完整识别在飞行模式下通过，移除用户必须配置服务器的依赖；在 iPhone 和 iPad 真机验证时间、峰值内存、热状态、取消和后台中断，再开放正式入口。
 
 ## 构建与测试结果应如何记录
 
 - Swift 包测试、Java 对照测试、iOS Release 编译、iPhone 模拟器、iPad 模拟器、两种真机测试应分别记录结果，不能互相替代。
 - CI 配置已经写入并不表示任务已执行；必须保留实际运行状态和日志。
 - 此次开发主机是 Windows。审计时 PATH 中有 Java 21，但没有 `native-image`、`xcodebuild` 或 `xcrun`；本机无法生成或验证 Apple SDK 产物。macOS 构建与设备验证需要由相应 runner / 设备执行。
-- 在完成第五阶段验收前，不应把第一阶段的调试输出或远端识别结果标记为“完整 Audiveris 已在 iPhone / iPad 本地运行”。
+- 在完成完整识别验收前，不应把 Swift 调试输出、宿主测试或远端识别结果标记为“完整 Audiveris 已在 iPhone / iPad 本地运行”。
