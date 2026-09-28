@@ -31,6 +31,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Test native build provenance gates
+        run: python3 tools/audiveris-port/test_download_native_artifacts.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -72,79 +74,22 @@ jobs:
         run: |
           xcodebuild -version
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-      - name: Resolve explicit or pinned artifact workflow runs
-        env:
-          RUNTIME_RUN_INPUT: ${{ inputs.runtime_run_id }}
-          OCR_RUN_INPUT: ${{ inputs.ocr_run_id }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          path = Path('tools/audiveris-port/native-artifact-runs.json')
-          pinned = json.loads(path.read_text()) if path.exists() else {}
-          values = {
-              'RUNTIME_RUN': os.environ.get('RUNTIME_RUN_INPUT') or pinned.get('runtime_run_id', ''),
-              'OCR_RUN': os.environ.get('OCR_RUN_INPUT') or pinned.get('ocr_run_id', ''),
-          }
-          with open(os.environ['GITHUB_ENV'], 'a') as output:
-              for key, value in values.items():
-                  value = str(value)
-                  if not value.isdigit():
-                      raise SystemExit('Supply real successful artifact run IDs via inputs or native-artifact-runs.json')
-                  output.write(key + '=' + value + '\n')
-          PY
-      - name: Download compiled runtime and OCR artifacts
+      - name: Download and verify the native builds
         env:
           GH_TOKEN: ${{ github.token }}
+          RUNTIME_RUN_INPUT: ${{ inputs.runtime_run_id }}
+          OCR_RUN_INPUT: ${{ inputs.ocr_run_id }}
           RUNTIME_PLATFORM: ${{ matrix.runtime }}
-          OCR_SDK: ${{ matrix.sdk }}
         run: |
-          python3 - <<'PY'
-          import json, os, subprocess
-          from pathlib import Path
-          evidence = {}
-          for key, workflow in [('RUNTIME_RUN', 'audiveris-mobile-runtime.yml'),
-                                ('OCR_RUN', 'audiveris-ios-ocr.yml')]:
-              run = json.loads(subprocess.check_output([
-                  'gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] +
-                  '/actions/runs/' + os.environ[key]], text=True))
-              if (run['status'] != 'completed' or run['conclusion'] != 'success'
-                      or run['path'] != '.github/workflows/' + workflow):
-                  raise SystemExit('Expected a successful completed ' + workflow + ': ' + run['html_url'])
-              evidence[key] = {name: run[name] for name in
-                              ('id', 'head_sha', 'path', 'html_url', 'status', 'conclusion')}
-          target = Path('build/incoming/source-runs.json')
-          target.parent.mkdir(parents=True, exist_ok=True)
-          target.write_text(json.dumps(evidence, indent=2) + '\n')
-          PY
-          gh run download "$RUNTIME_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "audiveris-ios-runtime-$RUNTIME_PLATFORM" --dir build/incoming/runtime
-          gh run download "$OCR_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "audiveris-ocr-$OCR_SDK-arm64" --dir build/incoming/ocr
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          runtime = list(Path('build/incoming/runtime').rglob('headless/runtime/lib/modules'))
-          ocr = list(Path('build/incoming/ocr').rglob('install/lib/libjnitesseract.a'))
-          if len(runtime) != 1 or len(ocr) != 1:
-              raise SystemExit('Artifacts do not contain exactly one complete headless runtime and OCR installation')
-          inventories = list(Path('build/incoming/runtime').rglob('runtime-inventory.json'))
-          if len(inventories) != 1:
-              raise SystemExit('Expected one runtime build inventory')
-          import json
-          inventory = json.loads(inventories[0].read_text())
-          pinned = json.loads(Path('tools/audiveris-port/native-artifact-runs.json').read_text())
-          if (inventory.get('source_commit') != pinned['openjdk_source_commit']
-                  or inventory.get('platform') != os.environ['RUNTIME_PLATFORM']
-                  or inventory.get('vm') != 'zero'
-                  or inventory.get('headless_build_exit_code') != 0
-                  or not inventory.get('java_desktop_jmod')
-                  or not inventory.get('runtime_module_image')):
-              raise SystemExit('The downloaded runtime does not match the required source, platform, or complete build')
-          with open(os.environ['GITHUB_ENV'], 'a') as output:
-              output.write('EMBEDDED_RUNTIME=' + str(runtime[0].parents[2].resolve()) + '\n')
-              output.write('EMBEDDED_OCR=' + str(ocr[0].parents[1].resolve()) + '\n')
-          PY
+          python3 tools/audiveris-port/download-native-artifacts.py \
+            --platform "$RUNTIME_PLATFORM" --destination build/incoming \
+            --runtime-run "$RUNTIME_RUN_INPUT" --ocr-run "$OCR_RUN_INPUT"
+      - name: Preserve native build provenance for release verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-omr-provenance-${{ matrix.sdk }}
+          if-no-files-found: error
+          path: build/incoming/source-runs.json
       - name: Build actual same-process JNI app
         env:
           PROBE_SDK: ${{ matrix.sdk }}
