@@ -87,6 +87,37 @@ public final class PortabilityProbe {
         if (decoded == null || decoded.getWidth() != image.getWidth() || decoded.getHeight() != image.getHeight()) {
             throw new IllegalStateException("TIFF roundtrip failed");
         }
+        Path pdfFile = output.resolve("scanned-notehead.pdf");
+        try (var document = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            var bounds = new org.apache.pdfbox.pdmodel.common.PDRectangle(
+                    image.getWidth() * 72f / 300f, image.getHeight() * 72f / 300f);
+            var page = new org.apache.pdfbox.pdmodel.PDPage(bounds);
+            document.addPage(page);
+            try (var stream = new org.apache.pdfbox.pdmodel.PDPageContentStream(document, page)) {
+                stream.drawImage(org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory.createFromImage(document, image),
+                        0, 0, bounds.getWidth(), bounds.getHeight());
+            }
+            document.save(pdfFile.toFile());
+        }
+        var pdfLoader = com.notelite.omr.image.ImageLoading.getLoader(pdfFile);
+        if (pdfLoader == null) throw new IllegalStateException("Engine PDF loader unavailable");
+        try {
+            BufferedImage pdfImage = pdfLoader.getImage(1);
+            if (pdfLoader.getImageCount() != 1 || pdfImage == null
+                    || Math.abs(pdfImage.getWidth() - image.getWidth()) > 1
+                    || Math.abs(pdfImage.getHeight() - image.getHeight()) > 1) {
+                throw new IllegalStateException("PDFBox engine rasterization failed");
+            }
+            int dark = 0;
+            for (int y = 0; y < pdfImage.getHeight(); y++) {
+                for (int x = 0; x < pdfImage.getWidth(); x++) {
+                    if ((pdfImage.getRGB(x, y) & 255) < 128) dark++;
+                }
+            }
+            if (dark < foreground / 2 || dark > foreground * 2) {
+                throw new IllegalStateException("PDF renderer lost or corrupted the actual notehead");
+            }
+        } finally { pdfLoader.dispose(); }
         JAXBContext binding = JAXBContext.newInstance(Payload.class);
         Payload source = new Payload(); source.value = "音伴-𝄞";
         StringWriter xml = new StringWriter();
@@ -129,6 +160,7 @@ public final class PortabilityProbe {
             + ",\"fontRasterSHA256\":\"" + hash + "\",\"imageIOTiff\":true,\"jaxbUnicode\":true"
             + ",\"musicXMLBinding\":true,\"javaCPPTiffBridge\":true,\"legacyOCRCall\":true"
             + ",\"imageIOJpeg\":true,\"javaCPPJpegBridge\":true"
+            + ",\"enginePDFRaster\":true"
             + ",\"fullScoreRecognitionTested\":false}";
     }
 }

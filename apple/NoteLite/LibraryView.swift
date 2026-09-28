@@ -479,6 +479,7 @@ struct ScoreDetailView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Button(actionTitle) { library.start(record.id) }
                         .buttonStyle(.bordered).disabled(!library.canRecognize && record.serverURL == nil)
+                        .accessibilityIdentifier("recognition-start")
                     if !library.hasLocalEngine && !library.isConfigured { Button("连接识谱服务器") { showingSettings = true } }
                 }
             }

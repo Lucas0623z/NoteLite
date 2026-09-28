@@ -7,6 +7,9 @@ final class NoteLiteUITests: XCTestCase {
     @MainActor
     func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() {
         continueAfterFailure = false
+        // Simulator launch, accessibility snapshots and both iPad rotations
+        // exceeded 120 seconds in CI while every functional assertion passed.
+        executionTimeAllowance = 300
         #if os(iOS)
         XCUIDevice.shared.orientation = .portrait
         #endif

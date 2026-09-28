@@ -231,7 +231,7 @@ jobs:
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
             -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
-            -maximum-test-execution-time-allowance 180 \
+            -maximum-test-execution-time-allowance 360 \
             NOTELITE_SIM_SWIFT_PATH= CODE_SIGNING_ALLOWED=NO
       - name: Export native interface screenshots
         if: always()
