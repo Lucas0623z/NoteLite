@@ -117,7 +117,7 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 [CI 36410992236](https://github.com/Lucas0623z/NoteLite/actions/runs/36410992236) 已同时完成 device / simulator arm64 的完整运行时编译与模块打包：31 个 JDK 静态库加 libffi、63 个模块，以及真实的 `runtime/lib/modules`；全部必需库存在。下载真机产物检查了 32 个归档中的 1,445 个 Mach-O 对象，均标记 arm64、最低 iOS 16.0，未发现弱导入符号；编译日志没有 API 可用性警告。这是构建和二进制元数据证据，尚不证明 iOS 16 实际运行通过。
 
-首轮嵌入式应用链接暴露了三个 W^X 状态符号缺失：共享 arm64 代码引用了原生 AArch64 VM 的实现，但 Zero 使用另一组平台源文件。补丁现仅在 iOS Zero 中一致关闭这组 JIT 页面状态管理，并保留上述只读写的数据缓存。源码检查还发现，静态 JVM 在解析 `-Djava.home` 之前查找模块；现允许嵌入桥接层预先设置 `JAVA_HOME`，验证其为绝对路径且含可读的真实 `lib/modules`，再设置引导路径。两项改动通过固定源码上下文验证，仍需新的运行时构建与应用执行验证。
+首轮嵌入式应用链接暴露了三个 W^X 状态符号缺失：共享 arm64 代码引用了原生 AArch64 VM 的实现，但 Zero 使用另一组平台源文件。补丁现仅在 iOS Zero 中一致关闭这组 JIT 页面状态管理，并保留上述只读写的数据缓存。源码检查还发现，静态 JVM 在解析 `-Djava.home` 之前查找模块；现允许嵌入桥接层预先设置 `JAVA_HOME`，验证其为绝对路径且含可读的真实 `lib/modules`，再设置引导路径。[修复后的 CI 36413078985](https://github.com/Lucas0623z/NoteLite/actions/runs/36413078985) 已同时通过 device / simulator 构建。实际真机 `libjvm.a` 的 840 个对象已无上述三个未定义引用，并包含新的引导路径检查；应用链接和执行仍需单独验证。
 
 ### 已执行的宿主适配测试
 

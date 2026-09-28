@@ -3,6 +3,7 @@ import copy
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
 
 spec = importlib.util.spec_from_file_location(
     "native_artifacts", Path(__file__).with_name("download-native-artifacts.py"))
@@ -28,15 +29,32 @@ class NativeArtifactGateTests(unittest.TestCase):
                     native.validate_run(altered, "audiveris-ios-embedded-probe.yml", "a" * 40)
 
     def test_acceptance_must_use_the_same_native_builds(self):
-        sources = {"RUNTIME_RUN": dict(self.run), "OCR_RUN": dict(self.run, id=456)}
+        sources = {"RUNTIME_RUN": dict(self.run), "OCR_RUN": dict(self.run, id=456),
+                   "NATIVE_PAYLOADS": {"runtime": "original-runtime", "ocr": "original-ocr"}}
         native.validate_acceptance_sources(copy.deepcopy(sources), sources)
-        for key in sources:
+        for key in ("RUNTIME_RUN", "OCR_RUN"):
             changed = copy.deepcopy(sources)
             changed[key]["id"] += 1
             with self.subTest(key=key), self.assertRaises(ValueError):
                 native.validate_acceptance_sources(changed, sources)
         with self.assertRaises(ValueError):
             native.validate_acceptance_sources({}, sources)
+        changed = copy.deepcopy(sources)
+        changed["NATIVE_PAYLOADS"]["runtime"] = "rerun-with-different-bytes"
+        with self.assertRaises(ValueError):
+            native.validate_acceptance_sources(changed, sources)
+        without_fingerprint = {key: value for key, value in sources.items() if key != "NATIVE_PAYLOADS"}
+        with self.assertRaises(ValueError):
+            native.validate_acceptance_sources(without_fingerprint, without_fingerprint)
+
+    def test_payload_fingerprint_detects_same_size_content_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "libjvm.a").write_bytes(b"original")
+            first = native.fingerprint_directory(root)
+            self.assertEqual(first, native.fingerprint_directory(root))
+            (root / "libjvm.a").write_bytes(b"modified")
+            self.assertNotEqual(first["sha256"], native.fingerprint_directory(root)["sha256"])
 
     def test_runtime_must_include_the_complete_matching_module_image(self):
         inventory = {"source_commit": "a" * 40, "platform": "device", "vm": "zero",

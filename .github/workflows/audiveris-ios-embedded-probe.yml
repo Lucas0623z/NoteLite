@@ -32,7 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Test native build provenance gates
-        run: python3 tools/audiveris-port/test_download_native_artifacts.py
+        run: |
+          python3 tools/audiveris-port/test_download_native_artifacts.py
+          python3 -B apple/release/test_release.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -131,10 +133,28 @@ jobs:
       - name: Compose the actual offline NoteLite app from the same runtime and resources
         env:
           APP_SDK: ${{ matrix.sdk }}
-          NOTELITE_EMBEDDED_ARCHIVE: ${{ matrix.sdk == 'iphoneos' && '1' || '0' }}
         run: |
           bash tools/audiveris-port/build-embedded-app.sh "$APP_SDK" \
             "build/embedded-probe/$APP_SDK-arm64/embedding" "build/embedded-app/$APP_SDK-arm64"
+      - name: Verify the standard release archive contains the complete offline engine
+        if: matrix.sdk == 'iphoneos'
+        env:
+          RELEASE_MODE: verify
+          RELEASE_UPLOAD: 'false'
+          RELEASE_BUNDLE_ID: com.lucas0623z.yinban
+          RELEASE_VERSION: '1.0.0'
+          RELEASE_BUILD_NUMBER: ${{ github.run_number }}
+          RELEASE_EMBEDDED_BUILD: ${{ github.workspace }}/build/embedded-app/iphoneos-arm64
+        run: |
+          set -o pipefail
+          python3 apple/release/release.py archive 2>&1 | tee build/embedded-app/iphoneos-arm64/evidence/standard-release.log
+          mkdir -p build/embedded-app/iphoneos-arm64/standard-release
+          cp "$RUNNER_TEMP/yinban-release-output/Yinban.xcarchive.zip" \
+            "$RUNNER_TEMP/yinban-release-output/embedded-archive-inventory.json" \
+            build/embedded-app/iphoneos-arm64/standard-release/
+      - name: Clean up interrupted release state
+        if: always() && matrix.sdk == 'iphoneos'
+        run: python3 apple/release/release.py cleanup
       - name: Exercise offline recognition and practice in the actual iPhone and iPad app
         if: matrix.sdk == 'iphonesimulator'
         run: |
@@ -166,5 +186,6 @@ jobs:
             build/embedded-probe/${{ matrix.sdk }}-arm64/simulator-results/
             build/embedded-app/${{ matrix.sdk }}-arm64/NoteLite.app/
             build/embedded-app/${{ matrix.sdk }}-arm64/NoteLite.xcarchive.zip
+            build/embedded-app/${{ matrix.sdk }}-arm64/standard-release/
             build/embedded-app/${{ matrix.sdk }}-arm64/evidence/
             build/embedded-app/${{ matrix.sdk }}-arm64/ui-results/

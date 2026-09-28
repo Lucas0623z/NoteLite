@@ -82,7 +82,7 @@ bash tools/audiveris-port/run-embedded-app-tests.sh \
 
 真机构建将 SDK 参数改为 `iphoneos`，并提供对应的 device 运行时和 `iphoneos-arm64` OCR 库。组合脚本会生成临时 Xcode 工程、链接真实静态库、打包资源并设置 `EMBEDDED_OMR_RUNTIME`；只手动打开这个编译标记不能构成完整引擎。依赖目录和组合探针的构建目录在应用构建及测试结束前必须保留。输出应用位于 `build/embedded-app/<SDK>-arm64/NoteLite.app`；脚本不执行分发签名。
 
-设置 `NOTELITE_EMBEDDED_ARCHIVE=1` 后运行 `iphoneos` 的应用构建，还会生成并检查 `NoteLite.xcarchive.zip`。完整验收工作流启用此步骤，逐项确认归档保留同一套引擎资源。归档未经分发签名，不能直接安装到手机；现有 App Store 发布工作流仍使用基础客户端工程，不能把它的归档当作完整引擎产物。
+设置 `NOTELITE_EMBEDDED_ARCHIVE=1` 后运行 `iphoneos` 的应用构建，还会生成并检查 `NoteLite.xcarchive.zip`。完整验收工作流启用此步骤，逐项确认归档保留同一套引擎资源。归档未经分发签名，不能直接安装到手机。标准 [App Store 发布流程](release/README.md) 也强制重新组合完整引擎工程并检查实际归档；正式导出还要求同一源码及原生构建来源的完整 iPhone / iPad 验收通过。
 
 **验收状态：原生 OCR 已在 iOS 模拟器实际运行；完整 Audiveris 在 iPhone / iPad 中生成并使用 MusicXML / MIDI 的验收尚未完成。** 单独编译成功、OCR 文本识别成功或桌面 Java 识谱成功，都不能替代完整移动端验收。签名真机安装、内存与耗时测量，以及上架仍是后续步骤。
 

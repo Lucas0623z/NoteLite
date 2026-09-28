@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Resolve proven native builds for acceptance and the standard release archive."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -34,9 +35,27 @@ def validate_runtime(inventory, platform, source_commit):
 
 
 def validate_acceptance_sources(accepted, current):
-    for key in ("RUNTIME_RUN", "OCR_RUN"):
+    for key in ("RUNTIME_RUN", "OCR_RUN", "NATIVE_PAYLOADS"):
+        if not accepted.get(key) or not current.get(key):
+            raise ValueError("Missing native acceptance provenance: " + key)
         if accepted.get(key) != current.get(key):
             raise ValueError("The accepted app used different native build provenance: " + key)
+
+
+def fingerprint_directory(root):
+    entries = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        checksum = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                checksum.update(chunk)
+        entries.append([path.relative_to(root).as_posix(), path.stat().st_size, checksum.hexdigest()])
+    if not entries:
+        raise ValueError("Native payload is empty: " + str(root))
+    return {"fileCount": len(entries), "totalBytes": sum(entry[1] for entry in entries),
+            "sha256": hashlib.sha256(json.dumps(entries, separators=(",", ":")).encode()).hexdigest()}
 
 
 def exactly_one(root, pattern):
@@ -87,11 +106,11 @@ def main():
     if output.exists():
         raise ValueError("Use a new artifact directory; refusing to mix old and new build outputs: " + str(output))
     output.mkdir(parents=True)
+    accepted_sources = None
     if accepted is not None:
         proof = output / "acceptance"
         download(args.acceptance_run, "embedded-omr-provenance-iphoneos", proof)
-        evidence = json.loads(exactly_one(proof, "source-runs.json").read_text())
-        validate_acceptance_sources(evidence, sources)
+        accepted_sources = json.loads(exactly_one(proof, "source-runs.json").read_text())
         (output / "accepted-run.json").write_text(json.dumps(accepted, indent=2) + "\n", encoding="utf-8")
     (output / "source-runs.json").write_text(json.dumps(sources, indent=2) + "\n", encoding="utf-8")
 
@@ -103,6 +122,13 @@ def main():
     inventory = json.loads(exactly_one(output / "runtime", "runtime-inventory.json").read_text())
     validate_runtime(inventory, args.platform, pinned["openjdk_source_commit"])
     resolved = {"EMBEDDED_RUNTIME": str(modules.parents[2]), "EMBEDDED_OCR": str(ocr.parents[1])}
+    # A workflow rerun may replace artifacts while retaining the same run ID.
+    # Bind release approval to the actual native bytes tested by acceptance.
+    sources["NATIVE_PAYLOADS"] = {"runtime": fingerprint_directory(modules.parents[2]),
+                                  "ocr": fingerprint_directory(ocr.parents[1])}
+    if accepted_sources is not None:
+        validate_acceptance_sources(accepted_sources, sources)
+    (output / "source-runs.json").write_text(json.dumps(sources, indent=2) + "\n", encoding="utf-8")
     (output / "resolved-paths.json").write_text(json.dumps(resolved, indent=2) + "\n", encoding="utf-8")
     if os.environ.get("GITHUB_ENV"):
         with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
