@@ -6,6 +6,12 @@
 #include <string>
 #include <vector>
 #include <atomic>
+#include <algorithm>
+#include <chrono>
+#include <memory>
+#include <thread>
+#include <mach/mach.h>
+#include <TargetConditionals.h>
 
 extern "C" void loadfunctions(void);
 
@@ -15,6 +21,65 @@ static std::atomic<JavaVM *> publishedVM(nullptr);
 static std::atomic<bool> cancellationRequested(false);
 static NSString *initializedResources;
 static NSString *initializedSandbox;
+
+// Process-wide samples include the host UI, VM, native OCR, and this sampler.
+// A sampled maximum is not the operating system's exact high-water mark.
+class ProbeMemorySampler {
+    std::atomic<bool> stopped{false};
+    std::thread worker;
+    uint64_t baselineResident = 0, baselineFootprint = 0;
+    uint64_t peakResident = 0, peakFootprint = 0, samples = 0, failedSamples = 0;
+
+    void sample() {
+        task_vm_info_data_t info = {};
+        mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+        kern_return_t status = task_info(mach_task_self(), TASK_VM_INFO,
+                                         reinterpret_cast<task_info_t>(&info), &count);
+        if (status != KERN_SUCCESS || count < TASK_VM_INFO_REV1_COUNT) {
+            ++failedSamples;
+            return;
+        }
+        if (samples == 0) {
+            baselineResident = info.resident_size;
+            baselineFootprint = info.phys_footprint;
+        }
+        ++samples;
+        peakResident = std::max(peakResident, static_cast<uint64_t>(info.resident_size));
+        peakFootprint = std::max(peakFootprint, static_cast<uint64_t>(info.phys_footprint));
+    }
+
+    void stop() {
+        stopped.store(true);
+        if (worker.joinable()) worker.join();
+    }
+
+public:
+    ProbeMemorySampler() {
+        sample();
+        worker = std::thread([this] {
+            while (!stopped.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                if (!stopped.load()) sample();
+            }
+        });
+    }
+    ~ProbeMemorySampler() { stop(); }
+
+    NSDictionary *report() {
+        stop();
+        sample();
+        return @{
+            @"measurement": @"Darwin task_info TASK_VM_INFO; sampled process-wide values",
+            @"platform": TARGET_OS_SIMULATOR ? @"ios-simulator" : @"ios-device",
+            @"samplingIntervalMilliseconds": @50,
+            @"sampleCount": @(samples), @"failedSampleCount": @(failedSamples),
+            @"baselineResidentBytes": @(baselineResident),
+            @"peakSampledResidentBytes": @(peakResident),
+            @"baselinePhysicalFootprintBytes": @(baselineFootprint),
+            @"peakSampledPhysicalFootprintBytes": @(peakFootprint),
+        };
+    }
+};
 
 @interface EmbeddedJVM ()
 + (nullable NSString *)invokeWithResourceRoot:(NSString *)resourceRoot sandbox:(NSString *)sandbox
@@ -101,6 +166,8 @@ static NSString *pendingException(JNIEnv *environment) {
                        firstArgument:(NSString *)firstArgument secondArgument:(NSString *)secondArgument
                          recognition:(BOOL)recognition error:(NSError **)error {
     @synchronized (self) {
+        std::unique_ptr<ProbeMemorySampler> memory;
+        if (!recognition) memory = std::make_unique<ProbeMemorySampler>();
         if (recognition) cancellationRequested.store(false);
         if (embeddedVM && (![initializedResources isEqualToString:resourceRoot]
                            || ![initializedSandbox isEqualToString:sandbox])) {
@@ -252,6 +319,15 @@ static NSString *pendingException(JNIEnv *environment) {
         } else if (recognition && cancellationRequested.load() && !result) {
             if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil];
         } else if (!result) setError(error, exception ?: @"Java engine returned no result");
+        if (memory && result) {
+            NSMutableDictionary *report = [NSJSONSerialization JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding]
+                                                                          options:NSJSONReadingMutableContainers error:nil];
+            if ([report isKindOfClass:NSMutableDictionary.class]) {
+                report[@"nativeMemory"] = memory->report();
+                NSData *data = [NSJSONSerialization dataWithJSONObject:report options:0 error:nil];
+                if (data) result = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            }
+        }
         // Keep the same VM alive for the host app's lifetime. No process launch or DestroyJavaVM.
         if (detach) embeddedVM->DetachCurrentThread();
         return result;

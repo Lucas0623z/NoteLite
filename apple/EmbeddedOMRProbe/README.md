@@ -3,7 +3,9 @@
 This separate test app links the real OpenJDK Mobile Zero interpreter, headless
 Java desktop libraries, and OCR/JavaCPP archives into one iOS process. It calls
 the complete Java recognition pipeline through JNI. It is not wired into the
-production recognition screen.
+production recognition screen. Its shared bridge and exact generated resources
+are also consumed by the production app's embedded build, documented in
+[`EmbeddedOMRRuntime/README.md`](../EmbeddedOMRRuntime/README.md).
 
 The build fails if required native libraries, the target module image, or
 JavaCPP static initialization symbols are absent. The app reports success only
@@ -65,7 +67,12 @@ and is recorded in `semantic-parity.json`.
 - `Documents/omr/log`: engine logs; fatal VM logs also stay under `Documents/omr`.
 
 The report records Java VM/version, elapsed time, pitched-note count and MIDI
-note-on count. Counts demonstrate that output exists; they do not establish
+note-on count. Its `nativeMemory` section records process resident size and
+physical footprint from Darwin `task_info`, sampled every 50 milliseconds from
+before JVM initialization through recognition. It includes baseline values,
+sampled maxima, sample counts, and an explicit simulator/device label. Sampled
+maxima may miss shorter spikes; simulator memory is not device memory evidence.
+Counts demonstrate that output exists; they do not establish
 transcription accuracy. Platform execution and score comparisons must be
 reported from a real completed run, not inferred from a successful build.
 

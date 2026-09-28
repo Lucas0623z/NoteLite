@@ -40,3 +40,53 @@ omit the probe Java JAR and app UI while keeping the shared bridge.
 Missing libraries, unsupported VM flags, JNI exceptions, and failed exports are
 reported as errors. A successful build alone does not prove device execution;
 use the separate iPhone/iPad acceptance workflow for that evidence.
+
+## Build the production app with the embedded engine
+
+After `build-embedded-probe.sh` has composed the matching runtime and OCR
+artifacts, use its `embedding` directory to build the actual NoteLite app:
+
+```sh
+bash tools/audiveris-port/build-embedded-app.sh iphonesimulator \
+  build/embedded-probe/iphonesimulator-arm64/embedding \
+  build/embedded-app/iphonesimulator-arm64
+```
+
+Use `iphoneos` and its matching embedding directory for a device build. Keep the
+downloaded runtime and OCR archives in place: the generated configuration uses
+their absolute paths. Xcode, XcodeGen, and Python 3 are required.
+
+The script creates an isolated XcodeGen overlay over `apple/project.yml`.
+It adds the shared bridge, generated native symbol references, and the complete
+`OMRResources` bundle. The `EMBEDDED_OMR_RUNTIME` compilation flag enables the
+production recognition service. Original app screens, icons, document types,
+and practice files remain part of the build. No source project or signing
+setting is modified.
+
+The output contains `NoteLite.app` and an `evidence` directory with the build
+log, generated overlay, native link configuration, Mach-O platform check, and
+SHA-256 resource inventory. The script verifies the JNI entry points and every
+engine resource against the probe's copy. Device output is unsigned; simulator
+output is signed locally for installation. This is a build artifact, not a
+distribution archive.
+
+The embedded acceptance workflow builds this app after the probe's simulator
+recognition and semantic comparisons pass. Device composition follows a
+successful device probe build. The production app inventory records recognition
+execution separately; compiling it does not claim that its UI flow was run.
+
+Run the production UI acceptance test on the same iPhone and iPad simulators:
+
+```sh
+bash tools/audiveris-port/run-embedded-app-tests.sh \
+  build/embedded-app/iphonesimulator-arm64 SIMULATOR_UDID \
+  build/embedded-app/iphonesimulator-arm64/ui-results/iphone
+```
+
+The generated `NoteLiteOffline` scheme runs only `NoteLiteOfflineUITests` against
+the real app with its embedded engine enabled. It builds Debug to enable the
+fixture import hook, then exercises library recognition and practice without a
+server configuration. The runner preserves the Xcode result bundle, screenshots,
+test log, and app Documents/Application Support data. Each test has a 2400-second
+limit to accommodate interpreted execution. The acceptance workflow runs this
+flow for both iPhone and iPad after the probe comparisons pass.

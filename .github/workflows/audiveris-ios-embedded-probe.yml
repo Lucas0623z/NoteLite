@@ -51,7 +51,7 @@ jobs:
             apple/NoteLite/Models.swift apple/NoteLite/EmbeddedRecognitionService.swift
   compose-and-test:
     runs-on: macos-26
-    timeout-minutes: 100
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -127,20 +127,49 @@ jobs:
           from pathlib import Path
           def data(*arguments):
               return json.loads(subprocess.check_output(['xcrun', 'simctl', *arguments, '--json']))
-          runtimes = [r for r in data('list', 'runtimes')['runtimes']
-                      if r.get('isAvailable') and r['identifier'].startswith('com.apple.CoreSimulator.SimRuntime.iOS-')]
-          runtime = max(runtimes, key=lambda r: tuple(map(int, r['version'].split('.'))))
-          device_types = data('list', 'devicetypes')['devicetypes']
+          sdk_major = int(subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-version'],
+                                                  text=True).split('.')[0])
+          runtimes = {r['identifier']: r for r in data('list', 'runtimes')['runtimes']
+                      if r.get('isAvailable') and r['identifier'].startswith('com.apple.CoreSimulator.SimRuntime.iOS-')
+                      and 26 <= int(r['version'].split('.')[0]) <= sdk_major}
+          available = data('list', 'devices', 'available')['devices']
           app = 'build/embedded-probe/iphonesimulator-arm64/EmbeddedOMRProbe.app'
           for family in ['iPhone', 'iPad']:
-              types = [d for d in device_types if d['name'].startswith(family)]
-              device = subprocess.check_output(['xcrun', 'simctl', 'create', 'Audiveris embedded ' + family,
-                                                types[-1]['identifier'], runtime['identifier']], text=True).strip()
+              candidates = [(tuple(map(int, runtimes[runtime]['version'].split('.'))),
+                             d['name'], d['udid'], runtime, d)
+                            for runtime, devices in available.items() if runtime in runtimes
+                            for d in devices if d.get('isAvailable') and d['name'].startswith(family)]
+              if not candidates:
+                  raise SystemExit('No compatible available ' + family + ' simulator is installed')
+              _, _, device, runtime_id, details = max(candidates, key=lambda entry: entry[:3])
+              runtime = runtimes[runtime_id]
               output = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
               output.mkdir(parents=True, exist_ok=True)
-              (output / 'device.json').write_text(json.dumps({'udid':device, 'type':types[-1], 'runtime':runtime}, indent=2))
+              (output / 'device.json').write_text(json.dumps({'udid':device, 'device':details, 'runtime':runtime}, indent=2))
               try:
                   subprocess.run(['bash', 'tools/audiveris-port/run-embedded-probe.sh', app, device, str(output)], check=True)
+              finally:
+                  subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
+          PY
+      - name: Compose the actual offline NoteLite app from the same runtime and resources
+        env:
+          APP_SDK: ${{ matrix.sdk }}
+        run: |
+          bash tools/audiveris-port/build-embedded-app.sh "$APP_SDK" \
+            "build/embedded-probe/$APP_SDK-arm64/embedding" "build/embedded-app/$APP_SDK-arm64"
+      - name: Exercise offline recognition and practice in the actual iPhone and iPad app
+        if: matrix.sdk == 'iphonesimulator'
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          for family in ['iPhone', 'iPad']:
+              probe = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
+              device = json.loads((probe / 'device.json').read_text())['udid']
+              output = Path('build/embedded-app/iphonesimulator-arm64/ui-results') / family
+              try:
+                  subprocess.run(['bash', 'tools/audiveris-port/run-embedded-app-tests.sh',
+                                  'build/embedded-app/iphonesimulator-arm64', device, str(output)], check=True)
               finally:
                   subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
           PY
@@ -156,3 +185,6 @@ jobs:
             build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-symbols.c
             build/embedded-probe/${{ matrix.sdk }}-arm64/embedding/native-libraries.xcconfig
             build/embedded-probe/${{ matrix.sdk }}-arm64/simulator-results/
+            build/embedded-app/${{ matrix.sdk }}-arm64/NoteLite.app/
+            build/embedded-app/${{ matrix.sdk }}-arm64/evidence/
+            build/embedded-app/${{ matrix.sdk }}-arm64/ui-results/

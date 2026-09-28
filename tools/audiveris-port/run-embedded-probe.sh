@@ -44,6 +44,11 @@ if not report.get('sameProcessJNI') or 'Zero' not in report.get('javaVM', ''):
     raise SystemExit('The report was not produced by the embedded Zero JNI runtime')
 if report.get('pitchedNotes', 0) <= 0 or report.get('midiNoteOnEvents', 0) <= 0:
     raise SystemExit('No real musical output was validated')
+memory = report.get('nativeMemory', {})
+if (memory.get('platform') != 'ios-simulator' or memory.get('sampleCount', 0) <= 0
+        or memory.get('peakSampledResidentBytes', 0) <= 0
+        or memory.get('peakSampledPhysicalFootprintBytes', 0) <= 0):
+    raise SystemExit('The probe did not record actual simulator process memory samples')
 PY
 job=$(python3 - "$output/result.json" <<'PY'
 import json, re, sys
