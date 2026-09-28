@@ -57,7 +57,8 @@ API alone does not establish that these dependencies run on iOS.
 TESSDATA_PREFIX=/path/to/bundled/tessdata ./gradlew :app:embeddedOmrTest
 ```
 
-This opt-in task runs eighteen integration tests in a fresh sandbox. It rejects
+This opt-in task runs eighteen engine integration tests in a fresh sandbox and
+three template scoring regressions. It rejects
 malformed arguments and outside paths, verifies cancellation and executor
 timeout handling, feeds a corrupt image followed by two complete recognitions
 of `data/examples/chula.png`, and exercises the JNI JSON entry. It parses the
@@ -75,3 +76,23 @@ Step diagnostics record wall/CPU time, GC deltas and asynchronous timeout
 thread dumps; an unavailable measurement stays explicit.
 The tests do not claim transcription accuracy against a human-verified
 score or substitute for a device run.
+
+## Template scoring on Zero
+
+Actual iPhone and iPad simulator run `36425731144` passed all thirteen component
+gates, but HEADS reached its 300-second step limit. Its worker consumed 233.672
+and 240.293 CPU seconds respectively, with only 54 and 47 milliseconds of GC.
+Samples repeatedly reached `Template.evaluate`, including `Math.abs(double)`
+and its native double-bit conversion. Neither run produced a score export.
+
+The scorer now derives the same binary 0.0/1.0 mismatch directly from the two
+foreground predicates. It retains point order, weight multiplication, both
+running sums, clipping, unknown-distance handling and the empty-support
+sentinel. This removes double-bit conversion calls from that inner loop.
+Production bytecode matched the frozen original Java oracle on all 10,368
+score pairs, 1,296 anchor cases and 57 distance-transform cases. CI also runs
+14,592 direct score-bit comparisons covering signed distances, ROI views,
+clipping, six weight configurations and both point orders, plus explicit
+sentinel and order-sensitive regressions. An iOS speedup and complete score
+exports still require the next actual simulator run; host timings do not
+establish Zero performance.

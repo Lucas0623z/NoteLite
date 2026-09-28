@@ -231,9 +231,9 @@ public class Template
                     // pix.d > 0 for expected background, expected distance to nearest foreground
                     double weight = (pix.d == 0) ? foreWeight
                             : ((pix.d > 0) ? backWeight : holeWeight);
-                    double expected = (pix.d == 0) ? 0 : 1;
-                    double actual = (actualDist == 0) ? 0 : 1;
-                    double dist = Math.abs(actual - expected);
+                    // Both classifications are binary. Keep the same 0.0/1.0 distance without
+                    // Math.abs(double), whose bit conversions cross JNI in the Zero interpreter.
+                    double dist = ((actualDist == 0) == (pix.d == 0)) ? 0.0 : 1.0;
 
                     total += (weight * dist);
                     weights += weight;
