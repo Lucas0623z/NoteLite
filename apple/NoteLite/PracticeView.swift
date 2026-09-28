@@ -5,9 +5,9 @@ import WebKit
 struct PracticeView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var history: PracticeHistoryStore
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     let record: ScoreRecord
+    let onDismiss: () -> Void
     @StateObject private var controller = PracticeWebController()
 
     var body: some View {
@@ -28,7 +28,7 @@ struct PracticeView: View {
             .navigationTitle(record.filename)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button { controller.close { dismiss() } } label: {
+                    Button { controller.close(completion: onDismiss) } label: {
                         Label("曲谱", systemImage: "chevron.left")
                     }
                     .accessibilityIdentifier("practice-close")
@@ -48,7 +48,7 @@ struct PracticeView: View {
 
     private func prepare() {
         controller.onReport = { report in history.save(report: report, for: record) }
-        controller.onClose = { dismiss() }
+        controller.onClose = onDismiss
         controller.open(score: record, url: library.practiceURL(record))
     }
 }
@@ -111,7 +111,7 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         errorMessage = nil
         guard let url else { errorMessage = "此乐谱还没有可用的 MusicXML。请先完成识谱，或直接导入 MusicXML 文件。"; return }
         guard let page = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "practice") else {
-            errorMessage = "练习资源未打包，请重新构建 NoteLite。"; return
+            errorMessage = "练习资源缺失，请重新安装应用。"; return
         }
         do {
             let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0

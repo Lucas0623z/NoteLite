@@ -19,13 +19,17 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pin the stable toolchain; the runner also contains preview Xcode versions.
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
 concurrency:
   group: apple-client-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   native-clients:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +49,8 @@ jobs:
         working-directory: apple
         run: |
           xcodebuild -version
+          sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
+          test "${sdk_version%%.*}" -ge 26
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen generate --spec project.yml
       - name: Build iOS simulator app without signing
@@ -123,7 +129,7 @@ jobs:
 
   simulator-clients:
     name: ${{ matrix.family }} interface
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -145,12 +151,57 @@ jobs:
         working-directory: apple
         run: |
           xcodebuild -version
+          sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
+          test "${sdk_version%%.*}" -ge 26
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen generate --spec project.yml
+      - name: Select App Store screenshot simulator
+        id: simulator
+        env:
+          DEVICE_FAMILY: ${{ matrix.family }}
+        run: |
+          python3 <<'PY'
+          import json, os, subprocess
+
+          def simctl(*args):
+              return json.loads(subprocess.check_output(["xcrun", "simctl", *args, "--json"]))
+
+          sdk_major = int(subprocess.check_output(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"], text=True).split(".")[0])
+          runtimes = {
+              runtime["identifier"]: tuple(map(int, runtime["version"].split(".")))
+              for runtime in simctl("list", "runtimes")["runtimes"]
+              if runtime.get("isAvailable") and ".iOS-" in runtime["identifier"]
+          }
+          candidates = []
+          for runtime, devices in simctl("list", "devices", "available")["devices"].items():
+              version = runtimes.get(runtime, (0,))
+              if version[0] < 26 or version[0] > sdk_major:
+                  continue
+              for device in devices:
+                  name = device["name"]
+                  fits = ("iPhone" in name and "Pro Max" in name) if os.environ["DEVICE_FAMILY"] == "iPhone" else ("iPad Pro" in name and "13-inch" in name)
+                  if device.get("isAvailable") and fits:
+                      candidates.append((version, name, device["udid"]))
+          if not candidates:
+              raise SystemExit("No iOS 26+ Pro Max iPhone or 13-inch iPad simulator is installed for " + os.environ["DEVICE_FAMILY"])
+          version, name, device_id = max(candidates)
+          print(f"Using {name}, iOS {'.'.join(map(str, version))}: {device_id}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"device_id={device_id}\n")
+          PY
       - name: Test native interface and model
         timeout-minutes: 15
         working-directory: apple
-        run: bash scripts/run-simulator-tests.sh '${{ matrix.family }}'
+        env:
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+        run: |
+          trap 'xcrun simctl shutdown "$DEVICE_ID" >/dev/null 2>&1 || true' EXIT
+          xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
+            -maximum-test-execution-time-allowance 180 \
+            NOTELITE_SIM_SWIFT_PATH= CODE_SIGNING_ALLOWED=NO
       - name: Export native interface screenshots
         if: always()
         working-directory: apple

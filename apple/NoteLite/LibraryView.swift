@@ -161,7 +161,7 @@ struct LibraryView: View {
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .background(NoteLiteTheme.sidebar)
-            .navigationTitle("NoteLite")
+            .navigationTitle("音伴")
             .navigationSplitViewColumnWidth(min: 180, ideal: 212, max: 250)
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -377,10 +377,13 @@ struct ScoreDetailView: View {
             }
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $practicing) { PracticeView(record: record) }
+        .fullScreenCover(isPresented: $practicing) {
+            PracticeView(record: record, onDismiss: { practicing = false })
+        }
         #else
         .sheet(isPresented: $practicing) {
-            PracticeView(record: record).noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
+            PracticeView(record: record, onDismiss: { practicing = false })
+                .noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
         }
         #endif
         .sheet(isPresented: $showingOriginal) {
@@ -476,7 +479,7 @@ struct ScoreDetailView: View {
                 }
             }
             if !canPractice {
-                Text("点选开始识别时，原稿将上传到你配置的 NoteLite 服务器。")
+                Text("点选开始识别时，原稿将上传到你配置的识谱服务器。")
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             }
             if let server = record.serverURL {

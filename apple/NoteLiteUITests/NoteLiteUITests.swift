@@ -7,6 +7,9 @@ final class NoteLiteUITests: XCTestCase {
     @MainActor
     func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() {
         continueAfterFailure = false
+        #if os(iOS)
+        XCUIDevice.shared.orientation = .portrait
+        #endif
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting-import-demo"]
         // The UI runner launches a separate process; pass the simulator runtime fix to it too.
@@ -21,6 +24,7 @@ final class NoteLiteUITests: XCTestCase {
         score.tap()
         let practice = app.buttons["practice-start"].firstMatch
         XCTAssertTrue(practice.waitForExistence(timeout: 10), "Imported structured scores need a practice entry")
+        attach(app, name: "Score-details")
         practice.tap()
         // WebKit exposes HTML text as `value` on macOS and `label` on iOS.
         let title = app.webViews.staticTexts.matching(NSPredicate(
@@ -36,7 +40,7 @@ final class NoteLiteUITests: XCTestCase {
             }, object: app)
             XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 10), .completed,
                            "The iPad practice screen must rotate before capture")
-            waitForStableLandscapeLayout(app)
+            waitForStablePracticeLayout(app, landscape: true)
             assertPracticeControlsVisible(app)
             attach(app, name: "Practice-landscape")
             XCUIDevice.shared.orientation = .portrait
@@ -44,6 +48,7 @@ final class NoteLiteUITests: XCTestCase {
                 app.frame.height > app.frame.width
             }, object: app)
             XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 10), .completed)
+            waitForStablePracticeLayout(app, landscape: false)
         }
         #endif
         let back = app.buttons.matching(identifier: "practice-close").firstMatch
@@ -52,6 +57,8 @@ final class NoteLiteUITests: XCTestCase {
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.webViews.firstMatch)
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 10), .completed,
                        "Returning must dismiss practice and release the bundled renderer")
+        XCTAssertTrue(app.buttons["practice-start"].firstMatch.waitForExistence(timeout: 5),
+                      "Returning must restore the score details")
     }
 
     @MainActor
@@ -71,14 +78,15 @@ final class NoteLiteUITests: XCTestCase {
 
     #if os(iOS)
     @MainActor
-    private func waitForStableLandscapeLayout(_ app: XCUIApplication) {
+    private func waitForStablePracticeLayout(_ app: XCUIApplication, landscape: Bool) {
         var previousWindow = CGRect.null
         var previousWebView = CGRect.null
         var stableSamples = 0
         let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             let window = app.windows.firstMatch.frame
             let webView = app.webViews.firstMatch.frame
-            guard window.width > window.height, webView.width > webView.height,
+            guard (window.width > window.height) == landscape,
+                  (webView.width > webView.height) == landscape,
                   window.contains(webView) else {
                 stableSamples = 0
                 return false

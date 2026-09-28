@@ -1,0 +1,97 @@
+name: iOS App Store release
+
+on:
+  pull_request:
+    paths:
+      - "apple/**"
+      - "practice-web/**"
+      - "app/res/practice/**"
+      - ".github/workflows/app-store-release.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "verify = unsigned device archive; export = signed App Store IPA"
+        type: choice
+        options: [verify, export]
+        default: verify
+      upload:
+        description: "Validate and upload the signed IPA to App Store Connect (requires export)"
+        type: boolean
+        default: false
+      bundle_id:
+        description: "Registered App ID / App Store Connect bundle ID"
+        type: string
+        default: com.lucas0623z.yinban
+      team_id:
+        description: "Apple Developer Team ID (required for export)"
+        type: string
+      version:
+        description: "App Store version"
+        type: string
+        default: "1.0.0"
+      build_number:
+        description: "New build number; empty uses the workflow run number"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-store-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'verify' }}
+      RELEASE_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.upload && 'true' || 'false' }}
+      RELEASE_BUNDLE_ID: ${{ inputs.bundle_id || 'com.lucas0623z.yinban' }}
+      RELEASE_TEAM_ID: ${{ inputs.team_id }}
+      RELEASE_VERSION: ${{ inputs.version || '1.0.0' }}
+      RELEASE_BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: practice-web/package-lock.json
+      - name: Select stable Xcode and check release inputs
+        run: python3 apple/release/release.py prepare
+      - name: Build and test bundled practice view
+        working-directory: practice-web
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Generate Xcode project
+        working-directory: apple
+        run: |
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate --spec project.yml
+      - name: Verify unsigned iOS device archive
+        if: env.RELEASE_MODE == 'verify'
+        run: python3 apple/release/release.py archive
+      - name: Export signed IPA and optionally upload
+        if: github.event_name == 'workflow_dispatch' && env.RELEASE_MODE == 'export'
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_APP_STORE_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROFILE_BASE64 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          ASC_API_PRIVATE_KEY_BASE64: ${{ secrets.ASC_API_PRIVATE_KEY_BASE64 }}
+        run: python3 apple/release/release.py archive
+      - name: Remove temporary signing credentials
+        if: always()
+        run: python3 apple/release/release.py cleanup
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yinban-ios-${{ env.RELEASE_MODE }}-${{ env.RELEASE_BUILD_NUMBER }}
+          path: |
+            ${{ runner.temp }}/yinban-release-output/Yinban.xcarchive.zip
+            ${{ runner.temp }}/yinban-release-output/export/*.ipa
+          if-no-files-found: error
+          retention-days: 7
