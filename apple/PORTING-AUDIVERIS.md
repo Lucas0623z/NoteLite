@@ -6,7 +6,7 @@
 
 当前完整引擎路线是：在应用内静态链接 OpenJDK Mobile 的 Zero 解释器，保留原有 Java 识别算法、模型和 MusicXML 导出；移植它实际依赖的软件图像处理、字体和 OCR 库。Java 代码与运行时随应用打包，不要求用户安装 Java、配置 OMR 服务或下载可执行代码。
 
-实际模拟器验收已通过全部 13 项独立平台检查，包括原字体排版、图像与 PDF、XML 和完整 legacy OCR。完整曲谱目前进入 BEAMS 步骤后超过原有 120 秒单步期限，尚未在 iOS 导出通过语义验收的完整乐谱。下一步用真实工作线程栈、CPU 时间和 GC 统计定位耗时，再验证必要的等价优化与取消行为。
+实际模拟器验收已通过全部 13 项独立平台检查，包括原字体排版、图像与 PDF、XML 和完整 legacy OCR。完整曲谱两轮分别在 BEAMS 和 HEADS 超过原有 120 秒单步期限，尚未在 iOS 导出通过语义验收的完整乐谱。下一步用真实工作线程栈、CPU 时间和 GC 统计定位耗时，再验证必要的等价优化与取消行为。
 
 `apple/AudiverisCore` 是已经独立实现的 Swift 二值化与游程核心。游程是同一行或列中连续的黑色像素段。它输出二值图和游程，**尚不能识别音符、节奏或生成 MusicXML**。应用中的“本地引擎移植测试”验证这部分处理；完整引擎必须通过后文的嵌入式运行与导出验收。
 
@@ -138,6 +138,8 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 [完整嵌入验收 CI 36422667123](https://github.com/Lucas0623z/NoteLite/actions/runs/36422667123) 随后在模拟器真正通过全部 13 项检查，包含通过 JavaCPP 对象绑定调用的 legacy OCR。完整 chula 曲谱继续进入 BEAMS，但触发原有 120 秒单步超时；线程池在取消后 30 秒内没有结束，后续调用按安全边界被拒绝。应用日志中的实际 VM 启动至失败约为 237 秒；模拟器此前的启动时间不属于引擎耗时。
 
 当前源码中，BEAMS 的中值滤波、Gaussian 滤波和灰度闭运算均包含不检查中断的逐像素 Java 循环；仅 `Future.cancel(true)` 不能保证这些循环立即停止。chula 的闭运算结构元含 61 个邻域点，约需 5.84 亿次邻域访问与 960 万次小数组分配。这是需要实测的候选热点，不能仅凭源码认定为该次超时根因。固定 Zero 构建已包含 management / JVMTI，Apple 平台线程 CPU 统计由 `thread_info` 实现，可在应用内记录栈、CPU 与 GC 增量；栈采集放在独立 daemon 中，避免等待 VM safepoint 时阻塞取消路径。该 Zero 构建未启用 JFR。
+
+[第二次原预算验收 CI 36423953597](https://github.com/Lucas0623z/NoteLite/actions/runs/36423953597) 再次通过 13 项检查，完整曲谱完成 BEAMS、进入 LEDGERS 与 HEADS，随后 HEADS 超时。这说明前一轮不能解释为固定发生在 BEAMS 的死锁。HEADS 先构建整页距离表，再扫描候选位置并逐模板点匹配；这些计算与模板初始化锁都需要实际栈和 CPU 证据区分，不能单纯提高期限后宣称解决性能问题。
 
 ### 已执行的宿主适配测试
 
