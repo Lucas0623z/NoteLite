@@ -134,11 +134,11 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 设置 `TESSDATA_PREFIX` 为完整 tessdata 4.1.0 目录，至少包含支持 legacy 模式的 `eng.traineddata`。测试结果保存在 `app/build/port-probe/` 和 `app/build/test-results/embeddedOmrTest/`。
 
-另一个 CI 作业 `host_runtime_validation` 使用上述固定源码构建的 macOS JDK 28：Gradle 与引擎编译仍用 Java 21，六个平台适配类改用该 JDK 28 的 `javac` 编译，探针和完整识别测试改由该 JDK 28 执行。此作业独立于 iOS 交叉编译；[CI 36409604644 的宿主作业](https://github.com/Lucas0623z/NoteLite/actions/runs/36409604644/job/108887214378) 已通过：
+另一个 CI 作业 `host_runtime_validation` 使用上述固定源码构建的 macOS JDK 28：Gradle 与引擎编译仍用 Java 21，六个平台适配类改用该 JDK 28 的 `javac` 编译，探针和完整识别测试改由该 JDK 28 执行。此作业独立于 iOS 交叉编译；[CI 36410992236 的宿主作业](https://github.com/Lucas0623z/NoteLite/actions/runs/36410992236/job/108891052271) 已通过：
 
-- 8 个测试，0 个跳过、失败或错误；重复识别、故障恢复、取消、沙盒和 JSON 库入口均完成。
+- 11 个测试，0 个跳过、失败或错误；重复识别、故障恢复、取消及其调用时序、沙盒、固定 PDF 分辨率和 JSON 库入口均完成。
 - 单页重复导出各 151 个有音高音符 / 220 个 MIDI note-on；两页 TIFF 和 PDF 各导出 302 个有音高音符 / 440 个 MIDI note-on。
-- 4 组单页导出的完整 MusicXML / MIDI 语义比较通过，差异列表为空。
+- 5 组单页导出的完整 MusicXML / MIDI 语义比较通过，差异列表为空。
 - 图像、XML、legacy OCR 和真实 PDF 栅格化探针通过。Bravura 光栅为 197 个前景像素，SHA-256 为 `a38f07a0bc9d820d190c62b323bf642f005fb65aee56cbc62d5096f3133a749e`，与 Windows Java 21 的 200 像素结果不同。因此字体不是跨平台逐像素一致；这个完整曲谱样例的识别语义仍一致。
 
 在已准备好 `MOBILE_JDK_HOST_HOME` 的 macOS 主机上，可切换 `JAVA_HOME` 到 Java 21 后运行：

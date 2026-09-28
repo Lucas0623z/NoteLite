@@ -42,6 +42,9 @@ gradle.projectsEvaluated {
         into('licenses') {
             from(new File(root, 'apple/AudiverisCore/LICENSE')) { rename { 'AGPL-3.0.txt' } }
             from new File(root, 'docs/development/embedded-omr.md')
+            into('fonts') {
+                from(new File(root, 'tools/audiveris-port/font-licenses')) { exclude '.gitattributes' }
+            }
         }
     }
     app.tasks.register('embeddedNativeProbeDesktop', JavaExec) {

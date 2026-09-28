@@ -1,0 +1,126 @@
+{
+  "auditedOn": "2026-09-28",
+  "fontsUnmodified": true,
+  "noticeFile": "FONT-NOTICES.txt",
+  "licenseSources": [
+    {
+      "file": "Bravura-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/steinbergmedia/bravura/301087ca0b0d30b65d81bc3e718ff64b613e2a9a/LICENSE.txt",
+      "bytes": 4420,
+      "sha256": "eaf7e8faffbe4e404fc19e625c89cef03992dc736051ae7e2fefe205cd6c93db"
+    },
+    {
+      "file": "Leland-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/MuseScoreFonts/Leland/667d9b3d95932236a3569d3994794b19e4084124/LICENSE.txt",
+      "bytes": 4400,
+      "sha256": "e77bc3c994c027465162e21d76fcc3b74d87833212f6082eb261b0f838260643"
+    },
+    {
+      "file": "MakeMusic-OFL.txt",
+      "url": "https://makemusic.zendesk.com/hc/en-us/article_attachments/4402710909975",
+      "bytes": 5110,
+      "sha256": "ddb4d751552bb20edf19e990587339e0d19206d585c8bf4acd3e6a230658d951"
+    }
+  ],
+  "sourcePackages": [
+    {
+      "url": "https://makemusic.zendesk.com/hc/en-us/article_attachments/4586784089367",
+      "file": "MMFonts.msi",
+      "bytes": 2744320,
+      "sha256": "8f00e2159fc1346325f1d1f98be89234a650b5d10e141831c581029cc57613d0",
+      "extraction": "Read compound-file CAB stream and expanded files; installer was not executed."
+    }
+  ],
+  "fonts": [
+    {
+      "file": "Bravura.otf",
+      "bytes": 512924,
+      "sha256": "dca2d90c88437a701b1c2e71fa54e76f9fa41d7deee935d74dc871ea66ecfdd2",
+      "embeddedVersion": "Version 1.392",
+      "upstreamBinaryMatched": true,
+      "matchedFontSource": "https://raw.githubusercontent.com/steinbergmedia/bravura/301087ca0b0d30b65d81bc3e718ff64b613e2a9a/redist/otf/Bravura.otf",
+      "release": "bravura-1.392",
+      "licenseFile": "Bravura-LICENSE.txt",
+      "status": "publisher-license-retrieved"
+    },
+    {
+      "file": "FinaleJazz.otf",
+      "bytes": 136984,
+      "sha256": "a8ea0408ef7628ca38ae29eaa1b4357d2b0bf11747f6eee3c5f9ed5cca358e08",
+      "embeddedVersion": "Version 1.9",
+      "upstreamBinaryMatched": true,
+      "matchedFontSource": "https://makemusic.zendesk.com/hc/en-us/article_attachments/4586784089367",
+      "installerMember": "F_TTFonts_Fonts_FinaleJazz.otf",
+      "licenseFile": "MakeMusic-OFL.txt",
+      "licenseScopeSource": "https://makemusic.zendesk.com/hc/en-us/articles/1500013053461-MakeMusic-Fonts-and-Licensing-Information",
+      "status": "publisher-license-retrieved"
+    },
+    {
+      "file": "FinaleJazzText.otf",
+      "bytes": 48120,
+      "sha256": "b3421c9171d41a5c7e24c772848c87af695f012cdfab2f849d86829435a8baff",
+      "embeddedVersion": "Version 1.3",
+      "upstreamBinaryMatched": true,
+      "matchedFontSource": "https://makemusic.zendesk.com/hc/en-us/article_attachments/4586784089367",
+      "installerMember": "F_TTFonts_Fonts_FinaleJazzText.otf",
+      "licenseFile": "MakeMusic-OFL.txt",
+      "licenseScopeSource": "https://makemusic.zendesk.com/hc/en-us/articles/1500013053461-MakeMusic-Fonts-and-Licensing-Information",
+      "status": "publisher-license-retrieved"
+    },
+    {
+      "file": "JazzPerc.ttf",
+      "bytes": 26748,
+      "sha256": "310ef24d859055f1ba026fe3a86359eb3be1e3ebbcac6cb9029281952e958538",
+      "embeddedVersion": "Macromedia Fontographer 4.1 9/15/99",
+      "upstreamBinaryMatched": true,
+      "matchedFontSource": "https://makemusic.zendesk.com/hc/en-us/article_attachments/4586784089367",
+      "installerMember": "F_TTFonts_Fonts_JazzPerc.TTF",
+      "status": "license-scope-unresolved",
+      "notes": "Exact legacy font is in the official installer. The current licensing article lists OpenType Finale families, not this legacy JazzPerc TrueType family. No font-specific license is embedded.",
+      "additionalSources": [
+        "https://usermanuals.finalemusic.com/FinaleWin/Content/Finale/What_s_new.htm",
+        "https://github.com/Audiveris/audiveris/commit/78b61b566ebdf5130ef14dee301e4573289a2999"
+      ]
+    },
+    {
+      "file": "Leland.otf",
+      "bytes": 88132,
+      "sha256": "cacca69cb750d851023d52a8e41d3373904aa82afc7247085f37d4ee6823506c",
+      "embeddedVersion": "Version 0.77",
+      "upstreamBinaryMatched": true,
+      "matchedFontSource": "https://raw.githubusercontent.com/MuseScoreFonts/Leland/667d9b3d95932236a3569d3994794b19e4084124/Leland.otf",
+      "release": "v0.77",
+      "licenseFile": "Leland-LICENSE.txt",
+      "status": "publisher-license-retrieved"
+    },
+    {
+      "file": "MusicalSymbols.ttf",
+      "bytes": 37644,
+      "sha256": "07fb37d9fd2c6ccceb1124d0e9e7aa8a4ffe03ae2f0a3bff5e620b241b59d5cc",
+      "embeddedVersion": "",
+      "upstreamBinaryMatched": true,
+      "matchedFontSource": "https://raw.githubusercontent.com/Audiveris/audiveris/cb6f5d33b308b2446709ca34d0a7979879e4289a/res/MusicalSymbols.ttf",
+      "status": "license-grant-not-found",
+      "additionalSources": [
+        "https://github.com/Audiveris/audiveris/blob/cb6f5d33b308b2446709ca34d0a7979879e4289a/src/main/omr/ui/symbol/MusicFont.java",
+        "http://simplythebest.net/fonts/fonts/musical_symbols.html"
+      ],
+      "notes": "Matches the 2013 Audiveris binary. Copyright/version fields are empty; there is no embedded license. The historical font-download page cited in Audiveris is unavailable."
+    },
+    {
+      "file": "Primus.ttf",
+      "bytes": 48072,
+      "sha256": "25f73922f6462d50a250e98cbb3b69909a7546eae8167e99592c3d641b80facd",
+      "embeddedVersion": "Version 1.239; 2008",
+      "upstreamBinaryMatched": true,
+      "matchedFontSource": "https://www.indigo2.dk/primus/faq/normal/primus.ttf",
+      "status": "license-grant-not-found",
+      "additionalSources": [
+        "https://www.indigo2.dk/primus/faq/faq.htm",
+        "https://github.com/Audiveris/audiveris/commit/63bec919570fd55ae91717fbdea43c12bef90f9c",
+        "https://www.columbussoft.de/download/primus11.pdf"
+      ],
+      "notes": "Distributor download and original Audiveris binary match. Embedded notice reserves all rights; there is no embedded license description or URL. The publisher manual does not supply a separate font redistribution grant."
+    }
+  ]
+}
