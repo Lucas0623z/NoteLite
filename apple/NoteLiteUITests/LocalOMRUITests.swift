@@ -11,8 +11,9 @@ final class LocalOMRUITests: XCTestCase {
         let entry = app.descendants(matching: .any).matching(identifier: "local-omr-open").firstMatch
         if !entry.exists {
             // The library toolbar exposes debug actions in its menu.
-            let menu = app.buttons["library-menu"].firstMatch
-            if menu.exists { menu.tap() }
+            let menu = app.descendants(matching: .any).matching(identifier: "library-menu").firstMatch
+            XCTAssertTrue(menu.waitForExistence(timeout: 10))
+            menu.tap()
         }
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         entry.tap()

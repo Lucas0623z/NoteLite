@@ -121,13 +121,21 @@ enum LocalOMRProcessor {
                 let crop = page.getBoxRect(.cropBox).intersection(page.getBoxRect(.mediaBox))
                 let angle = ((Int(page.rotationAngle) % 360) + 360) % 360
                 let swapsAxes = angle == 90 || angle == 270
-                let width = Double(swapsAxes ? crop.height : crop.width) * limits.pdfPixelsPerPoint
-                let height = Double(swapsAxes ? crop.width : crop.height) * limits.pdfPixelsPerPoint
+                let nativeWidth = swapsAxes ? crop.height : crop.width
+                let nativeHeight = swapsAxes ? crop.width : crop.height
+                let width = Double(nativeWidth) * limits.pdfPixelsPerPoint
+                let height = Double(nativeHeight) * limits.pdfPixelsPerPoint
                 let size = try boundedSize(width: width, height: height, limits: limits)
                 image = try grayscale(width: size.width, height: size.height, cancellationCheck: cancellationCheck) { context in
                     let target = CGRect(x: 0, y: 0, width: size.width, height: size.height)
                     context.clip(to: target)
-                    context.concatenate(page.getDrawingTransform(.cropBox, rect: target, rotate: 0, preserveAspectRatio: true))
+                    // Quartz's fitting transform may leave small pages at their
+                    // original point size. Apply the requested raster scale
+                    // explicitly, then ask Quartz only for crop/rotation mapping.
+                    context.scaleBy(x: CGFloat(size.width) / nativeWidth,
+                                    y: CGFloat(size.height) / nativeHeight)
+                    let pageRect = CGRect(x: 0, y: 0, width: nativeWidth, height: nativeHeight)
+                    context.concatenate(page.getDrawingTransform(.cropBox, rect: pageRect, rotate: 0, preserveAspectRatio: true))
                     context.drawPDFPage(page)
                 }
             case .image(let source):

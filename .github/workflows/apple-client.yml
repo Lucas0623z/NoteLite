@@ -76,7 +76,7 @@ jobs:
             -configuration Release -destination 'generic/platform=iOS' \
             -derivedDataPath Build-device \
             CODE_SIGNING_ALLOWED=NO
-          lipo -verify_arch arm64 Build-device/Build/Products/Release-iphoneos/NoteLite.app/NoteLite
+          lipo Build-device/Build/Products/Release-iphoneos/NoteLite.app/NoteLite -verify_arch arm64
           ditto -c -k --keepParent Build-device/Build/Products/Release-iphoneos/NoteLite.app NoteLite-iOS-device-unsigned.zip
       - name: Verify bundled practice resources
         working-directory: apple
