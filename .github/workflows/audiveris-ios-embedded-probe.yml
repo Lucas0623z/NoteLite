@@ -35,6 +35,7 @@ jobs:
         run: |
           python3 tools/audiveris-port/test_download_native_artifacts.py
           python3 -B tools/audiveris-port/test_manage_embedded_simulators.py
+          python3 -B tools/audiveris-port/test_verify_embedded_score.py
           python3 -B apple/release/test_release.py
       - uses: actions/setup-java@v4
         with:
@@ -64,8 +65,16 @@ jobs:
         include:
           - sdk: iphoneos
             runtime: device
+            family: device
+            artifact_suffix: ''
           - sdk: iphonesimulator
             runtime: simulator
+            family: iPhone
+            artifact_suffix: '-iPhone'
+          - sdk: iphonesimulator
+            runtime: simulator
+            family: iPad
+            artifact_suffix: '-iPad'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -90,7 +99,7 @@ jobs:
       - name: Preserve native build provenance for release verification
         uses: actions/upload-artifact@v4
         with:
-          name: embedded-omr-provenance-${{ matrix.sdk }}
+          name: embedded-omr-provenance-${{ matrix.sdk }}${{ matrix.artifact_suffix }}
           if-no-files-found: error
           path: build/incoming/source-runs.json
       - name: Build actual same-process JNI app
@@ -104,14 +113,17 @@ jobs:
         run: |
           python3 tools/audiveris-port/manage-embedded-simulators.py create \
             build/embedded-probe/iphonesimulator-arm64/simulator-results
-      - name: Run full recognition on iPhone and iPad simulators
+      - name: Run full recognition on ${{ matrix.family }}
         if: matrix.sdk == 'iphonesimulator'
+        env:
+          SIMULATOR_FAMILY: ${{ matrix.family }}
         run: |
           python3 - <<'PY'
-          import json, subprocess
+          import json, os, subprocess
           from pathlib import Path
           app = 'build/embedded-probe/iphonesimulator-arm64/EmbeddedOMRProbe.app'
-          for family in ['iPhone', 'iPad']:
+          for family in [os.environ['SIMULATOR_FAMILY']]:
+              assert family in ('iPhone', 'iPad')
               output = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
               device = json.loads((output / 'device.json').read_text())['udid']
               try:
@@ -119,6 +131,13 @@ jobs:
               finally:
                   subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
           PY
+      - name: Preserve completed recognition evidence before production app testing
+        if: always() && matrix.sdk == 'iphonesimulator'
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-omr-score-evidence-${{ matrix.family }}
+          if-no-files-found: warn
+          path: build/embedded-probe/iphonesimulator-arm64/simulator-results/${{ matrix.family }}/
       - name: Compose the actual offline NoteLite app from the same runtime and resources
         env:
           APP_SDK: ${{ matrix.sdk }}
@@ -156,13 +175,16 @@ jobs:
               destination.mkdir(parents=True, exist_ok=True)
               shutil.copy2(report, destination / report.name)
           PY
-      - name: Exercise offline recognition and practice in the actual iPhone and iPad app
+      - name: Exercise offline recognition and practice in the actual ${{ matrix.family }} app
         if: matrix.sdk == 'iphonesimulator'
+        env:
+          SIMULATOR_FAMILY: ${{ matrix.family }}
         run: |
           python3 - <<'PY'
-          import json, subprocess
+          import json, os, subprocess
           from pathlib import Path
-          for family in ['iPhone', 'iPad']:
+          for family in [os.environ['SIMULATOR_FAMILY']]:
+              assert family in ('iPhone', 'iPad')
               probe = Path('build/embedded-probe/iphonesimulator-arm64/simulator-results') / family
               device = json.loads((probe / 'device.json').read_text())['udid']
               output = Path('build/embedded-app/iphonesimulator-arm64/ui-results') / family
@@ -181,7 +203,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: embedded-omr-probe-${{ matrix.sdk }}-arm64
+          name: embedded-omr-probe-${{ matrix.sdk }}-arm64${{ matrix.artifact_suffix }}
           if-no-files-found: warn
           path: |
             build/incoming/source-runs.json
