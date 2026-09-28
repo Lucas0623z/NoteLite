@@ -69,6 +69,20 @@ print(match.group(1))
 PY
 )
 printf '%s\n' "$pid" > "$output/process-id.txt"
+print_new_log_tail() {
+  local file=$1 previous=$2 lines=0 added
+  if [ -f "$file" ]; then lines=$(wc -l < "$file"); fi
+  if [ "$lines" -gt "$previous" ]; then
+    added=$((lines - previous))
+    if [ "$added" -gt 40 ]; then added=40; fi
+    printf 'Probe progress: %s (%s new lines shown)\n' "${file##*/}" "$added" >&2
+    tail -n "$added" "$file" >&2 || true
+  fi
+  printf '%s\n' "$lines"
+}
+last_progress=$started
+stdout_lines=0
+stderr_lines=0
 while [ ! -f "$container/Documents/embedded-probe-result.json" ]; do
   elapsed=$(($(date +%s) - started))
   if [ "$elapsed" -ge 10 ] && ! kill -0 "$pid" 2>/dev/null; then
@@ -84,6 +98,11 @@ while [ ! -f "$container/Documents/embedded-probe-result.json" ]; do
   if [ "$elapsed" -ge "$timeout" ]; then
     echo "Probe did not produce a completion report within $timeout seconds" >&2
     exit 1
+  fi
+  if [ $(($(date +%s) - last_progress)) -ge 60 ]; then
+    stdout_lines=$(print_new_log_tail "$output/stdout.log" "$stdout_lines")
+    stderr_lines=$(print_new_log_tail "$output/stderr.log" "$stderr_lines")
+    last_progress=$(date +%s)
   fi
   sleep 2
 done

@@ -78,8 +78,10 @@ tools/audiveris-port/run-embedded-probe.sh \
 
 Run the same command with an iPad simulator UDID and a separate output directory.
 The runner preserves stdout/stderr, a completion report, and the entire app
-Documents folder. A timeout or Java/native failure is a test failure. The
-default timeout is 1800 seconds because this VM uses an interpreter; override
+Documents folder. A timeout or Java/native failure is a test failure. The runner
+prints up to 40 new lines from each log every 60 seconds while waiting,
+and the last 120 stderr lines on failure. Complete logs remain in the artifacts.
+The default timeout is 1800 seconds because this VM uses an interpreter; override
 with `NOTELITE_PROBE_TIMEOUT_SECONDS` when needed.
 The runner also compares the exported MusicXML and MIDI against the committed
 desktop semantic reference using `verify_embedded_score.py`. A difference in
