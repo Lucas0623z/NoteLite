@@ -11,7 +11,7 @@ app=$(cd "$app" && pwd)
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
 bundle_id=com.notelite.embeddedprobe
-timeout=${NOTELITE_PROBE_TIMEOUT_SECONDS:-1800}
+timeout=${NOTELITE_PROBE_TIMEOUT_SECONDS:-3900}
 xcrun simctl boot "$device" 2>/dev/null || true
 xcrun simctl bootstatus "$device" -b
 xcrun simctl install "$device" "$app"

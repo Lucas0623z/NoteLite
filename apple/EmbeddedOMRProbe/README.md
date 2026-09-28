@@ -105,8 +105,10 @@ The runner preserves stdout/stderr, a completion report, and the entire app
 Documents folder. A timeout or Java/native failure is a test failure. The runner
 prints up to 40 new lines from each log every 60 seconds while waiting,
 and the last 120 stderr lines on failure. Complete logs remain in the artifacts.
-The default timeout is 1800 seconds because this VM uses an interpreter; override
-with `NOTELITE_PROBE_TIMEOUT_SECONDS` when needed.
+The runner allows 3900 seconds for four independent recognition jobs (two PNG
+jobs plus two-page PDF and TIFF jobs): four 900-second job budgets plus 300
+seconds for component checks and cleanup. Override with
+`NOTELITE_PROBE_TIMEOUT_SECONDS` when needed.
 Inside the native app, each recognition job has a 900-second total deadline,
 including initialization and exports, and each sheet step has a 300-second
 limit. Desktop and ordinary host sessions retain their existing timeout.
