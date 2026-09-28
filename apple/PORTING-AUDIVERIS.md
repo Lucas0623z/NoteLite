@@ -131,6 +131,8 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 [模拟器 CI 36420435044](https://github.com/Lucas0623z/NoteLite/actions/runs/36420435044) 随后实际通过混合 JNI 参数的静态与实例调用、原 ImageIO JPEG 和 JavaCPP JPEG 测试，确认上述 ABI 修复生效。13 个独立检查中 12 个通过：真实音乐字体、PNG / JPEG / TIFF、PDF 栅格化、JAXB / ProxyMusic 与库加载均已执行。剩余 legacy OCR 在 `TessBaseAPI.allocate()` 处报告缺失 JNI 方法。原生成器只扫描 global 包，遗漏 C++ 对象包装类；独立使用 `javap` 读取锁定 API JAR，并直接检查旧 Mach-O 归档，确认 100 个类的 6,836 个 native 声明中缺失 1,620 个绑定。新生成器扫描完整包，构建与最终链接均增加全量声明覆盖检查；仍需用重建产物执行 OCR 和完整曲谱识别。
 
+[OCR 重建 CI 36421470400](https://github.com/Lucas0623z/NoteLite/actions/runs/36421470400) 已通过 device / simulator 构建及模拟器原生 smoke 测试。对实际下载的 device JNI 归档再用独立的 `javap` 与 Mach-O 解析器复核，6,836 个声明全部有对应的编译符号，缺失数为零；9 个归档校验值、6 个固定上游源码提交、API JAR 与完整 OCR 模型校验值均与构建证据相符。JNI 对象标记为 iOS arm64、最低系统版本 16.0；这些静态证据仍需由完整嵌入运行来验证。
+
 ### 已执行的宿主适配测试
 
 2026-09-28，在 Windows Java 21 上用相同的六个适配类替换 `java.desktop` 平台入口，实际执行了平台探针和完整进程内识别测试：
