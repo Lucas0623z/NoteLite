@@ -85,6 +85,46 @@ def main() -> None:
             "#if defined(AARCH64) && defined(__APPLE__)\n",
             "#ifdef MACOS_AARCH64\n")
 
+    # NativeSignatureIterator promotes pass_byte/pass_short to pass_int unless
+    # a backend overrides them. That loses JNI primitive widths in Zero's CIF.
+    # Unlike the ordinary AAPCS64 ABI, Apple arm64 packs stack arguments using
+    # their actual sizes: consecutive jbooleans occupy one byte each. JPEG's
+    # long writeImage JNI signature exposed the resulting shifted arguments.
+    # Read exact signature types, including signed byte/short vs unsigned
+    # boolean/char, and retain the existing CIF path on every other target.
+    replace(root, "src/hotspot/cpu/zero/interpreterRT_zero.cpp",
+            "  // Build the argument types list\n"
+            "  pass_object();\n"
+            "  if (method()->is_static())\n"
+            "    pass_object();\n"
+            "  iterate(fingerprint);\n",
+            "  // Build the argument types list\n"
+            "#if defined(__IOS__) && defined(AARCH64)\n"
+            "  // Darwin arm64 packs JNI stack arguments at their native width.\n"
+            "  pass_object(); // JNIEnv*\n"
+            "  pass_object(); // jclass for static methods, jobject otherwise\n"
+            "  for (SignatureStream signature(method()->signature());\n"
+            "       !signature.at_return_type(); signature.next()) {\n"
+            "    push(signature.type());\n"
+            "    _cif->nargs++;\n"
+            "  }\n"
+            "#else\n"
+            "  pass_object();\n"
+            "  if (method()->is_static())\n"
+            "    pass_object();\n"
+            "  iterate(fingerprint);\n"
+            "#endif\n")
+    replace(root, "src/hotspot/cpu/zero/zeroInterpreter_zero.cpp",
+            "      else if (type->size == 4) {\n"
+            "        *(dst++) = src--;\n",
+            "      else if (type->size == 4\n"
+            "#if defined(__IOS__) && defined(AARCH64)\n"
+            "               || type->size == 1 || type->size == 2\n"
+            "#endif\n"
+            "      ) {\n"
+            "        // A narrow JNI argument still occupies one Java stack word.\n"
+            "        *(dst++) = src--;\n")
+
     # A static iOS JVM has no libjvm.dylib location to infer java.home from.
     # Its stock layout assumes app/lib/lib/modules. The embedding bridge sets
     # JAVA_HOME to its bundled runtime before JNI_CreateJavaVM; -Djava.home is
