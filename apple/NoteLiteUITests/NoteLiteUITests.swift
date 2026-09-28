@@ -104,7 +104,9 @@ final class NoteLiteUITests: XCTestCase {
             }
             return stableSamples >= 2
         }, object: app)
-        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed,
+        // One CI accessibility query took 9.16 seconds after rotation. Allow
+        // three stable samples while keeping orientation and containment checks.
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 30), .completed,
                        "The rotated window and score renderer must finish resizing before capture")
     }
     #endif
