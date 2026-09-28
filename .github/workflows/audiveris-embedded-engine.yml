@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - 'app/**'
+      - 'apple/EmbeddedOMRRuntime/Sources/TemplateScorer.*'
       - 'tools/audiveris-port/**'
       - '.github/workflows/audiveris-embedded-engine.yml'
 
@@ -21,6 +22,14 @@ jobs:
   full-engine-with-mobile-desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scorer: java
+            artifact: embedded-engine-host-evidence
+          - scorer: native
+            artifact: embedded-engine-native-host-evidence
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -28,6 +37,22 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
+      - name: Compile the production native scorer for host verification
+        if: matrix.scorer == 'native'
+        run: |
+          mkdir -p build/native-template
+          clang++ -std=c++17 -O2 -fPIC -shared -fno-fast-math -ffp-contract=off \
+            -Wall -Wextra -Werror -pedantic \
+            -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" \
+            -Iapple/EmbeddedOMRRuntime/Sources \
+            apple/EmbeddedOMRRuntime/Sources/TemplateScorer.cpp \
+            tools/audiveris-port/native-template-host.cpp \
+            -o build/native-template/libnotelite_template.so
+          clang++ --version > build/native-template/compiler.txt
+          sha256sum apple/EmbeddedOMRRuntime/Sources/TemplateScorer.{hpp,cpp} \
+            tools/audiveris-port/native-template-host.cpp \
+            build/native-template/libnotelite_template.so \
+            > build/native-template/source-and-library.sha256
       - name: Prepare pinned legacy OCR model
         run: |
           mkdir -p build/tessdata
@@ -38,16 +63,53 @@ jobs:
       - name: Run actual image, font, OCR, serialization and recognition paths
         env:
           TESSDATA_PREFIX: ${{ github.workspace }}/build/tessdata
+          SCORER: ${{ matrix.scorer }}
         run: |
+          native_args=()
+          if [ "$SCORER" = native ]; then
+            native_args+=("-PnativeTemplateLibrary=$GITHUB_WORKSPACE/build/native-template/libnotelite_template.so")
+          fi
           bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle \
             -I tools/audiveris-port/test-mobile-desktop.gradle \
+            "${native_args[@]}" \
             :app:portProbe :app:embeddedOmrTest
       - name: Compare every exported score and verify acceptance gate
+        env:
+          SCORER: ${{ matrix.scorer }}
         run: |
           python3 tools/audiveris-port/test_verify_embedded_score.py
           python3 - <<'PY'
           from pathlib import Path
+          import json
+          import os
           import subprocess
+          import xml.etree.ElementTree as ET
+          suites = [ET.parse(path).getroot() for path in Path('app/build/test-results/embeddedOmrTest').glob('TEST-*.xml')]
+          if not suites or sum(int(suite.get('tests', '0')) for suite in suites) < 21:
+              raise SystemExit('The complete engine and template regression suites must execute')
+          if any(int(suite.get(key, '0')) for suite in suites for key in ('failures', 'errors', 'skipped')):
+              raise SystemExit('Full host acceptance does not allow failed or skipped tests')
+          statistics = Path('app/build/embedded-tests/native-template-statistics.json')
+          if not statistics.is_file():
+              raise SystemExit('Missing scoring implementation evidence')
+          evidence = json.loads(statistics.read_text())
+          native = os.environ['SCORER'] == 'native'
+          if evidence.get('requested') is not native or evidence.get('enabled') is not native:
+              raise SystemExit('The requested scoring implementation was not exercised')
+          if native:
+              if evidence.get('jniCheckEnabled') is not True:
+                  raise SystemExit('Native boundary checks must be enabled')
+              before, after = evidence['before'], evidence['after']
+              if len(before) != 4 or len(after) != 4:
+                  raise SystemExit('Incomplete native lifetime counters')
+              calls, pins, releases, copies = [end - start for start, end in zip(before, after)]
+              if calls <= 0 or pins <= 0 or pins != releases or not 0 <= copies <= pins:
+                  raise SystemExit('Full recognition did not execute and release actual native scoring')
+              diagnostics = '\n'.join(text for suite in suites for text in suite.itertext())
+              if any(marker in diagnostics for marker in ('WARNING in native method',
+                     'FATAL ERROR in native method', 'Calling other JNI functions in the scope')):
+                  raise SystemExit('JNI checking reported a native boundary violation')
+          print(json.dumps(evidence))
           exports = sorted(Path('app/build/embedded-tests').rglob('chula.mxl'))
           if len(exports) < 3:
               raise SystemExit('Expected repeat recognition and JNI-entry exports')
@@ -60,8 +122,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: embedded-engine-host-evidence
+          name: ${{ matrix.artifact }}
           path: |
             app/build/embedded-tests/
             app/build/port-probe/
             app/build/test-results/embeddedOmrTest/
+            build/native-template/
