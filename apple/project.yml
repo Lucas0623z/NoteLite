@@ -108,7 +108,11 @@ targets:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - NoteLiteUITests
+      - path: NoteLiteUITests
+        excludes: ["Fixtures/**"]
+      - path: NoteLiteUITests/Fixtures
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mobile.uitests
@@ -119,7 +123,11 @@ targets:
     type: bundle.ui-testing
     platform: macOS
     sources:
-      - NoteLiteUITests
+      - path: NoteLiteUITests
+        excludes: ["Fixtures/**"]
+      - path: NoteLiteUITests/Fixtures
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac.uitests

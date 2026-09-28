@@ -102,11 +102,65 @@ final class LibraryStore: ObservableObject {
     func sourceURL(_ record: ScoreRecord) -> URL? { storage?.sourceURL(for: record) }
 
     func practiceURL(_ record: ScoreRecord) -> URL? {
-        if record.isMusicXML { return sourceURL(record) }
-        return record.downloadedArtifacts.sorted().first(where: {
-            FileRules.musicXMLExtensions.contains(($0 as NSString).pathExtension.lowercased())
-        }).flatMap { artifactURL($0, record: record) }
+        practiceParts(record).first?.url
     }
+
+    func practiceParts(_ record: ScoreRecord) -> [PracticePart] {
+        if record.isMusicXML {
+            guard let url = sourceURL(record), FileManager.default.fileExists(atPath: url.path) else { return [] }
+            return [PracticePart(artifactName: nil, url: url, title: nil)]
+        }
+        let files = Set(record.downloadedArtifacts).filter {
+            FileRules.musicXMLExtensions.contains(($0 as NSString).pathExtension.lowercased())
+        }.sorted {
+            $0.compare($1, options: [.numeric, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX")) == .orderedAscending
+        }.compactMap { name -> (String, URL)? in
+            artifactURL(name, record: record).map { (name, $0) }
+        }
+        return files.enumerated().map { index, file in
+            PracticePart(artifactName: file.0, url: file.1,
+                         title: files.count > 1 ? "第 \(index + 1) 部分" : nil)
+        }
+    }
+
+    func practicePart(_ record: ScoreRecord, artifactName: String?) -> PracticePart? {
+        let parts = practiceParts(record)
+        // Old history predates part identity and always opened the first score.
+        if record.isMusicXML { return artifactName == nil ? parts.first : nil }
+        let name = artifactName ?? record.downloadedArtifacts.sorted().first {
+            FileRules.musicXMLExtensions.contains(($0 as NSString).pathExtension.lowercased())
+        }
+        return parts.first { $0.artifactName == name }
+    }
+
+    #if DEBUG
+    /// UI navigation tests provide real desktop exports without running OMR.
+    /// This import route and its launch argument do not exist in Release builds.
+    func importPracticeUITestFixture(_ data: Data) async {
+        struct Fixture: Decodable {
+            struct Artifact: Decodable { let name: String; let data: Data }
+            let source: Data
+            let artifacts: [Artifact]
+        }
+        let filename = "多部分练习样本.png"
+        guard let storage, !records.contains(where: { $0.filename == filename }) else { return }
+        do {
+            let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let source = directory.appendingPathComponent(filename)
+            try fixture.source.write(to: source)
+            guard let id = await importFiles([source]), let record = self.record(id) else { return }
+            let artifacts = fixture.artifacts.map { EmbeddedArtifact(name: $0.name, data: $0.data) }
+            try storage.installEmbeddedArtifacts(artifacts, for: record)
+            try update(id) {
+                $0.downloadedArtifacts = artifacts.map(\.name)
+                $0.phase = .ready
+            }
+        } catch { errorMessage = "无法载入练习测试样本：\(error.localizedDescription)" }
+    }
+    #endif
 
     func artifactURL(_ name: String, record: ScoreRecord) -> URL? {
         guard let url = try? storage?.artifactURL(name: name, for: record),

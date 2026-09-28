@@ -47,6 +47,8 @@ struct PracticeHistoryRecord: Codable, Identifiable {
     let completed: Bool
     let measureCount: Int
     let errors: [PracticeIssue]
+    var artifactName: String? = nil
+    var partTitle: String? = nil
     var errorCount: Int { errors.count }
 }
 
@@ -71,7 +73,11 @@ final class PracticeHistoryStore: ObservableObject {
 
     func latest(for id: UUID) -> PracticeHistoryRecord? { records.first { $0.scoreID == id } }
 
-    func save(report: [String: Any], for score: ScoreRecord) {
+    func latest(for id: UUID, part: PracticePart) -> PracticeHistoryRecord? {
+        records.first { $0.scoreID == id && $0.artifactName == part.artifactName }
+    }
+
+    func save(report: [String: Any], for score: ScoreRecord, part: PracticePart? = nil) {
         guard let fileURL else { return }
         do {
             // The renderer may represent a measure label as a number or as a string (e.g. pickups).
@@ -92,7 +98,8 @@ final class PracticeHistoryStore: ObservableObject {
                 title: report["title"] as? String ?? score.filename, date: Date(),
                 durationSeconds: max(0, report["durationSeconds"] as? Double ?? 0),
                 completed: report["completed"] as? Bool ?? false,
-                measureCount: max(0, report["measureCount"] as? Int ?? 0), errors: issues)
+                measureCount: max(0, report["measureCount"] as? Int ?? 0), errors: issues,
+                artifactName: part?.artifactName, partTitle: part?.title)
             let updated = Array(([record] + records).prefix(500))
             try JSONEncoder().encode(updated).write(to: fileURL, options: .atomic)
             records = updated
@@ -104,7 +111,7 @@ final class PracticeHistoryStore: ObservableObject {
 struct PracticeHistoryView: View {
     @EnvironmentObject private var history: PracticeHistoryStore
     @EnvironmentObject private var library: LibraryStore
-    @State private var practicing: ScoreRecord?
+    @State private var practicing: PracticeSelection?
 
     var body: some View {
         Group {
@@ -122,6 +129,7 @@ struct PracticeHistoryView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(record.title).font(.headline)
+                            if let part = record.partTitle { Text(part).font(.subheadline) }
                             Text(record.date, style: .date).font(.caption).foregroundStyle(.secondary)
                             Text("\(record.measureCount) 小节 · \(record.errorCount) 处记录\(record.completed ? "" : " · 未完成")")
                                 .font(.subheadline).foregroundStyle(.secondary)
@@ -132,12 +140,12 @@ struct PracticeHistoryView: View {
         }
         .navigationTitle("练习记录")
         #if os(iOS)
-        .fullScreenCover(item: $practicing) { score in
-            PracticeView(record: score, onDismiss: { practicing = nil })
+        .fullScreenCover(item: $practicing) { selection in
+            PracticeView(record: selection.score, part: selection.part, onDismiss: { practicing = nil })
         }
         #else
-        .sheet(item: $practicing) { score in
-            PracticeView(record: score, onDismiss: { practicing = nil })
+        .sheet(item: $practicing) { selection in
+            PracticeView(record: selection.score, part: selection.part, onDismiss: { practicing = nil })
                 .noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
         }
         #endif
@@ -151,6 +159,7 @@ struct PracticeHistoryView: View {
         List {
             Section {
                 Text(record.title).font(.title2.weight(.medium))
+                if let part = record.partTitle { Text(part).font(.headline) }
                 Text("\(Int(record.durationSeconds / 60)) 分 \(Int(record.durationSeconds) % 60) 秒 · \(record.measureCount) 小节")
                     .foregroundStyle(.secondary)
                 if !record.completed { Text("本次练习未完成；未演奏的部分未评分。").foregroundStyle(.secondary) }
@@ -167,9 +176,11 @@ struct PracticeHistoryView: View {
                     }.padding(.vertical, 6)
                 }
             }
-            if let score = library.record(record.scoreID), library.practiceURL(score) != nil {
+            if let score = library.record(record.scoreID),
+               let part = library.practicePart(score, artifactName: record.artifactName) {
                 Section {
-                    Button("再练一遍") { practicing = score }.buttonStyle(.borderedProminent)
+                    Button("再练一遍") { practicing = PracticeSelection(score: score, part: part) }
+                        .buttonStyle(.borderedProminent)
                 }
             }
         }.listStyle(.plain).navigationTitle("练习回顾")

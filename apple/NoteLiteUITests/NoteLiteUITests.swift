@@ -21,7 +21,8 @@ final class NoteLiteUITests: XCTestCase {
             app.launchEnvironment["DYLD_FALLBACK_LIBRARY_PATH"] = swiftPath
         }
         app.launch()
-        let score = app.descendants(matching: .any).matching(identifier: "score-row").firstMatch
+        let score = app.descendants(matching: .any).matching(identifier: "score-row")
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "demo", "demo")).firstMatch
         XCTAssertTrue(score.waitForExistence(timeout: 15), "Bundled MusicXML must enter the real library importer")
         attach(app, name: "Library")
         score.tap()

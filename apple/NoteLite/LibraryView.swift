@@ -341,13 +341,15 @@ struct ScoreDetailView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var history: PracticeHistoryStore
     let record: ScoreRecord
-    @State private var practicing = false
+    @State private var practicing: PracticePart?
+    @State private var choosingPart = false
     @State private var showingOriginal = false
     @State private var showingSettings = false
     @State private var confirmingRestart = false
     @State private var confirmingCleanup = false
     private var active: Bool { library.activeIDs.contains(record.id) }
     private var canPractice: Bool { library.practiceURL(record) != nil }
+    private var practiceParts: [PracticePart] { library.practiceParts(record) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -389,15 +391,22 @@ struct ScoreDetailView: View {
             }
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $practicing) {
-            PracticeView(record: record, onDismiss: { practicing = false })
+        .fullScreenCover(item: $practicing) { part in
+            PracticeView(record: record, part: part, onDismiss: { practicing = nil })
         }
         #else
-        .sheet(isPresented: $practicing) {
-            PracticeView(record: record, onDismiss: { practicing = false })
+        .sheet(item: $practicing) { part in
+            PracticeView(record: record, part: part, onDismiss: { practicing = nil })
                 .noteLiteSheetSize(idealWidth: 1440, idealHeight: 900)
         }
         #endif
+        .confirmationDialog("选择要练习的部分", isPresented: $choosingPart, titleVisibility: .visible) {
+            ForEach(practiceParts) { part in
+                Button(part.title ?? "开始练习") { practicing = part }
+                    .accessibilityIdentifier("practice-part-" + part.id)
+            }
+            Button("取消", role: .cancel) {}
+        }
         .sheet(isPresented: $showingOriginal) {
             NavigationStack {
                 if let url = library.sourceURL(record) {
@@ -441,12 +450,19 @@ struct ScoreDetailView: View {
                 Text(canPractice ? "曲谱已就绪" : "原稿已保存在此设备").font(.headline)
             }
             if canPractice {
-                Button { practicing = true } label: {
+                Button {
+                    if practiceParts.count == 1 { practicing = practiceParts.first }
+                    else { choosingPart = true }
+                } label: {
                     Label(history.latest(for: record.id) == nil ? "开始练习" : "继续练习", systemImage: "play")
                         .frame(minHeight: 24)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .accessibilityIdentifier("practice-start")
+                if practiceParts.count > 1 {
+                    Text("这份曲谱包含 \(practiceParts.count) 个部分，可分别练习。")
+                        .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
+                }
                 Text("乐器根据谱面信息判断，可在练习前更改。")
                     .font(.caption).foregroundStyle(NoteLiteTheme.secondary)
             } else {
