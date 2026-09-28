@@ -63,9 +63,10 @@ jobs:
       - name: Check the native scoring boundary with JNI diagnostics
         if: matrix.scorer == 'native'
         run: |
+          set -euo pipefail
           bash ./gradlew --no-daemon \
             "-PnativeTemplateLibrary=$GITHUB_WORKSPACE/build/native-template/libnotelite_template.so" \
-            :app:nativeTemplateCheckedTest
+            :app:nativeTemplateCheckedTest 2>&1 | tee build/native-template/checked-jni.log
       - name: Run actual image, font, OCR, serialization and recognition paths
         env:
           TESSDATA_PREFIX: ${{ github.workspace }}/build/tessdata
@@ -128,6 +129,7 @@ jobs:
                   if calls <= 0 or pins <= 0 or pins != releases or not 0 <= copies <= pins:
                       raise SystemExit('Actual native scoring and balanced releases are required in both phases')
               diagnostics = '\n'.join(text for suite in suites + checked for text in suite.itertext())
+              diagnostics += Path('build/native-template/checked-jni.log').read_text()
               if any(marker in diagnostics for marker in ('WARNING in native method',
                      'FATAL ERROR in native method', 'Calling other JNI functions in the scope')):
                   raise SystemExit('JNI checking reported a native boundary violation')
