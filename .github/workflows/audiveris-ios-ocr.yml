@@ -3,7 +3,7 @@ name: Audiveris iOS native OCR
 on:
   workflow_dispatch:
   push:
-    branches: [codex/audiveris-ios-builds]
+    branches: [codex/audiveris-ios-builds, codex/audiveris-ios-ocr-builds]
     paths:
       - tools/audiveris-port/build-ios-ocr.sh
       - tools/audiveris-port/ocr-smoke.cpp

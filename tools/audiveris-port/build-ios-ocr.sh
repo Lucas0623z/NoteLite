@@ -114,13 +114,14 @@ if [ ! -f "$repo/app/build/ios-jni/jnileptonica.cpp" ]; then
   (cd "$repo" && bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle :app:portJNI)
 fi
 native_flags=(-target "$target" -isysroot "$sysroot" -O2 -std=c++17 -fPIC
-              "-I$prefix/include" "-I$JAVA_HOME/include" "-I$JAVA_HOME/include/darwin" -DJAVACPP_STATIC)
+              "-I$prefix/include" "-I$JAVA_HOME/include" "-I$JAVA_HOME/include/darwin")
 for library in jnijavacpp jnileptonica jnitesseract; do
-  flags=()
+  # macOS ships Bash 3.2, whose nounset mode rejects even a declared empty array.
+  flags=(-DJAVACPP_STATIC)
   if [ "$library" != jnijavacpp ]; then
     # The original generated files use the dynamic-library entry name. Give
     # each one the statically linked JNI name recognized by an embedded JVM.
-    flags=("-DJNI_OnLoad=JNI_OnLoad_$library" "-DJNI_OnUnload=JNI_OnUnload_$library")
+    flags+=("-DJNI_OnLoad=JNI_OnLoad_$library" "-DJNI_OnUnload=JNI_OnUnload_$library")
   fi
   "$cxx" "${native_flags[@]}" "${flags[@]}" -c "$repo/app/build/ios-jni/$library.cpp" -o "$build_root/$library.o"
   xcrun --sdk "$sdk" ar rcs "$prefix/lib/lib$library.a" "$build_root/$library.o"
