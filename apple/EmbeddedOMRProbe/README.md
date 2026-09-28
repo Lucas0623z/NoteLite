@@ -40,6 +40,22 @@ bytecode are rejected. Java engine JARs, classifier data, fonts and traineddata
 are bundled before the app runs. There is no runtime network or subprocess
 request in the probe.
 
+The FlatLaf 3.5.4 API JAR also carries six desktop UI native binaries.
+`prepare-embedded-jars.py` removes only those optional entries and verifies
+that every retained Java class, resource, and license stays byte-identical.
+The bridge disables FlatLaf native loading for this headless runtime. Other
+unexpected native binaries or preview classes fail the build. Original and
+packaged JAR hashes and removed entries are recorded in
+`java-packaging-report.json` in the resources and build evidence.
+
+This staged-only bundle was validated on Windows with OpenJDK 21.0.12.1,
+using the packaged engine JAR instead of Gradle's loose application classes.
+All 56 packaged JARs passed the native/preview audit after the FlatLaf removal.
+The full font, TIFF, JPEG, PDF, OCR and serialization probe passed, and the
+resulting `chula` MusicXML/MIDI exactly matched the desktop semantic reference
+(151 pitched notes, 19 measures, 220 MIDI note-on events). This validates Java
+packaging and resource lookup; it is not evidence of iOS execution.
+
 ## Run on iPhone and iPad simulators
 
 ```sh

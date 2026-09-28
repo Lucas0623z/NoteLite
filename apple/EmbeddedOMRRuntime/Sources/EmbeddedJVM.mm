@@ -224,6 +224,7 @@ static NSString *pendingException(JNIEnv *environment) {
                 [@"-Dsun.boot.library.path=" stringByAppendingString:[runtime stringByAppendingPathComponent:@"lib"]],
                 [@"-Djava.library.path=" stringByAppendingString:[runtime stringByAppendingPathComponent:@"lib"]],
                 @"-Djava.awt.headless=true", @"-Dfile.encoding=UTF-8",
+                @"-Dflatlaf.useNativeLibrary=false",
                 @"-Dnotelite.omr.jniHost=true",
                 [@"-Dnotelite.appHome=" stringByAppendingString:sandbox],
                 [@"-Duser.home=" stringByAppendingString:sandbox],

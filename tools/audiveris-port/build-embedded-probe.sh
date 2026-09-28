@@ -37,6 +37,9 @@ cp "$repo/apple/EmbeddedOMRProbe/project.yml" "$project/project.yml"
     -I tools/audiveris-port/oracle.gradle -I tools/audiveris-port/embedded-probe.gradle \
     "-PembeddedProbeStage=$resources" :app:stageEmbeddedProbe
 ) 2>&1 | tee "$output/evidence/java-build.log"
+python3 "$repo/tools/audiveris-port/prepare-embedded-jars.py" "$resources" \
+  2>&1 | tee "$output/evidence/java-packaging.log"
+cp "$resources/java-packaging-report.json" "$output/evidence/"
 cp -R "$runtime/runtime" "$resources/runtime"
 cp -R "$ocr/share/tessdata" "$resources/tessdata"
 if [ -d "$ocr/share/licenses" ]; then cp -R "$ocr/share/licenses" "$resources/licenses/ocr"; fi
