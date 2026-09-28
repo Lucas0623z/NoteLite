@@ -9,9 +9,18 @@ on:
         default: device
         type: choice
         options: [device, simulator]
+  push:
+    branches: ["codex/audiveris-ios-builds"]
+    paths:
+      - "tools/audiveris-port/build-mobile-jdk.sh"
+      - "tools/audiveris-port/mobile-desktop/**"
+      - "tools/audiveris-port/patch-mobile-desktop.py"
+      - ".github/workflows/audiveris-mobile-runtime.yml"
   pull_request:
     paths:
       - "tools/audiveris-port/build-mobile-jdk.sh"
+      - "tools/audiveris-port/mobile-desktop/**"
+      - "tools/audiveris-port/patch-mobile-desktop.py"
       - ".github/workflows/audiveris-mobile-runtime.yml"
 
 permissions:

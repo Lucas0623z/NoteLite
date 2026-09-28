@@ -71,6 +71,20 @@ ffi_source="$work_root/libffi-$ffi_version"
 ffi_build="$work_root/libffi-build"
 (
   cd "$ffi_source"
+  # libffi 3.5.2 still generates armv7 configuration even with --only-ios.
+  # Xcode 26 no longer links armv7; both of our supported targets are arm64.
+  python3 - <<'PY'
+from pathlib import Path
+path = Path("generate-darwin-source-and-headers.py")
+source = path.read_text()
+for call in ("copy_src_platform_files(ios_device_armv7_platform)",
+             "build_target(ios_device_armv7_platform, platform_headers)"):
+    line = "        " + call + "\n"
+    if source.count(line) != 1:
+        raise SystemExit("Unexpected libffi generator context: " + call)
+    source = source.replace(line, "")
+path.write_text(source)
+PY
   python3 generate-darwin-source-and-headers.py --only-ios
   xcodebuild -project libffi.xcodeproj -scheme libffi-iOS -sdk "$sdk" \
     -configuration Release -arch arm64 "SYMROOT=$ffi_build" \
