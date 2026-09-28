@@ -31,6 +31,33 @@ def main() -> None:
     if commit != SOURCE_COMMIT:
         raise SystemExit(f"Expected {SOURCE_COMMIT}, found {commit}")
 
+    # Zero's code buffers contain ZeroEntry records pointing at precompiled
+    # C++ functions (assembler_zero.hpp, zeroInterpreterGenerator.hpp and
+    # entry_zero.hpp), not emitted machine code. The upstream generic code
+    # cache still requests executable memory, which a signed iOS process
+    # cannot grant without a JIT entitlement. Keep these data buffers RW.
+    # replace() asserts that this pinned allocation call appears exactly once.
+    replace(root, "src/hotspot/share/memory/memoryReserver.cpp",
+            "  return MemoryReserver::reserve(nullptr /* requested_address */,\n"
+            "                                 size,\n"
+            "                                 alignment,\n"
+            "                                 page_size,\n"
+            "                                 ExecMem,\n"
+            "                                 mtCode);",
+            "  // Zero stores interpreter entry records here, not machine code.\n"
+            "  // iOS must not require a JIT entitlement for those data buffers.\n"
+            "#if defined(__IOS__) && defined(ZERO)\n"
+            "  const bool executable = false;\n"
+            "#else\n"
+            "  const bool executable = ExecMem;\n"
+            "#endif\n"
+            "  return MemoryReserver::reserve(nullptr /* requested_address */,\n"
+            "                                 size,\n"
+            "                                 alignment,\n"
+            "                                 page_size,\n"
+            "                                 executable,\n"
+            "                                 mtCode);")
+
     replace(root, "make/modules/java.desktop/Lib.gmk",
             "ifeq ($(call isTargetOs, android ios), false)",
             "ifeq ($(call isTargetOs, android), false)")

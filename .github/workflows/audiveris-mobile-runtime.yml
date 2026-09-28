@@ -10,7 +10,7 @@ on:
         type: choice
         options: [device, simulator, both]
   push:
-    branches: ["codex/audiveris-ios-builds", "codex/audiveris-ios-runtime-builds"]
+    branches: ["codex/audiveris-ios-builds", "codex/audiveris-ios-runtime-*"]
     paths:
       - "tools/audiveris-port/build-mobile-jdk.sh"
       - "tools/audiveris-port/build-mobile-jdk-tools.sh"

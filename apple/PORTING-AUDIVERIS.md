@@ -111,6 +111,8 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 静态链接还隔离了 JDK 自带 IJG JPEG 与 OCR 的 libjpeg-turbo：JDK JPEG 的 102 个 C 符号加独立前缀，JNI 名称保留，防止同一进程中两种实现错误互相调用。JDK 使用外部 zlib API，避免重复打包到 `libzip.a`。
 
+固定上游的通用代码缓存仍请求可执行内存，但 Zero 不生成机器码：`assembler_zero.hpp` 说明其代码缓冲区保存入口记录，`zeroInterpreterGenerator.hpp` 写入 `ZeroEntry`，`entry_zero.hpp` 再调用已经编译的 C++ 函数。因此补丁仅在 `__IOS__ && ZERO` 条件下把 `CodeMemoryReserver` 的这块存储设为可读写，不请求执行权限，也不添加 JIT entitlement。其他平台和 VM 类型保留原行为；补丁检查原分配调用必须恰好出现一次。这项修改仍需随嵌入式运行时实际验证。
+
 ### 已执行的宿主适配测试
 
 2026-09-28，在 Windows Java 21 上用相同的六个适配类替换 `java.desktop` 平台入口，实际执行了平台探针和完整进程内识别测试：
