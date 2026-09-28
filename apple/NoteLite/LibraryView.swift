@@ -116,7 +116,7 @@ struct LibraryView: View {
         )) {
             Button("好", role: .cancel) { library.errorMessage = nil }
         } message: { Text(library.errorMessage ?? "") }
-        .confirmationDialog("删除这份本地曲谱及下载结果？", isPresented: Binding(
+        .confirmationDialog("删除这份曲谱及识谱结果？", isPresented: Binding(
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }
         ), titleVisibility: .visible) {
             Button("删除本地文件", role: .destructive) {
@@ -125,7 +125,7 @@ struct LibraryView: View {
             }
             Button("取消", role: .cancel) { deleting = nil }
         } message: {
-            Text("已有服务器任务会先被清理；仍在运行或无法连接时保留本地记录，请稍后再试。")
+            Text(deleting?.job != nil ? "已有服务器任务会先被清理；仍在运行或无法连接时保留本地记录，请稍后再试。" : "将删除保存在这台设备上的原稿和识谱结果。")
         }
         .task { library.resumePending() }
         .onChange(of: library.records.map(\.id)) { ids in
