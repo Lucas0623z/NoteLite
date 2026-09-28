@@ -127,7 +127,9 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 [CI 36417119007](https://github.com/Lucas0623z/NoteLite/actions/runs/36417119007) 在模拟器中通过了真实字体 / HarfBuzz 排版及 PNG 输出，随后 JPEG 写入抛出原生参数空指针异常。源码定位到 Zero 的 JNI 参数描述：`NativeSignatureIterator` 默认把 byte / boolean / short / char 交给 `pass_int`，但 [Apple arm64 ABI](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms) 按参数实际宽度紧密排列栈参数。`JPEGImageWriter.writeImage` 超出寄存器数量后的三个连续 boolean 因此被错误描述成三个 int；原生 `componentIds` 在栈偏移 72 读到了 Java 的空 `scanInfo` 指针，恰好触发该异常。
 
-补丁仅在 iOS arm64 的 Zero 中按完整 Java 签名生成 libffi 参数类型，保留有符号 byte / short、无符号 boolean / char，以及数组和对象指针；同时允许参数读取器从一个 Java 栈槽中读取 1 / 2 字节值。返回类型原本已保留这些区别，无需更改。静态方法与实例方法都保留 `JNIEnv*` 加 class / receiver 两个隐含参数。固定源码应用和重复应用拒绝检查通过；[重建 CI 36419489365](https://github.com/Lucas0623z/NoteLite/actions/runs/36419489365) 已通过 device / simulator 两种目标的实际编译，以及独立的宿主完整引擎测试。混合参数 JNI 回归和原 JPEG 探针仍需在更新后的嵌入应用中执行。
+补丁仅在 iOS arm64 的 Zero 中按完整 Java 签名生成 libffi 参数类型，保留有符号 byte / short、无符号 boolean / char，以及数组和对象指针；同时允许参数读取器从一个 Java 栈槽中读取 1 / 2 字节值。返回类型原本已保留这些区别，无需更改。静态方法与实例方法都保留 `JNIEnv*` 加 class / receiver 两个隐含参数。固定源码应用和重复应用拒绝检查通过；[重建 CI 36419489365](https://github.com/Lucas0623z/NoteLite/actions/runs/36419489365) 已通过 device / simulator 两种目标的实际编译，以及独立的宿主完整引擎测试。
+
+[模拟器 CI 36420435044](https://github.com/Lucas0623z/NoteLite/actions/runs/36420435044) 随后实际通过混合 JNI 参数的静态与实例调用、原 ImageIO JPEG 和 JavaCPP JPEG 测试，确认上述 ABI 修复生效。13 个独立检查中 12 个通过：真实音乐字体、PNG / JPEG / TIFF、PDF 栅格化、JAXB / ProxyMusic 与库加载均已执行。剩余 legacy OCR 在 `TessBaseAPI.allocate()` 处报告缺失 JNI 方法。原生成器只扫描 global 包，遗漏 C++ 对象包装类；独立使用 `javap` 读取锁定 API JAR，并直接检查旧 Mach-O 归档，确认 100 个类的 6,836 个 native 声明中缺失 1,620 个绑定。新生成器扫描完整包，构建与最终链接均增加全量声明覆盖检查；仍需用重建产物执行 OCR 和完整曲谱识别。
 
 ### 已执行的宿主适配测试
 
