@@ -242,12 +242,16 @@ public interface DistanceTable
     {
         private final Table.Short table;
 
+        /** Contiguous backing storage, or null for a view that must retain Java access semantics. */
+        private final short[] nativeValues;
+
         public Short (int width,
                       int height,
                       int normalizer)
         {
             super(normalizer);
             table = new Table.Short(width, height);
+            nativeValues = table.getValues();
         }
 
         protected Short (Table.Short table,
@@ -255,6 +259,18 @@ public interface DistanceTable
         {
             super(normalizer);
             this.table = table;
+            short[] contiguous;
+            try {
+                contiguous = table.getValues();
+            } catch (UnsupportedOperationException view) {
+                contiguous = null;
+            }
+            nativeValues = contiguous;
+        }
+
+        short[] nativeValues ()
+        {
+            return nativeValues;
         }
 
         @Override

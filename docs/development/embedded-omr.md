@@ -91,8 +91,41 @@ running sums, clipping, unknown-distance handling and the empty-support
 sentinel. This removes double-bit conversion calls from that inner loop.
 Production bytecode matched the frozen original Java oracle on all 10,368
 score pairs, 1,296 anchor cases and 57 distance-transform cases. CI also runs
-14,592 direct score-bit comparisons covering signed distances, ROI views,
+21,888 direct score-bit pairs covering signed distances, ROI views,
 clipping, six weight configurations and both point orders, plus explicit
 sentinel and order-sensitive regressions. An iOS speedup and complete score
 exports still require the next actual simulator run; host timings do not
 establish Zero performance.
+
+The follow-up iPhone run `36429216883` still reached the HEADS limit (300.043
+wall seconds, 237.103 CPU seconds, 70 milliseconds of GC). Its later samples
+remained in template iteration and distance-table reads. The embedded host now
+registers a C++ implementation of the same ordered scoring arithmetic. Every
+call snapshots the current point list, reads its fields before pinning the
+distance array, performs bounded pure computation, then releases the array.
+No point list is cached. Integer tables, ROI views and custom short-table
+subclasses retain their Java behavior. Registration failure stops recognition.
+
+The scorer builds with `-O2 -fno-fast-math -ffp-contract=off`. The probe requires
+actual native call/pin/release evidence and exact small scoring cases before
+the full score. It also writes and reads a real diagnostic MIDI file, comparing
+track, tick and message bytes. These component checks add to full MusicXML/MIDI
+parity, repeated-thread recognition and the two multipage document checks.
+
+Host validation separates two JVMs: `embeddedOmrTest` accepts
+`-PnativeTemplateLibrary=/absolute/library` to run the complete pipeline through
+the registered scorer, while `nativeTemplateCheckedTest` requires that option
+and enables `-Xcheck:jni` for scoring and boundary regressions. Each class gets a
+fresh JVM. This separation avoids the JNI checker's guarded copies on every
+small AWT rectangle during full-image rendering. Both tasks record their actual
+enabled state and before/after native counters; the checked task also records
+the real VM flag. Checked workers establish headless mode and an explicit test
+sandbox before engine classes initialize, avoiding unrelated desktop shell
+discovery. The ten checked tests passed with no JNI warnings in the complete
+host console log: 21,888 public scoring comparisons and 945 boundary pairs,
+including mutable point lists, ROI geometry, rejected arguments and concurrent
+GC. The complete native host engine made 6,043,635 scoring calls with matching
+pin/release counts and no copies; all five PNG exports and both movements of
+each PDF/TIFF export matched the original complete MusicXML/MIDI semantics.
+Default host tests still exercise Java scoring. Native iOS speed and complete
+exports remain subject to the next full acceptance run.

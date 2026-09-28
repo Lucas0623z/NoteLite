@@ -117,6 +117,7 @@ public final class PortabilityProbe {
         String fontHash;
         byte[] jpeg;
         byte[] tiff;
+        long[] nativeScoring = new long[4];
     }
 
     public static void main(String[] args) throws Exception {
@@ -152,6 +153,12 @@ public final class PortabilityProbe {
                 }
             }
         });
+
+        if (nativeHost) gates.run("native-template-scoring", () -> {
+            state.nativeScoring = checkNativeTemplateScoring();
+        });
+
+        gates.run("midi-file-roundtrip", () -> checkMidiRoundtrip(output));
 
         gates.run("awt-font-raster", () -> {
             if (!GraphicsEnvironment.isHeadless()) throw new IllegalStateException("Headless mode required");
@@ -283,6 +290,13 @@ public final class PortabilityProbe {
         String report = "{\"status\":" + quote(gates.passed() ? "SUCCESS" : "FAILED")
                 + ",\"jniMixedPrimitiveArgumentsRequired\":" + nativeHost
                 + ",\"jniMixedPrimitiveArguments\":" + gates.passed("jni-mixed-primitives")
+                + ",\"nativeTemplateScoringRequired\":" + nativeHost
+                + ",\"nativeTemplateScoring\":" + gates.passed("native-template-scoring")
+                + ",\"nativeTemplateScoringCalls\":" + state.nativeScoring[0]
+                + ",\"nativeTemplatePins\":" + state.nativeScoring[1]
+                + ",\"nativeTemplateReleases\":" + state.nativeScoring[2]
+                + ",\"nativeTemplateCopiedPins\":" + state.nativeScoring[3]
+                + ",\"midiFileRoundtrip\":" + gates.passed("midi-file-roundtrip")
                 + ",\"awtFontRaster\":" + gates.passed("awt-font-raster")
                 + ",\"foregroundPixels\":" + state.foreground
                 + ",\"fontRasterSHA256\":" + (state.fontHash == null ? "null" : quote(state.fontHash))
@@ -311,6 +325,96 @@ public final class PortabilityProbe {
             }
         }
         return image;
+    }
+
+    private static long[] checkNativeTemplateScoring() throws Exception {
+        if (!com.notelite.omr.image.NativeTemplateScorer.isEnabled()) {
+            throw new IllegalStateException("Native template scoring was not registered");
+        }
+        long[] before = com.notelite.omr.image.NativeTemplateScorer.statistics();
+        var table = new com.notelite.omr.image.DistanceTable.Short(1, 1, 3);
+        var template = new com.notelite.omr.image.Template(com.notelite.omr.glyph.Shape.NOTEHEAD_BLACK,
+                com.notelite.omr.ui.symbol.MusicFamily.Bravura, 20, 1, 1,
+                new ArrayList<>(List.of(new com.notelite.omr.image.PixelDistance(0, 0, 0))),
+                new java.awt.Rectangle(0, 0, 1, 1));
+        var field = com.notelite.omr.image.Template.class.getDeclaredField("constants");
+        field.setAccessible(true);
+        Object constants = field.get(null);
+        double[] weights = new double[3];
+        String[] names = {"foreWeight", "backWeight", "holeWeight"};
+        for (int i = 0; i < names.length; i++) {
+            var weightField = constants.getClass().getDeclaredField(names[i]);
+            weightField.setAccessible(true);
+            weights[i] = ((com.notelite.omr.constant.Constant.Double) weightField.get(constants)).getValue();
+        }
+        for (double expectedDistance : new double[]{-3, -0.0, 0, 2}) {
+            template.getKeyPoints().set(0, new com.notelite.omr.image.PixelDistance(0, 0, expectedDistance));
+            for (int actualDistance : new int[]{-32768, -2, -1, 0, 1, 32767}) {
+                table.setValue(0, 0, actualDistance);
+                double weight = expectedDistance == 0 ? weights[0]
+                        : expectedDistance > 0 ? weights[1] : weights[2];
+                double binaryDistance = Math.abs((actualDistance == 0 ? 0.0 : 1.0)
+                        - (expectedDistance == 0 ? 0.0 : 1.0));
+                double score = actualDistance == -1 || weight == 0 ? Double.MAX_VALUE
+                        : (weight * binaryDistance) / weight;
+                double hole = expectedDistance < 0 && actualDistance != -1 && actualDistance != 0 ? 1.0 : 0.0;
+                if (Double.doubleToRawLongBits(template.evaluate(0, 0, null, table)) != Double.doubleToRawLongBits(score)
+                        || Double.doubleToRawLongBits(template.evaluateHole(0, 0, null, table)) != Double.doubleToRawLongBits(hole)) {
+                    throw new IllegalStateException("Native template signed-distance or mutation result differs");
+                }
+            }
+        }
+        template.getKeyPoints().clear();
+        if (template.evaluate(0, 0, null, table) != Double.MAX_VALUE
+                || Double.doubleToRawLongBits(template.evaluateHole(0, 0, null, table)) != 0) {
+            throw new IllegalStateException("Native empty template result differs");
+        }
+        long[] after = com.notelite.omr.image.NativeTemplateScorer.statistics();
+        long[] delta = new long[4];
+        for (int i = 0; i < delta.length; i++) delta[i] = after[i] - before[i];
+        if (delta[0] < 50 || delta[1] == 0 || delta[1] != delta[2] || delta[3] != 0) {
+            throw new IllegalStateException("Native template path, balanced releases, or zero-copy storage not proven");
+        }
+        return delta;
+    }
+
+    private static void checkMidiRoundtrip(Path output) throws Exception {
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var tempoTrack = sequence.createTrack();
+        var tempo = new javax.sound.midi.MetaMessage();
+        tempo.setMessage(0x51, new byte[]{7, (byte)0xa1, 0x20}, 3);
+        tempoTrack.add(new javax.sound.midi.MidiEvent(tempo, 0));
+        var notes = sequence.createTrack();
+        for (int index = 0; index < 2; index++) {
+            var on = new javax.sound.midi.ShortMessage(javax.sound.midi.ShortMessage.NOTE_ON, 3, 60 + 4 * index, 90);
+            var off = new javax.sound.midi.ShortMessage(javax.sound.midi.ShortMessage.NOTE_OFF, 3, 60 + 4 * index, 0);
+            notes.add(new javax.sound.midi.MidiEvent(on, 960L * index));
+            notes.add(new javax.sound.midi.MidiEvent(off, 960L * index + 480));
+        }
+        Path midi = output.resolve("diagnostic-midi.mid");
+        if (javax.sound.midi.MidiSystem.write(sequence, 1, midi.toFile()) <= 0) {
+            throw new IllegalStateException("MIDI type-1 writer unavailable");
+        }
+        var decoded = javax.sound.midi.MidiSystem.getSequence(midi.toFile());
+        if (decoded.getDivisionType() != sequence.getDivisionType()
+                || decoded.getResolution() != sequence.getResolution()
+                || !midiEvents(decoded).equals(midiEvents(sequence))) {
+            throw new IllegalStateException("MIDI roundtrip changed track, tick or message bytes");
+        }
+    }
+
+    private static List<String> midiEvents(javax.sound.midi.Sequence sequence) {
+        List<String> events = new ArrayList<>();
+        var tracks = sequence.getTracks();
+        for (int index = 0; index < tracks.length; index++) {
+            events.add("track:" + index);
+            for (int item = 0; item < tracks[index].size(); item++) {
+                var event = tracks[index].get(item);
+                if (event.getMessage() instanceof javax.sound.midi.MetaMessage meta && meta.getType() == 0x2f) continue;
+                events.add(index + ":" + event.getTick() + ":" + HexFormat.of().formatHex(event.getMessage().getMessage()));
+            }
+        }
+        return events;
     }
 
     private static long countDark(BufferedImage image) {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 NoteLite contributors.
 #import "EmbeddedJVM.h"
+#include "TemplateScorer.hpp"
 #include <jni.h>
 #include <dlfcn.h>
 #include <cerrno>
@@ -387,6 +388,11 @@ static NSString *pendingException(JNIEnv *environment) {
 
         NSLog(@"EMBEDDED_OMR_PROBE_STAGE java-component-and-score-tests");
         NSString *result = nil;
+        if (!OMRRegisterTemplateScorer(environment)) {
+            setError(error, pendingException(environment) ?: @"Could not register native template scoring");
+            if (detach) embeddedVM->DetachCurrentThread();
+            return nil;
+        }
         jclass probe = environment->FindClass(entryClass);
         NSString *exception = pendingException(environment);
         if (probe && !exception) {

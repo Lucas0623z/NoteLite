@@ -122,6 +122,15 @@ if not report.get('sameProcessJNI') or 'Zero' not in report.get('javaVM', ''):
 components = report.get('components', {})
 if not components.get('jniMixedPrimitiveArgumentsRequired') or not components.get('jniMixedPrimitiveArguments'):
     raise SystemExit('The real mixed-primitive JNI stack ABI check did not pass')
+if not components.get('nativeTemplateScoringRequired') or not components.get('nativeTemplateScoring'):
+    raise SystemExit('The registered native template scorer was not exercised')
+if (components.get('nativeTemplateScoringCalls', 0) < 50
+        or components.get('nativeTemplatePins', 0) <= 0
+        or components.get('nativeTemplatePins') != components.get('nativeTemplateReleases')
+        or components.get('nativeTemplateCopiedPins') != 0):
+    raise SystemExit('Native scorer calls, balanced releases, or direct array access not proven')
+if not components.get('midiFileRoundtrip'):
+    raise SystemExit('The real MIDI file reader/writer check did not pass')
 if not report.get('cancelledBeforeVMStart'):
     raise SystemExit('The native pre-entry cancellation gate did not pass')
 primary = json.load(open(sys.argv[2]))

@@ -234,6 +234,7 @@ test {
     exclude '**/org/notelite/omr/jaxb/facade/**'
     // Full transcription runs separately with a fresh sandbox and bundled OCR models.
     exclude '**/EmbeddedOmrEngineTest*'
+    exclude '**/NativeTemplateBoundaryTest*'
 }
 
 tasks.register('embeddedOmrTest', Test) {
@@ -248,8 +249,44 @@ tasks.register('embeddedOmrTest', Test) {
     }
     workingDir = project.projectDir
     maxHeapSize = '3g'
+    // Each class owns isolated engine constants and native registration state.
+    forkEvery = 1
     systemProperty 'notelite.embeddedTestRoot', layout.buildDirectory.dir('embedded-tests').get().asFile.absolutePath
     systemProperty 'notelite.embeddedTestInput', rootProject.file('data/examples/chula.png').absolutePath
+    if (providers.gradleProperty('nativeTemplateLibrary').isPresent()) {
+        systemProperty 'notelite.nativeTemplateLibrary', providers.gradleProperty('nativeTemplateLibrary').get()
+    }
+    testLogging.showStandardStreams = true
+}
+
+tasks.register('nativeTemplateCheckedTest', Test) {
+    description = 'Exercise actual template JNI with checked calls, without large AWT raster copies'
+    group = 'verification'
+    dependsOn tasks.named('testClasses')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter {
+        includeTestsMatching 'com.notelite.omr.image.TemplateEvaluationTest'
+        includeTestsMatching 'com.notelite.omr.image.NativeTemplateBoundaryTest'
+    }
+    forkEvery = 1
+    workingDir = project.projectDir
+    jvmArgs '-Xcheck:jni'
+    // Establish the embedded environment before AWT or WellKnowns initializes.
+    // Desktop shell-folder discovery is unrelated to this checked JNI boundary.
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'notelite.appHome', layout.buildDirectory.dir('native-template-checked-home').get().asFile.absolutePath
+    systemProperty 'notelite.requireCheckedTemplate', 'true'
+    systemProperty 'notelite.embeddedTestRoot', layout.buildDirectory.dir('embedded-tests').get().asFile.absolutePath
+    if (providers.gradleProperty('nativeTemplateLibrary').isPresent()) {
+        systemProperty 'notelite.nativeTemplateLibrary', providers.gradleProperty('nativeTemplateLibrary').get()
+    }
+    doFirst {
+        if (!providers.gradleProperty('nativeTemplateLibrary').isPresent()) {
+            throw new GradleException('nativeTemplateCheckedTest requires -PnativeTemplateLibrary=/absolute/library')
+        }
+        layout.buildDirectory.dir('native-template-checked-home').get().asFile.mkdirs()
+    }
     testLogging.showStandardStreams = true
 }
 

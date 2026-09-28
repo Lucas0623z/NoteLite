@@ -10,6 +10,8 @@ import com.notelite.omr.image.Anchored.Anchor;
 import com.notelite.omr.ui.symbol.MusicFamily;
 
 import org.junit.Test;
+import org.junit.BeforeClass;
+import org.junit.AfterClass;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -25,6 +27,43 @@ import static org.junit.Assert.assertTrue;
 /** Checks the exact score contract of the original binary-distance calculation. */
 public class TemplateEvaluationTest
 {
+    private static long[] nativeBefore;
+
+    @BeforeClass
+    public static void loadRequestedNativeScorer ()
+    {
+        final String library = System.getProperty("notelite.nativeTemplateLibrary");
+        if (library != null) {
+            System.load(java.nio.file.Path.of(library).toAbsolutePath().toString());
+            assertTrue(NativeTemplateScorer.isEnabled());
+            nativeBefore = NativeTemplateScorer.statistics();
+        }
+        if (Boolean.getBoolean("notelite.requireCheckedTemplate")) {
+            assertTrue(NativeTemplateScorer.isEnabled());
+            assertTrue(java.lang.management.ManagementFactory.getRuntimeMXBean()
+                    .getInputArguments().contains("-Xcheck:jni"));
+        }
+    }
+
+    @AfterClass
+    public static void recordCheckedBoundaryEvidence () throws Exception
+    {
+        if (!Boolean.getBoolean("notelite.requireCheckedTemplate")) return;
+        final long[] after = NativeTemplateScorer.statistics();
+        assertTrue(after[0] > nativeBefore[0]);
+        assertTrue(after[1] > nativeBefore[1]);
+        assertEquals(after[1] - nativeBefore[1], after[2] - nativeBefore[2]);
+        final boolean checked = java.lang.management.ManagementFactory.getRuntimeMXBean()
+                .getInputArguments().contains("-Xcheck:jni");
+        final String report = "{\"requested\":true,\"enabled\":" + NativeTemplateScorer.isEnabled()
+                + ",\"jniCheckEnabled\":" + checked + ",\"scorePairs\":21888"
+                + ",\"before\":" + java.util.Arrays.toString(nativeBefore)
+                + ",\"after\":" + java.util.Arrays.toString(after) + "}";
+        final java.nio.file.Path directory = java.nio.file.Path.of(System.getProperty("notelite.embeddedTestRoot"));
+        java.nio.file.Files.createDirectories(directory);
+        java.nio.file.Files.writeString(directory.resolve("native-template-checked-statistics.json"), report);
+    }
+
     @Test
     public void scoreBitsPreserveWeightsOrderClippingAndSignedDistances () throws Exception
     {
@@ -45,10 +84,11 @@ public class TemplateEvaluationTest
         }
 
         final DistanceTable integer = new DistanceTable.Integer(11, 9, 3);
+        final DistanceTable contiguousShort = new DistanceTable.Short(11, 9, 3);
         final DistanceTable.Short shortParent = new DistanceTable.Short(15, 13, 3);
         final DistanceTable shortView = shortParent.getView(new Rectangle(2, 2, 11, 9));
 
-        for (DistanceTable table : List.of(integer, shortView)) {
+        for (DistanceTable table : List.of(integer, shortView, contiguousShort)) {
             for (int y = 0; y < table.getHeight(); y++) {
                 for (int x = 0; x < table.getWidth(); x++) {
                     table.setValue(x, y, distanceValues[random.nextInt(distanceValues.length)]);
@@ -70,7 +110,7 @@ public class TemplateEvaluationTest
                     final Template template = template(points);
                     template.putOffset(Anchor.CENTER, 2.5, -1.5);
 
-                    for (DistanceTable table : List.of(integer, shortView)) {
+                    for (DistanceTable table : List.of(integer, shortView, contiguousShort)) {
                         for (Anchor anchor : new Anchor[]{null, Anchor.CENTER}) {
                             for (int x = -4; x <= 14; x++) {
                                 for (int y = -3; y <= 12; y++) {
@@ -79,6 +119,10 @@ public class TemplateEvaluationTest
                                     assertEquals(Double.doubleToRawLongBits(expected),
                                             Double.doubleToRawLongBits(
                                                     template.evaluate(x, y, anchor, table)));
+                                    assertEquals(Double.doubleToRawLongBits(
+                                                    originalHole(template, x, y, anchor, table)),
+                                            Double.doubleToRawLongBits(
+                                                    template.evaluateHole(x, y, anchor, table)));
                                     comparisons++;
                                 }
                             }
@@ -90,7 +134,7 @@ public class TemplateEvaluationTest
             setValues(constants, previous);
         }
 
-        assertEquals(14592, comparisons);
+        assertEquals(21888, comparisons);
     }
 
     @Test
@@ -104,6 +148,12 @@ public class TemplateEvaluationTest
         table.fill(0);
         assertEquals(Double.MAX_VALUE, template(List.of(new PixelDistance(0, 0, 0)))
                 .evaluate(Integer.MAX_VALUE, Integer.MIN_VALUE, null, table), 0);
+        final DistanceTable overridden = new DistanceTable.Short(1, 1, 3) {
+            @Override public int getValue (int x, int y) { return 1; }
+        };
+        assertEquals("A custom distance accessor must use the Java path", 1.0,
+                template(List.of(new PixelDistance(0, 0, 0)))
+                        .evaluate(0, 0, null, overridden), 0);
     }
 
     @Test
@@ -128,6 +178,17 @@ public class TemplateEvaluationTest
             final double reverse = template(points).evaluate(0, 0, null, table);
             assertTrue("Grouping points or weights changes the original score bits",
                     Double.doubleToRawLongBits(forward) != Double.doubleToRawLongBits(reverse));
+            final Template mutable = template(points);
+            mutable.getKeyPoints().set(0, new PixelDistance(0, 0, -2));
+            assertCurrentPoints(mutable, table);
+            Collections.reverse(mutable.getKeyPoints());
+            assertCurrentPoints(mutable, table);
+            mutable.getKeyPoints().clear();
+            assertCurrentPoints(mutable, table);
+            mutable.getKeyPoints().add(new PixelDistance(0, 0, -2));
+            assertCurrentPoints(mutable, table);
+            table.fill(0);
+            assertCurrentPoints(mutable, table);
         } finally {
             setValues(constants, previous);
         }
@@ -137,6 +198,37 @@ public class TemplateEvaluationTest
     {
         return new Template(Shape.NOTEHEAD_BLACK, MusicFamily.Bravura, 20, 7, 7, points,
                 new Rectangle(0, 0, 7, 7));
+    }
+
+    private static void assertCurrentPoints (Template template, DistanceTable table)
+    {
+        assertEquals(Double.doubleToRawLongBits(originalScore(template, 0, 0, null,
+                        table, new double[]{1e16, 1, 1})),
+                Double.doubleToRawLongBits(template.evaluate(0, 0, null, table)));
+        assertEquals(Double.doubleToRawLongBits(originalHole(template, 0, 0, null, table)),
+                Double.doubleToRawLongBits(template.evaluateHole(0, 0, null, table)));
+    }
+
+    private static double originalHole (Template template, int x, int y, Anchor anchor,
+                                        DistanceTable table)
+    {
+        final Point offset = anchor == null ? new Point() : template.getOffset(anchor);
+        final int left = x - offset.x;
+        final int top = y - offset.y;
+        int expected = 0;
+        int actual = 0;
+        for (PixelDistance point : template.getKeyPoints()) {
+            final int nx = left + point.x;
+            final int ny = top + point.y;
+            if (nx >= 0 && nx < table.getWidth() && ny >= 0 && ny < table.getHeight()) {
+                final int distance = table.getValue(nx, ny);
+                if (distance != ChamferDistance.VALUE_UNKNOWN && point.d < 0) {
+                    expected++;
+                    if (distance != 0) actual++;
+                }
+            }
+        }
+        return expected == 0 ? 0.0 : (double) actual / expected;
     }
 
     /** Frozen arithmetic from Template.evaluate before the Zero optimization. */

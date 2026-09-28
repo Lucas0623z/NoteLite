@@ -118,6 +118,7 @@ link += [quoted(p) for p in runtime_lazy + ocr_codecs]
 settings = [
     'HEADER_SEARCH_PATHS = $(inherited) ' + quoted(runtime/'include') + ' ' + quoted(jni_md[0].parent),
     'OTHER_LDFLAGS = ' + ' '.join(link),
+    'OTHER_CPLUSPLUSFLAGS = $(inherited) -O2 -fno-fast-math -ffp-contract=off',
     'ARCHS = arm64', 'ONLY_ACTIVE_ARCH = YES',
 ]
 (generated / 'native-libraries.xcconfig').write_text('\n'.join(settings) + '\n')

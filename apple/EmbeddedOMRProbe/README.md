@@ -29,6 +29,15 @@ integer/object, 64-bit value and byte array, and both true and false returns.
 This detects Zero/libffi stack-layout errors independently of
 JPEG. Desktop Java runs explicitly report this native check as unexecuted;
 the iOS acceptance driver requires it to pass.
+The host also registers the production C++ template scorer. Its component gate
+checks exact signed-distance scores, mutable point lists and empty support,
+then requires positive native call counts, balanced pin/release counts and no
+distance-array copy. Integer tables, ROI views and custom table subclasses
+keep the Java scoring path. The shared generated configuration applies
+`-O2 -fno-fast-math -ffp-contract=off` to the probe and production bridge.
+A separate MIDI gate writes and reads an actual two-track type-1 file and
+compares every non-end-of-track event's tick and message bytes. The fifteen
+native-host components must all pass before score recognition begins.
 Before starting the VM, the native worker also submits an already-cancelled
 request with a nonexistent input. It must return the cancellation error before
 reading that input. The following full probe must still initialize and run.

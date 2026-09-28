@@ -5,6 +5,7 @@ package com.notelite.omr;
 import com.notelite.omr.text.tesseract.TesseractOCR;
 import com.notelite.omr.constant.Constant;
 import com.notelite.omr.image.ImageLoading;
+import com.notelite.omr.image.NativeTemplateScorer;
 import com.notelite.omr.util.OmrExecutors;
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,6 +36,7 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.junit.BeforeClass;
+import org.junit.AfterClass;
 import org.junit.Assume;
 import org.junit.Test;
 import org.w3c.dom.Document;
@@ -45,6 +47,7 @@ public class EmbeddedOmrEngineTest
 {
     private static EmbeddedOmrEngine engine;
     private static Path input;
+    private static long[] nativeBefore;
 
     @BeforeClass
     public static void setUp () throws Exception
@@ -60,9 +63,39 @@ public class EmbeddedOmrEngineTest
         // Match the native host, which supplies the sandbox as a VM property.
         System.setProperty("notelite.appHome", sandbox.toString());
         engine = EmbeddedOmrEngine.open(sandbox);
+        final String nativeLibrary = System.getProperty("notelite.nativeTemplateLibrary");
+        if (nativeLibrary != null) {
+            System.load(Path.of(nativeLibrary).toAbsolutePath().toString());
+            assertTrue("Requested native scorer must register successfully", NativeTemplateScorer.isEnabled());
+            nativeBefore = NativeTemplateScorer.statistics();
+        } else {
+            assertFalse("Default regression must exercise Java scoring", NativeTemplateScorer.isEnabled());
+        }
         input = engine.appHome().resolve("chula.png");
         Files.copy(Path.of(System.getProperty("notelite.embeddedTestInput")), input,
                 StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    @AfterClass
+    public static void recordNativeScoringEvidence () throws Exception
+    {
+        final boolean requested = System.getProperty("notelite.nativeTemplateLibrary") != null;
+        final long[] after = requested ? NativeTemplateScorer.statistics() : new long[4];
+        final long[] before = requested ? nativeBefore : new long[4];
+        if (requested) {
+            assertNotNull("Native before-test counters must be captured", before);
+            assertTrue("Full engine must actually invoke native scoring", after[0] > before[0]);
+            assertTrue("Full engine must pin actual distance data", after[1] > before[1]);
+            assertEquals("Every pin must be released", after[1] - before[1], after[2] - before[2]);
+        }
+        final String report = "{\"requested\":" + requested
+                + ",\"enabled\":" + NativeTemplateScorer.isEnabled()
+                + ",\"jniCheckEnabled\":" + java.lang.management.ManagementFactory
+                        .getRuntimeMXBean().getInputArguments().contains("-Xcheck:jni")
+                + ",\"before\":" + java.util.Arrays.toString(before)
+                + ",\"after\":" + java.util.Arrays.toString(after) + "}";
+        Files.writeString(Path.of(System.getProperty("notelite.embeddedTestRoot"))
+                .resolve("native-template-statistics.json"), report);
     }
 
     @Test

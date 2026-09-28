@@ -213,6 +213,11 @@ public class Template
         final double foreWeight = constants.foreWeight.getValue();
         final double backWeight = constants.backWeight.getValue();
         final double holeWeight = constants.holeWeight.getValue();
+        final short[] nativeValues = NativeTemplateScorer.supportedValues(distances);
+        if (nativeValues != null) {
+            return NativeTemplateScorer.evaluate(this, distances, nativeValues, ul,
+                    foreWeight, backWeight, holeWeight);
+        }
         double weights = 0; // Sum of weights
         double total = 0; // Sum of weighted distances
 
@@ -267,6 +272,10 @@ public class Template
                                 DistanceTable distances)
     {
         final Point ul = upperLeft(x, y, anchor);
+        final short[] nativeValues = NativeTemplateScorer.supportedValues(distances);
+        if (nativeValues != null) {
+            return NativeTemplateScorer.evaluateHole(this, distances, nativeValues, ul);
+        }
 
         // Loop through template key positions and read related distance.
         // Compute the mean value on all distances read
