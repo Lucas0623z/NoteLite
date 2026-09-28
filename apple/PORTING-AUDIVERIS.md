@@ -125,6 +125,10 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 发布归档还必须保留 JVM 动态查询的导出符号。实际归档检查发现，Xcode 的安装后符号清理会删除这些入口，即使普通 Release 构建可以链接也不能据此认定归档可用。嵌入目标禁用 `STRIP_INSTALLED_PRODUCT` 与 `COPY_PHASE_STRIP`，并对最终归档检查所需导出；验收应使用实际归档产物，检查入口保留情况并运行识别测试。
 
+[CI 36417119007](https://github.com/Lucas0623z/NoteLite/actions/runs/36417119007) 在模拟器中通过了真实字体 / HarfBuzz 排版及 PNG 输出，随后 JPEG 写入抛出原生参数空指针异常。源码定位到 Zero 的 JNI 参数描述：`NativeSignatureIterator` 默认把 byte / boolean / short / char 交给 `pass_int`，但 [Apple arm64 ABI](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms) 按参数实际宽度紧密排列栈参数。`JPEGImageWriter.writeImage` 超出寄存器数量后的三个连续 boolean 因此被错误描述成三个 int；原生 `componentIds` 在栈偏移 72 读到了 Java 的空 `scanInfo` 指针，恰好触发该异常。
+
+补丁仅在 iOS arm64 的 Zero 中按完整 Java 签名生成 libffi 参数类型，保留有符号 byte / short、无符号 boolean / char，以及数组和对象指针；同时允许参数读取器从一个 Java 栈槽中读取 1 / 2 字节值。返回类型原本已保留这些区别，无需更改。静态方法与实例方法都保留 `JNIEnv*` 加 class / receiver 两个隐含参数。固定源码应用和重复应用拒绝检查通过；[重建 CI 36419489365](https://github.com/Lucas0623z/NoteLite/actions/runs/36419489365) 与混合参数 JNI 回归用于验证实际目标行为，JPEG 测试继续使用原实现。
+
 ### 已执行的宿主适配测试
 
 2026-09-28，在 Windows Java 21 上用相同的六个适配类替换 `java.desktop` 平台入口，实际执行了平台探针和完整进程内识别测试：
