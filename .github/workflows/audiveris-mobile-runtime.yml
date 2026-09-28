@@ -6,9 +6,9 @@ on:
       platform:
         description: Apple target for the runtime build
         required: true
-        default: device
+        default: both
         type: choice
-        options: [device, simulator]
+        options: [device, simulator, both]
   push:
     branches: ["codex/audiveris-ios-builds"]
     paths:
@@ -27,13 +27,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: mobile-jdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform || 'device' }}
+  group: mobile-jdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform || 'both' }}
   cancel-in-progress: true
 
 jobs:
   runtime:
     runs-on: macos-26
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platform == 'device' && '["device"]' || inputs.platform == 'simulator' && '["simulator"]' || '["device","simulator"]') }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       MOBILE_JDK_WORK_DIR: ${{ github.workspace }}/build/mobile-jdk
@@ -49,13 +53,13 @@ jobs:
           java-version: "26"
       - name: Build Zero runtime and attempt headless java.desktop
         env:
-          MOBILE_PLATFORM: ${{ inputs.platform || 'device' }}
+          MOBILE_PLATFORM: ${{ matrix.platform }}
         run: bash tools/audiveris-port/build-mobile-jdk.sh "$MOBILE_PLATFORM"
       - name: Preserve compiler diagnostics and produced runtime
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: audiveris-ios-runtime-${{ inputs.platform || 'device' }}
+          name: audiveris-ios-runtime-${{ matrix.platform }}
           retention-days: 14
           if-no-files-found: warn
           path: |

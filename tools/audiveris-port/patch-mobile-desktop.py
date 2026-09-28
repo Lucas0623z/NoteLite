@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Apply the reviewed headless adaptation to the pinned OpenJDK Mobile source.
+
+This enables real OpenJDK software image/font rendering. It does not implement
+AWT windows, printing, audio, or a Cocoa toolkit; none is required by batch OMR.
+Each patch checks its source context and fails if upstream has changed.
+"""
+from pathlib import Path
+import argparse
+import subprocess
+
+SOURCE_COMMIT = "c1ed06aaef34c8dccf71e236d1ffa20918a77cfb"
+
+
+def replace(root: Path, relative: str, old: str, new: str) -> None:
+    path = root / relative
+    source = path.read_text(encoding="utf-8")
+    if source.count(old) != 1:
+        raise SystemExit(f"Unexpected source patch context: {relative}: {old!r}")
+    path.write_text(source.replace(old, new), encoding="utf-8", newline="\n")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path)
+    args = parser.parse_args()
+    root = args.source.resolve()
+    commit = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+    if commit != SOURCE_COMMIT:
+        raise SystemExit(f"Expected {SOURCE_COMMIT}, found {commit}")
+
+    replace(root, "make/modules/java.desktop/Lib.gmk",
+            "ifeq ($(call isTargetOs, android ios), false)",
+            "ifeq ($(call isTargetOs, android), false)")
+    awt = "make/modules/java.desktop/lib/AwtLibraries.gmk"
+    replace(root, awt,
+            "ifeq ($(call isTargetOs, linux macosx aix), true)",
+            "ifeq ($(call isTargetOs, linux macosx aix ios), true)")
+    # awt_Font.c stays in libawt_headless: it defines java.awt.Font.initIDs.
+    # Font discovery is supplied by MobileFontManager, so neither FontConfig
+    # nor X11 nor CUPS is used by this target.
+    replace(root, awt, "  LIBAWT_HEADLESS_EXTRA_HEADER_DIRS :=",
+            "  ifeq ($(call isTargetOs, ios), true)\n"
+            "    LIBAWT_HEADLESS_EXCLUDE_FILES += fontpath.c CUPSfuncs.c "
+            "X11Color.c X11FontScaler_md.c\n"
+            "  endif\n\n  LIBAWT_HEADLESS_EXTRA_HEADER_DIRS :=")
+    # JAWT is an interface for embedding desktop native windows. Its Unix
+    # headers require X11 even in a headless build; it is not an OMR dependency.
+    replace(root, awt, "LIBJAWT_EXTRA_HEADER_DIRS :=",
+            "ifeq ($(call isTargetOs, ios), false)\nLIBJAWT_EXTRA_HEADER_DIRS :=")
+    replace(root, awt, "TARGETS += $(BUILD_LIBJAWT)",
+            "TARGETS += $(BUILD_LIBJAWT)\nendif # no native desktop windows on iOS")
+    replace(root, "make/modules/java.desktop/lib/ClientLibraries.gmk",
+            "else ifeq ($(call isTargetOs, macosx), true)",
+            "else ifeq ($(call isTargetOs, macosx ios), true)")
+
+    # iOS imports macosx/classes in upstream Modules.gmk. Keep all six classes
+    # together there so the matching host build-JDK can also compile this tree.
+    source_classes = Path(__file__).resolve().parent / "mobile-desktop"
+    destination = root / "src/java.desktop/macosx/classes"
+    installed = []
+    for source in sorted(source_classes.rglob("*.java")):
+        relative = source.relative_to(source_classes)
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = source.read_text(encoding="utf-8")
+        if target.exists():
+            # Preserve the original copyright/license when replacing an
+            # upstream platform entry point.
+            text = target.read_text(encoding="utf-8").split("package ", 1)[0] + text
+        target.write_text(text, encoding="utf-8", newline="\n")
+        installed.append(target.relative_to(root).as_posix())
+    if len(installed) != 6:
+        raise SystemExit(f"Expected six platform classes, found {len(installed)}")
+    # Intent-to-add makes the saved git diff include the new platform classes.
+    subprocess.run(["git", "-C", str(root), "add", "--intent-to-add", "--", *installed],
+                   check=True)
+    print(f"Applied headless software raster/font adaptation to {commit}")
+    print("\n".join(installed))
+
+
+if __name__ == "__main__":
+    main()

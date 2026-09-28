@@ -84,6 +84,22 @@ for call in ("copy_src_platform_files(ios_device_armv7_platform)",
         raise SystemExit("Unexpected libffi generator context: " + call)
     source = source.replace(line, "")
 path.write_text(source)
+# Remove the corresponding project records as well: Xcode validates Sources
+# and CopyFiles inputs before it applies architecture preprocessor guards.
+project = Path("libffi.xcodeproj/project.pbxproj")
+source = project.read_text()
+armv7_files = ("ffi_armv7.c", "sysv_armv7.S", "ffi_armv7.h",
+               "fficonfig_armv7.h", "ffitarget_armv7.h")
+for name in armv7_files:
+    if name not in source:
+        raise SystemExit("Unexpected libffi project context: " + name)
+lines = [line for line in source.splitlines(keepends=True)
+         if not any(name in line for name in armv7_files)]
+source = "".join(lines).replace('VALID_ARCHS = "arm64 armv7 armv7s x86_64";',
+                              'VALID_ARCHS = "arm64 x86_64";')
+if "armv7" in source:
+    raise SystemExit("Unreviewed ARMv7 project entry remains")
+project.write_text(source)
 PY
   python3 generate-darwin-source-and-headers.py --only-ios
   xcodebuild -project libffi.xcodeproj -scheme libffi-iOS -sdk "$sdk" \
@@ -128,37 +144,14 @@ cp "$ffi_library" "$artifacts/baseline/static-libs/lib/"
 cp -R "$build_dir/images/jmods" "$artifacts/baseline/"
 cp "$build_dir/spec.gmk" "$artifacts/baseline/spec.gmk"
 
-# Initial headless adaptation: include the portable AWT raster, color, JPEG and
-# FreeType libraries. Exclude their X11-specific source files on iOS. Compilation
-# and runtime probes must resolve any further missing platform implementation;
-# this deliberately does not report the baseline's java.desktop classes as a port.
-python3 - "$source_dir" <<'PY'
-from pathlib import Path
-import sys
-root = Path(sys.argv[1])
-changes = [
-    ("make/modules/java.desktop/Lib.gmk",
-     "ifeq ($(call isTargetOs, android ios), false)",
-     "ifeq ($(call isTargetOs, android), false)"),
-    ("make/modules/java.desktop/lib/AwtLibraries.gmk",
-     "ifeq ($(call isTargetOs, linux macosx aix), true)",
-     "ifeq ($(call isTargetOs, linux macosx aix ios), true)"),
-    ("make/modules/java.desktop/lib/ClientLibraries.gmk",
-     "else ifeq ($(call isTargetOs, macosx), true)",
-     "else ifeq ($(call isTargetOs, macosx ios), true)"),
-]
-for relative, old, new in changes:
-    path = root / relative
-    content = path.read_text()
-    if content.count(old) != 1:
-        raise SystemExit(f"Source patch context changed: {relative}")
-    path.write_text(content.replace(old, new))
-PY
+# Add actual software raster/font rendering and replace the Cocoa-only platform
+# entry points. The patch is pinned and rejects unexpected upstream contexts.
+python3 "$repo_root/tools/audiveris-port/patch-mobile-desktop.py" "$source_dir"
 git -C "$source_dir" diff --binary > "$artifacts/ios-headless.patch"
 set +e
 (
   cd "$source_dir"
-  gmake "CONF=$conf_name" LOG=info static-libs-image jmods
+  gmake "CONF=$conf_name" LOG=info static-libs-image jmods jdk-image
 ) 2>&1 | tee "$logs/openjdk-headless.log"
 headless_status=${PIPESTATUS[0]}
 set -e
@@ -180,6 +173,7 @@ report = {
     "present_libraries": present,
     "missing_required_libraries": [name for name in required if name not in present],
     "java_desktop_jmod": (build / "images/jmods/java.desktop.jmod").is_file(),
+    "runtime_module_image": (build / "images/jdk/lib/modules").is_file(),
     "runtime_tested": False,
     "audiveris_end_to_end_tested": False,
 }
@@ -195,10 +189,27 @@ cp -R "$build_dir/images/static-libs" "$artifacts/headless/"
 cp -R "$build_dir/images/jmods" "$artifacts/headless/"
 cp -R "$build_dir/jdk/include" "$artifacts/headless/"
 cp "$ffi_library" "$artifacts/headless/static-libs/lib/"
+# jdk-image uses the matching host build-JDK28 jlink, not the JDK26 bootstrap
+# linker. Preserve its module image, configuration and notices for embedding.
+mkdir -p "$artifacts/headless/runtime/lib"
+cp "$build_dir/images/jdk/lib/modules" "$artifacts/headless/runtime/lib/"
+cp "$build_dir/images/jdk/release" "$artifacts/headless/runtime/"
+cp -R "$build_dir/images/jdk/conf" "$artifacts/headless/runtime/"
+cp -R "$build_dir/images/jdk/legal" "$artifacts/headless/runtime/"
+for resource in tzdb.dat jrt-fs.jar; do
+  if [[ -f "$build_dir/images/jdk/lib/$resource" ]]; then
+    cp "$build_dir/images/jdk/lib/$resource" "$artifacts/headless/runtime/lib/"
+  fi
+done
+# These are the application's original, licensed font files; use the same
+# contours for Audiveris templates. The default text fallback is FinaleJazzText.
+mkdir -p "$artifacts/headless/runtime/lib/fonts"
+find "$repo_root/app/res" -maxdepth 1 \( -name '*.otf' -o -name '*.ttf' \)   -exec cp {} "$artifacts/headless/runtime/lib/fonts/" \;
 python3 - "$artifacts/runtime-inventory.json" <<'PY'
 import json, sys
 report = json.load(open(sys.argv[1]))
-if report["missing_required_libraries"] or not report["java_desktop_jmod"]:
+if (report["missing_required_libraries"] or not report["java_desktop_jmod"]
+        or not report["runtime_module_image"]):
     raise SystemExit("Incomplete headless runtime; see runtime-inventory.json")
 print("Required runtime libraries compiled; device linking and OMR execution remain to be tested.")
 PY
