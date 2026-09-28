@@ -14,6 +14,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Executors;
 import java.util.zip.ZipFile;
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
 import javax.sound.midi.MidiEvent;
 import javax.sound.midi.MidiSystem;
 import javax.sound.midi.Sequence;
@@ -21,6 +23,11 @@ import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.w3c.dom.Document;
@@ -152,6 +159,56 @@ public class EmbeddedOmrEngineTest
         }
         OmrExecutors.restartForEmbedded();
         assertTrue(OmrExecutors.shutdownForEmbedded(false, 10_000));
+    }
+
+    @Test(timeout = 600_000)
+    public void everyPageOfTiffAndScannedPdfReachesMusicXmlAndMidi () throws Exception
+    {
+        final var image = ImageIO.read(input.toFile());
+        assertNotNull(image);
+        final Path tiff = engine.appHome().resolve("multipage.tiff");
+        final var writers = ImageIO.getImageWritersByFormatName("TIFF");
+        assertTrue("The embedded Java image stack must include a TIFF writer", writers.hasNext());
+        final var writer = writers.next();
+        try (var output = ImageIO.createImageOutputStream(tiff.toFile())) {
+            writer.setOutput(output);
+            writer.prepareWriteSequence(null);
+            for (int page = 0; page < 2; page++) {
+                writer.writeToSequence(new IIOImage(image, null, null), null);
+            }
+            writer.endWriteSequence();
+        } finally {
+            writer.dispose();
+        }
+        final Path pdf = engine.appHome().resolve("multipage.pdf");
+        try (var document = new PDDocument()) {
+            final float width = image.getWidth() * 72f / 300f;
+            final float height = image.getHeight() * 72f / 300f;
+            final var raster = LosslessFactory.createFromImage(document, image);
+            for (int index = 0; index < 2; index++) {
+                final var page = new PDPage(new PDRectangle(width, height));
+                document.addPage(page);
+                try (var content = new PDPageContentStream(document, page)) {
+                    content.drawImage(raster, 0, 0, width, height);
+                }
+            }
+            document.save(pdf.toFile());
+        }
+        for (Path document : List.of(tiff, pdf)) {
+            final var result = engine.recognize(document);
+            assertEquals(result.batch().errors().toString(), Main.BatchStatus.SUCCESS, result.batch().status());
+            int notes = 0;
+            for (Path xml : result.musicXML()) notes += countPitchedNotes(xml);
+            int events = 0;
+            for (Path midi : result.midi()) events += countNoteOnEvents(midi);
+            // The PNG baseline has 151 pitches and 220 note-on events. A result
+            // containing only one imported page must fail this document test.
+            assertEquals("Both scanned pages must reach MusicXML", 302, notes);
+            assertEquals("Both scanned pages must reach MIDI", 440, events);
+            System.out.printf("EMBEDDED_MULTIPAGE_RESULT input=%s notes=%d noteOnEvents=%d output=%s%n",
+                    document.getFileName(), notes, events, result.outputDirectory());
+            assertNull(Main.getCli());
+        }
     }
 
     @Test(timeout = 600_000)

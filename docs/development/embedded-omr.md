@@ -52,10 +52,12 @@ API alone does not establish that these dependencies run on iOS.
 TESSDATA_PREFIX=/path/to/bundled/tessdata ./gradlew :app:embeddedOmrTest
 ```
 
-This opt-in task runs seven integration tests in a fresh sandbox. It rejects
+This opt-in task runs eight integration tests in a fresh sandbox. It rejects
 malformed arguments and outside paths, verifies cancellation and executor
 timeout handling, feeds a corrupt image followed by two complete recognitions
 of `data/examples/chula.png`, and exercises the JNI JSON entry. It parses the
 actual exported MusicXML and MIDI to require pitched notes and sounding MIDI
-note events. It does not claim transcription accuracy against a human-verified
+note events. A two-page TIFF and a two-page scanned PDF each run through the
+complete pipeline and must export both copies of the fixture: 302 pitched
+notes and 440 MIDI note-on events. The tests do not claim transcription accuracy against a human-verified
 score or substitute for a device run.
