@@ -111,6 +111,7 @@ class EmbeddedReleaseTests(unittest.TestCase):
             "PLATFORM_NAME": "iphoneos", "ARCHS": "arm64",
             "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "EMBEDDED_OMR_RUNTIME",
             "OTHER_LDFLAGS": self.flags,
+            "OTHER_CPLUSPLUSFLAGS": "-O2 -fno-fast-math -ffp-contract=off",
             "STRIP_INSTALLED_PRODUCT": "NO", "COPY_PHASE_STRIP": "NO",
         }}]
         self.command_mock = patch.object(release, "run", side_effect=self.command)
@@ -191,6 +192,7 @@ class EmbeddedReleaseTests(unittest.TestCase):
         self.assertEqual(report["compositionInventorySHA256"], release.digest(self.evidence / "app-inventory.json"))
         self.assertEqual(report["practiceResourceCount"], 4)
         self.assertEqual(report["assetCatalogSHA256"], release.digest(app / "Assets.car"))
+        self.assertEqual(report["nativeCPlusPlusFlags"], ["-O2", "-fno-fast-math", "-ffp-contract=off"])
         bindings = report["nativePresetBindings"]
         self.assertTrue(bindings["passed"])
         self.assertEqual(bindings["linked"]["nativeDeclarations"], 4)
@@ -290,6 +292,35 @@ class EmbeddedReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "Missing or escaped"):
             release.verify_embedded_archive(app, composition, self.root)
         self.assertFalse((self.root / "embedded-archive-inventory.json").exists())
+
+    def test_effective_embedded_cpp_settings_require_all_kernel_flags(self):
+        settings = self.settings[0]["buildSettings"]
+        original = settings["OTHER_CPLUSPLUSFLAGS"]
+        for missing in ("-O2", "-fno-fast-math", "-ffp-contract=off"):
+            with self.subTest(missing=missing):
+                settings["OTHER_CPLUSPLUSFLAGS"] = original.replace(missing, "")
+                with self.assertRaisesRegex(release.ReleaseError, "Embedded C\\+\\+ settings must include"):
+                    release.embedded_build()
+        settings["OTHER_CPLUSPLUSFLAGS"] = original
+
+    def test_effective_embedded_cpp_settings_reject_later_conflicting_flags(self):
+        settings = self.settings[0]["buildSettings"]
+        original = settings["OTHER_CPLUSPLUSFLAGS"]
+        for override in ("-O0", "-O3", "-Os", "-Ofast", "-ffast-math", "-ffp-contract=fast",
+                         "-ffp-contract=on", "-ffp-model=fast", "-funsafe-math-optimizations",
+                         "-fassociative-math", "-freciprocal-math", "-ffinite-math-only"):
+            with self.subTest(override=override):
+                settings["OTHER_CPLUSPLUSFLAGS"] = original + " " + override
+                with self.assertRaisesRegex(release.ReleaseError, "conflicting optimization or floating-point"):
+                    release.embedded_build()
+        settings["OTHER_CPLUSPLUSFLAGS"] = original
+
+    def test_effective_embedded_cpp_settings_preserve_unrelated_compiler_flags(self):
+        settings = self.settings[0]["buildSettings"]
+        settings["OTHER_CPLUSPLUSFLAGS"] += ' -DPORT_ENABLED=1 -Wextra -I"/tmp/SDK Includes"'
+        composition = release.embedded_build()
+        self.assertIn("-DPORT_ENABLED=1", composition["nativeCPlusPlusFlags"])
+        self.assertIn("-I/tmp/SDK Includes", composition["nativeCPlusPlusFlags"])
 
     def test_archive_stripping_cannot_remove_dynamic_jni_exports(self):
         settings = self.settings[0]["buildSettings"]

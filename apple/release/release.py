@@ -235,6 +235,26 @@ def verify_resource_inventory(root, resources):
     return expected
 
 
+def verify_embedded_cpp_flags(value):
+    """Keep the measured template kernel optimized with strict floating point."""
+    flags = shlex.split(value)
+    required = {"-O2", "-fno-fast-math", "-ffp-contract=off"}
+    require(required <= set(flags), "Embedded C++ settings must include -O2, -fno-fast-math and -ffp-contract=off.")
+    # Refuse conflicting flags anywhere, including after the required flags.
+    # Merely checking token presence would accept a later -O0 or -ffast-math.
+    relaxed = {"-ffast-math", "-funsafe-math-optimizations", "-fassociative-math",
+               "-freciprocal-math", "-ffinite-math-only", "-fno-signed-zeros",
+               "-fno-honor-infinities", "-fno-honor-nans", "-menable-unsafe-fp-math"}
+    conflicts = [flag for flag in flags
+                 if flag in relaxed
+                 or (re.fullmatch(r"-O(?:[0-9]+|s|z|g|fast)?", flag) and flag != "-O2")
+                 or (flag.startswith("-ffp-contract=") and flag != "-ffp-contract=off")
+                 or (flag.startswith("-ffp-model=") and flag != "-ffp-model=strict")]
+    require(not conflicts, "Embedded C++ settings contain conflicting optimization or floating-point flags: "
+            + ", ".join(conflicts))
+    return flags
+
+
 def embedded_build():
     """Resolve only a verified device composition; there is no baseline fallback."""
     raw = os.environ.get("RELEASE_EMBEDDED_BUILD", "")
@@ -324,7 +344,9 @@ def embedded_build():
             "Effective Release settings lost composed native libraries.")
     require(effective.get("STRIP_INSTALLED_PRODUCT") == "NO" and effective.get("COPY_PHASE_STRIP") == "NO",
             "Embedded Release builds must preserve native exports required by JNI and FFM lookup.")
-    return {"project": project, "resources": inventory["resources"], "inventorySHA256": digest(inventory_file)}
+    cpp_flags = verify_embedded_cpp_flags(effective.get("OTHER_CPLUSPLUSFLAGS", ""))
+    return {"project": project, "resources": inventory["resources"], "inventorySHA256": digest(inventory_file),
+            "nativeCPlusPlusFlags": cpp_flags}
 
 
 def verify_preset_bindings(app, symbols, report_file):
@@ -375,6 +397,7 @@ def verify_embedded_archive(app, composition, output, *, report_name="embedded-a
               "compositionInventorySHA256": composition["inventorySHA256"],
               "practiceResourceCount": len(practice_files), "assetCatalogSHA256": digest(assets),
               "nativePresetBindings": binding_report,
+              "nativeCPlusPlusFlags": composition["nativeCPlusPlusFlags"],
               "nativeEntryPoints": list(NATIVE_ENGINE_ENTRIES), "resources": composition["resources"]}
     (output / report_name).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
