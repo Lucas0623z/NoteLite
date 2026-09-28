@@ -58,8 +58,10 @@ final class OfflineRecognitionUITests: XCTestCase {
         XCTAssertEqual(end.value as? String, "19", "The restored recognized score must retain all 19 measures")
         let done = app.webViews.buttons.matching(identifier: "完成").firstMatch
         XCTAssertTrue(done.isHittable, "The settings close control must stay reachable with the number keyboard open")
-        XCTAssertGreaterThanOrEqual(done.frame.minX, app.frame.minX)
-        XCTAssertLessThanOrEqual(done.frame.maxX, app.frame.maxX)
+        let viewport = app.webViews.firstMatch.frame
+        XCTAssertFalse(viewport.isNull, "The practice renderer must have a visible frame")
+        XCTAssertGreaterThanOrEqual(done.frame.minX, viewport.minX)
+        XCTAssertLessThanOrEqual(done.frame.maxX, viewport.maxX)
         done.tap()
         let player = app.webViews.buttons.matching(identifier: "开始练习").firstMatch
         let ready = XCTNSPredicateExpectation(
