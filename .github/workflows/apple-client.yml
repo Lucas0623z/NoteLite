@@ -7,12 +7,16 @@ on:
       - "apple/**"
       - "practice-web/**"
       - "app/res/practice/**"
+      - "tools/audiveris-port/manage-embedded-simulators.py"
+      - "tools/audiveris-port/test_manage_embedded_simulators.py"
       - ".github/workflows/apple-client.yml"
   pull_request:
     paths:
       - "apple/**"
       - "practice-web/**"
       - "app/res/practice/**"
+      - "tools/audiveris-port/manage-embedded-simulators.py"
+      - "tools/audiveris-port/test_manage_embedded_simulators.py"
       - ".github/workflows/apple-client.yml"
   workflow_dispatch:
 
@@ -191,53 +195,35 @@ jobs:
           test "${sdk_version%%.*}" -ge 26
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen generate --spec project.yml
-      - name: Select App Store screenshot simulator
+      - name: Create and boot dedicated screenshot simulator
         id: simulator
+        timeout-minutes: 5
         env:
           DEVICE_FAMILY: ${{ matrix.family }}
         run: |
-          python3 <<'PY'
-          import json, os, subprocess
-
-          def simctl(*args):
-              return json.loads(subprocess.check_output(["xcrun", "simctl", *args, "--json"]))
-
-          sdk_major = int(subprocess.check_output(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"], text=True).split(".")[0])
-          runtimes = {
-              runtime["identifier"]: tuple(map(int, runtime["version"].split(".")))
-              for runtime in simctl("list", "runtimes")["runtimes"]
-              if runtime.get("isAvailable") and ".iOS-" in runtime["identifier"]
-          }
-          candidates = []
-          for runtime, devices in simctl("list", "devices", "available")["devices"].items():
-              version = runtimes.get(runtime, (0,))
-              if version[0] < 26 or version[0] > sdk_major:
-                  continue
-              for device in devices:
-                  name = device["name"]
-                  fits = ("iPhone" in name and "Pro Max" in name) if os.environ["DEVICE_FAMILY"] == "iPhone" else ("iPad Pro" in name and "13-inch" in name)
-                  if device.get("isAvailable") and fits:
-                      candidates.append((version, name, device["udid"]))
-          if not candidates:
-              raise SystemExit("No iOS 26+ Pro Max iPhone or 13-inch iPad simulator is installed for " + os.environ["DEVICE_FAMILY"])
-          version, name, device_id = max(candidates)
-          print(f"Using {name}, iOS {'.'.join(map(str, version))}: {device_id}")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write(f"device_id={device_id}\n")
-          PY
+          set -euo pipefail
+          python3 -B tools/audiveris-port/test_manage_embedded_simulators.py
+          python3 tools/audiveris-port/manage-embedded-simulators.py create \
+            apple/SimulatorResults --family "$DEVICE_FAMILY" --screenshot
+          DEVICE_ID=$(python3 -c 'import json, os; from pathlib import Path; print(json.loads((Path("apple/SimulatorResults") / os.environ["DEVICE_FAMILY"] / "device.json").read_text())["udid"])')
+          echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b | tee apple/SimulatorResults/boot.log
       - name: Test native interface and model
         timeout-minutes: 15
         working-directory: apple
         env:
           DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
         run: |
-          trap 'xcrun simctl shutdown "$DEVICE_ID" >/dev/null 2>&1 || true' EXIT
           xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
             -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 360 \
             NOTELITE_SIM_SWIFT_PATH= CODE_SIGNING_ALLOWED=NO
+      - name: Remove dedicated simulator
+        if: always()
+        run: python3 tools/audiveris-port/manage-embedded-simulators.py cleanup apple/SimulatorResults
       - name: Export native interface screenshots
         if: always()
         working-directory: apple
@@ -253,4 +239,5 @@ jobs:
           path: |
             apple/TestResults-*.xcresult
             apple/Screenshots/
+            apple/SimulatorResults/
           if-no-files-found: ignore

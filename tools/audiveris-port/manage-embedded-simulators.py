@@ -23,7 +23,7 @@ def version(value):
     return pieces + (0,) * max(0, 3 - len(pieces))
 
 
-def select_devices(runtimes, installed_types, sdk):
+def select_devices(runtimes, installed_types, sdk, families=FAMILIES, screenshot=False):
     compatible = [runtime for runtime in runtimes
                   if runtime.get("isAvailable")
                   and runtime["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")
@@ -34,12 +34,19 @@ def select_devices(runtimes, installed_types, sdk):
     runtime = max(compatible, key=lambda item: (version(item["version"]), item["identifier"]))
     installed = {item["identifier"]: item for item in installed_types}
     selected = {}
-    for family in FAMILIES:
+    for family in families:
         candidates = [item for item in runtime.get("supportedDeviceTypes", [])
                       if item.get("productFamily") == family and item["identifier"] in installed
                       and installed[item["identifier"]].get("productFamily") == family]
         if not candidates:
             raise ValueError("Latest compatible runtime lacks an installed " + family + " device type")
+        if screenshot:
+            candidates = [item for item in candidates
+                          if ("Pro Max" in item["name"] if family == "iPhone"
+                              else "iPad Pro" in item["name"] and "13-inch" in item["name"])]
+            if not candidates:
+                raise ValueError("Latest compatible runtime lacks a screenshot-sized " + family + " device type")
+            candidates.sort(key=lambda item: (item["name"], item["identifier"]), reverse=True)
         # Select a supported installed type and record its exact identity.
         # Both phases reuse the new device ID, never a preexisting device by name.
         selected[family] = candidates[0]
@@ -53,17 +60,17 @@ def write_json(path, value):
     temporary.replace(path)
 
 
-def create(root):
+def create(root, families=FAMILIES, screenshot=False):
     registry = root / "created-devices.json"
     if registry.exists():
         raise ValueError("Simulator ownership record already exists; use a fresh acceptance directory")
     sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-version")
     runtime, types = select_devices(data("list", "runtimes")["runtimes"],
-                                    data("list", "devicetypes")["devicetypes"], sdk)
+                                    data("list", "devicetypes")["devicetypes"], sdk, families, screenshot)
     prefix = "NoteLite OMR " + os.environ.get("GITHUB_RUN_ID", "local") + "-" + uuid.uuid4().hex[:8]
     ownership = {"schema": 1, "namePrefix": prefix, "sdk": sdk, "devices": []}
     write_json(registry, ownership)
-    for family in FAMILIES:
+    for family in families:
         name = prefix + " " + family
         device = str(uuid.UUID(run("xcrun", "simctl", "create", name, types[family]["identifier"],
                                    runtime["identifier"]))).upper()
@@ -115,5 +122,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("create", "cleanup"))
     parser.add_argument("directory", type=Path)
+    parser.add_argument("--family", choices=FAMILIES, help="Create only this family; default creates both")
+    parser.add_argument("--screenshot", action="store_true", help="Require Pro Max iPhone or 13-inch iPad Pro")
     args = parser.parse_args()
-    {"create": create, "cleanup": cleanup}[args.action](args.directory)
+    if args.action == "create":
+        create(args.directory, (args.family,) if args.family else FAMILIES, args.screenshot)
+    else:
+        cleanup(args.directory)

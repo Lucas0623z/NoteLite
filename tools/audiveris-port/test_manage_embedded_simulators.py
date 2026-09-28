@@ -68,6 +68,31 @@ class SimulatorTests(unittest.TestCase):
             with self.subTest(version=value), self.assertRaises(ValueError):
                 simulators.select_devices([{**self.runtime, "version": value}], self.types, "26.5")
 
+    def test_screenshot_selection_preserves_both_required_display_sizes(self):
+        types = self.types + [
+            {"identifier": "type.largePhone", "name": "iPhone 17 Pro Max", "productFamily": "iPhone"},
+            {"identifier": "type.smallPad", "name": "iPad Pro 11-inch (M5)", "productFamily": "iPad"},
+            {"identifier": "type.largePad", "name": "iPad Pro 13-inch (M5)", "productFamily": "iPad"}]
+        runtime = {**self.runtime, "supportedDeviceTypes": types}
+        selected, devices = simulators.select_devices([runtime], types, "26.5", screenshot=True)
+        self.assertEqual(selected, runtime)
+        self.assertEqual(devices["iPhone"]["identifier"], "type.largePhone")
+        self.assertEqual(devices["iPad"]["identifier"], "type.largePad")
+
+    def test_screenshot_selection_rejects_other_sizes_without_falling_back(self):
+        with self.assertRaisesRegex(ValueError, "screenshot-sized iPhone"):
+            simulators.select_devices([self.runtime], self.types, "26.5", ("iPhone",), screenshot=True)
+
+    def test_matrix_creates_only_its_family_and_cleanup_preserves_existing_devices(self):
+        with patch.object(simulators, "data", side_effect=self.fake_data), patch.object(simulators, "run", side_effect=self.fake_run):
+            simulators.create(self.root, ("iPhone",))
+            self.assertTrue((self.root / "iPhone" / "device.json").is_file())
+            self.assertFalse((self.root / "iPad").exists())
+            self.assertEqual(len(json.loads((self.root / "created-devices.json").read_text())["devices"]), 1)
+            simulators.cleanup(self.root)
+        self.assertEqual(len(self.devices[self.runtime["identifier"]]), 1)
+        self.assertEqual(self.devices[self.runtime["identifier"]][0]["name"], "Runner's existing iPhone")
+
     def test_creates_both_families_records_identity_and_only_deletes_owned_devices(self):
         with patch.object(simulators, "data", side_effect=self.fake_data), patch.object(simulators, "run", side_effect=self.fake_run):
             simulators.create(self.root)
