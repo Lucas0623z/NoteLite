@@ -51,10 +51,12 @@ for label, root in roots.items():
 PY
 }
 trap 'result=$?; if [ "$result" -ne 0 ]; then preserve_failure_evidence; fi; exit "$result"' EXIT
-# Clear only the previous completion marker, so stale results cannot satisfy this run.
-if [ -f "$container/Documents/embedded-probe-result.json" ]; then
-  mv "$container/Documents/embedded-probe-result.json" "$output/previous-result.json"
-fi
+# Clear only previous completion reports, so stale results cannot satisfy this run.
+for marker in embedded-probe-result.json embedded-probe-primary-result.json; do
+  if [ -f "$container/Documents/$marker" ]; then
+    mv "$container/Documents/$marker" "$output/previous-$marker"
+  fi
+done
 xcrun simctl launch --terminate-running-process \
   --stdout="$output/stdout.log" --stderr="$output/stderr.log" "$device" "$bundle_id" \
   > "$output/launch.txt"
@@ -108,7 +110,7 @@ while [ ! -f "$container/Documents/embedded-probe-result.json" ]; do
 done
 ditto "$container/Documents" "$output/Documents"
 cp "$container/Documents/embedded-probe-result.json" "$output/result.json"
-python3 - "$output/result.json" <<'PY'
+python3 - "$output/result.json" "$output/Documents/embedded-probe-primary-result.json" <<'PY'
 import json, sys
 report = json.load(open(sys.argv[1]))
 print(json.dumps(report, indent=2))
@@ -116,8 +118,22 @@ if report.get('status') != 'SUCCESS' or not report.get('fullScoreRecognitionTest
     raise SystemExit('Actual embedded recognition failed; preserved reports and logs contain the evidence')
 if not report.get('sameProcessJNI') or 'Zero' not in report.get('javaVM', ''):
     raise SystemExit('The report was not produced by the embedded Zero JNI runtime')
+components = report.get('components', {})
+if not components.get('jniMixedPrimitiveArgumentsRequired') or not components.get('jniMixedPrimitiveArguments'):
+    raise SystemExit('The real mixed-primitive JNI stack ABI check did not pass')
 if not report.get('cancelledBeforeVMStart'):
     raise SystemExit('The native pre-entry cancellation gate did not pass')
+primary = json.load(open(sys.argv[2]))
+if (primary.get('status') != 'SUCCESS' or not primary.get('fullScoreRecognitionTested')
+        or primary.get('outputDirectory') != report.get('outputDirectory')):
+    raise SystemExit('The original completed score report was not preserved')
+reuse = report.get('vmReuse', {})
+repeated = reuse.get('recognition', {})
+if (reuse.get('status') != 'SUCCESS' or not reuse.get('cancelledOnExistingVM')
+        or not reuse.get('workerCompletionObserved') or repeated.get('status') != 'SUCCESS'
+        or not repeated.get('musicXML') or not repeated.get('midi')
+        or repeated.get('outputDirectory') == report.get('outputDirectory')):
+    raise SystemExit('Cross-thread cancellation and repeated real recognition did not pass')
 if report.get('pitchedNotes', 0) <= 0 or report.get('midiNoteOnEvents', 0) <= 0:
     raise SystemExit('No real musical output was validated')
 memory = report.get('nativeMemory', {})
@@ -126,17 +142,26 @@ if (memory.get('platform') != 'ios-simulator' or memory.get('sampleCount', 0) <=
         or memory.get('peakSampledPhysicalFootprintBytes', 0) <= 0):
     raise SystemExit('The probe did not record actual simulator process memory samples')
 PY
-job=$(python3 - "$output/result.json" <<'PY'
+jobs=$(python3 - "$output/result.json" <<'PY'
 import json, re, sys
 from pathlib import PurePosixPath
-name = PurePosixPath(json.load(open(sys.argv[1]))['outputDirectory']).name
-if not re.fullmatch(r'job-[A-Za-z0-9_-]+', name):
-    raise SystemExit('Unexpected job directory in completion report')
-print(name)
+report = json.load(open(sys.argv[1]))
+names = [PurePosixPath(record['outputDirectory']).name
+         for record in (report, report['vmReuse']['recognition'])]
+if len(set(names)) != 2 or any(not re.fullmatch(r'job-[A-Za-z0-9_-]+', name) for name in names):
+    raise SystemExit('Unexpected or reused job directory in completion report')
+print('\n'.join(names))
 PY
 )
+job=${jobs%%$'\n'*}
+repeated_job=${jobs##*$'\n'}
 python3 "$repo/tools/audiveris-port/verify_embedded_score.py" \
   "$output/Documents/omr/jobs/$job" \
   --reference "$repo/tools/audiveris-port/fixtures/chula-semantic-reference.json" \
   --source-image "$repo/data/examples/chula.png" \
   --report "$output/semantic-parity.json"
+python3 "$repo/tools/audiveris-port/verify_embedded_score.py" \
+  "$output/Documents/omr/jobs/$repeated_job" \
+  --reference "$repo/tools/audiveris-port/fixtures/chula-semantic-reference.json" \
+  --source-image "$repo/data/examples/chula.png" \
+  --report "$output/reuse-semantic-parity.json"

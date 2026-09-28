@@ -3,6 +3,9 @@
 #import "EmbeddedJVM.h"
 #include <jni.h>
 #include <dlfcn.h>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <atomic>
@@ -58,6 +61,37 @@ static jboolean nativeCancellationRequested(JNIEnv *, jclass, jlong handle) {
     // retained through that entire call, including shutdown/timeout handling.
     auto *flag = reinterpret_cast<const std::atomic<bool> *>(static_cast<intptr_t>(handle));
     return flag && flag->load() ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean nativeMixedPrimitiveArguments(JNIEnv *environment, jclass, jobject leadingObject,
+        jint a, jint b, jint c, jint d, jint e, jint f, jint g, jint h,
+        jboolean first, jboolean second, jboolean third, jint trailingInt, jobject trailingObject,
+        jbyte negativeByte, jshort negativeShort, jchar highChar,
+        jbyte positiveByte, jshort positiveShort, jchar maxChar, jlong wide, jbyteArray payload) {
+    const bool scalars = a == 1 && b == 2 && c == 3 && d == 4 && e == 5 && f == 6 && g == 7 && h == 8
+        && first == JNI_TRUE && second == JNI_FALSE && third == JNI_TRUE && trailingInt == 0x13579bdf
+        && negativeByte == -128 && negativeShort == -32768 && highChar == 0xfedc
+        && positiveByte == 127 && positiveShort == 32767 && maxChar == 0xffff
+        && wide == 0x0123456789abcdefLL;
+    // A broken stack layout may corrupt the trailing object slot. Check every
+    // scalar first and avoid dereferencing that slot if the ABI check failed.
+    if (!scalars || !environment->IsSameObject(leadingObject, trailingObject)
+        || !payload || environment->GetArrayLength(payload) != 3) return JNI_FALSE;
+    jbyte bytes[3] = {};
+    environment->GetByteArrayRegion(payload, 0, 3, bytes);
+    return !environment->ExceptionCheck() && bytes[0] == -128 && bytes[1] == 0 && bytes[2] == 127
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean nativeMixedInstanceArguments(JNIEnv *environment, jobject receiver, jobject leadingObject,
+        jint a, jint b, jint c, jint d, jint e, jint f, jint g, jint h,
+        jboolean first, jboolean second, jboolean third, jint trailingInt, jobject trailingObject,
+        jbyte negativeByte, jshort negativeShort, jchar highChar,
+        jbyte positiveByte, jshort positiveShort, jchar maxChar, jlong wide, jbyteArray payload) {
+    return nativeMixedPrimitiveArguments(environment, nullptr, leadingObject, a, b, c, d, e, f, g, h,
+        first, second, third, trailingInt, trailingObject, negativeByte, negativeShort, highChar,
+        positiveByte, positiveShort, maxChar, wide, payload)
+        && environment->IsSameObject(receiver, leadingObject) ? JNI_TRUE : JNI_FALSE;
 }
 
 // Process-wide samples include the host UI, VM, native OCR, and this sampler.
@@ -132,6 +166,26 @@ static void setError(NSError **error, NSString *message) {
         *error = [NSError errorWithDomain:@"com.notelite.embeddedprobe" code:1
                                 userInfo:@{NSLocalizedDescriptionKey: message}];
     }
+}
+
+static NSString *canonicalDirectory(NSString *path, NSError **error) {
+    char *resolved = realpath(path.fileSystemRepresentation, nullptr);
+    if (!resolved) {
+        const int failure = errno;
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:failure
+                                           userInfo:@{NSFilePathErrorKey: path}];
+        return nil;
+    }
+    NSString *canonical = [NSFileManager.defaultManager stringWithFileSystemRepresentation:resolved
+                                                                                    length:strlen(resolved)];
+    free(resolved);
+    BOOL directory = NO;
+    if (![NSFileManager.defaultManager fileExistsAtPath:canonical isDirectory:&directory] || !directory) {
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:ENOTDIR
+                                           userInfo:@{NSFilePathErrorKey: path}];
+        return nil;
+    }
+    return canonical;
 }
 
 static NSString *javaString(JNIEnv *environment, jstring string) {
@@ -211,14 +265,24 @@ static NSString *pendingException(JNIEnv *environment) {
             if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil];
             return nil;
         }
+        NSFileManager *files = NSFileManager.defaultManager;
+        if (!embeddedVM && ![files createDirectoryAtPath:sandbox
+              withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+        // iOS exposes equivalent /var and /private/var sandbox paths. Compare
+        // existing physical directories and pass those identities to Java too.
+        sandbox = canonicalDirectory(sandbox, error);
+        if (!sandbox) return nil;
+        resourceRoot = canonicalDirectory(resourceRoot, error);
+        if (!resourceRoot) return nil;
         if (embeddedVM && (![initializedResources isEqualToString:resourceRoot]
                            || ![initializedSandbox isEqualToString:sandbox])) {
             setError(error, @"The existing JVM belongs to a different resource directory or sandbox");
             return nil;
         }
-        NSFileManager *files = NSFileManager.defaultManager;
         if (![files createDirectoryAtPath:[sandbox stringByAppendingPathComponent:@"tmp"]
               withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+        firstArgument = recognition ? sandbox : resourceRoot;
+        if (!recognition) secondArgument = sandbox;
 
         NSString *runtime = [resourceRoot stringByAppendingPathComponent:@"runtime"];
         NSString *jarDirectory = [resourceRoot stringByAppendingPathComponent:@"java"];
@@ -332,6 +396,22 @@ static NSString *pendingException(JNIEnv *environment) {
                 if (environment->RegisterNatives(probe, &callback, 1) != JNI_OK) {
                     exception = pendingException(environment) ?: @"Could not register request cancellation callback";
                 }
+            } else {
+                jclass argumentsProbe = environment->FindClass("PortabilityProbe");
+                exception = pendingException(environment);
+                if (argumentsProbe && !exception) {
+                    const char *signature = "(Ljava/lang/Object;IIIIIIIIZZZILjava/lang/Object;BSCBSCJ[B)Z";
+                    JNINativeMethod callbacks[] = {
+                        {const_cast<char *>("mixedPrimitiveArguments"), const_cast<char *>(signature),
+                         reinterpret_cast<void *>(&nativeMixedPrimitiveArguments)},
+                        {const_cast<char *>("mixedInstanceArguments"), const_cast<char *>(signature),
+                         reinterpret_cast<void *>(&nativeMixedInstanceArguments)}
+                    };
+                    if (environment->RegisterNatives(argumentsProbe, callbacks, 2) != JNI_OK) {
+                        exception = pendingException(environment) ?: @"Could not register native argument probe";
+                    }
+                }
+                if (argumentsProbe) environment->DeleteLocalRef(argumentsProbe);
             }
             jmethodID run = nullptr;
             if (!exception) {

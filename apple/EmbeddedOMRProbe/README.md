@@ -22,9 +22,22 @@ PDF and OCR diagnostics use that glyph when available; after a font failure
 they use an explicitly identified diagnostic raster. This cannot satisfy the
 font gate. Any failed component causes an aggregate exception before full
 score recognition starts; no partial result is reported as success.
+The native host additionally registers a real JNI argument check with more
+arguments than the arm64 integer registers can hold. Static and instance calls
+check narrow signed and unsigned values, consecutive booleans, a trailing
+integer/object, 64-bit value and byte array, and both true and false returns.
+This detects Zero/libffi stack-layout errors independently of
+JPEG. Desktop Java runs explicitly report this native check as unexecuted;
+the iOS acceptance driver requires it to pass.
 Before starting the VM, the native worker also submits an already-cancelled
 request with a nonexistent input. It must return the cancellation error before
 reading that input. The following full probe must still initialize and run.
+After that worker finishes and detaches, another worker submits a cancelled
+request to the existing VM. A third, separate worker recognizes `chula.png`
+with a fresh token in the same VM and sandbox. Every worker has an 8 MiB stack.
+The second recognition must create a different job and pass the same exact
+MusicXML/MIDI comparison as the first. The main actor awaits these workers
+without blocking the interface.
 
 ## Build on macOS
 
@@ -87,10 +100,13 @@ The runner also compares the exported MusicXML and MIDI against the committed
 desktop semantic reference using `verify_embedded_score.py`. A difference in
 notes, timing, voices, staves, musical attributes, or MIDI events fails the run
 and is recorded in `semantic-parity.json`.
+The second job is independently checked in `reuse-semantic-parity.json`.
 
 ### Output contract
 
 - `Documents/embedded-probe-result.json`: success/failure marker and metrics.
+- `Documents/embedded-probe-primary-result.json`: original successful first-run
+  result, preserved before cancellation/reuse checks begin.
 - `Documents/omr/probe-report.json`: successful Java component/full-score report.
 - `Documents/omr/component-probe/portability-probe.json`: all component outcomes,
   including original exception stacks when a component fails.
@@ -104,6 +120,10 @@ physical footprint from Darwin `task_info`, sampled every 50 milliseconds from
 before JVM initialization through recognition. It includes baseline values,
 sampled maxima, sample counts, and an explicit simulator/device label. Sampled
 maxima may miss shorter spikes; simulator memory is not device memory evidence.
+Memory samples and the original Java elapsed time cover VM initialization,
+components and the first recognition only. `vmReuse.recognition` contains the
+second job's Java timing, and `totalProbeElapsedMilliseconds` covers the entire
+native sequence. A reuse failure preserves the original report and exports.
 Counts demonstrate that output exists; they do not establish
 transcription accuracy. Platform execution and score comparisons must be
 reported from a real completed run, not inferred from a successful build.

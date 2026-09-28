@@ -29,6 +29,20 @@ import static org.bytedeco.tesseract.global.tesseract.*;
 
 /** No HTTP, process launch or downloaded code. Every component must pass. */
 public final class PortabilityProbe {
+    // Registered by the probe host only. Narrow arguments after the arm64
+    // register limit exercise the real Zero -> libffi -> C stack ABI.
+    private static native boolean mixedPrimitiveArguments(Object leadingObject,
+            int a, int b, int c, int d, int e, int f, int g, int h,
+            boolean first, boolean second, boolean third, int trailingInt, Object trailingObject,
+            byte negativeByte, short negativeShort, char highChar,
+            byte positiveByte, short positiveShort, char maxChar, long wide, byte[] payload);
+
+    private native boolean mixedInstanceArguments(Object leadingObject,
+            int a, int b, int c, int d, int e, int f, int g, int h,
+            boolean first, boolean second, boolean third, int trailingInt, Object trailingObject,
+            byte negativeByte, short negativeShort, char highChar,
+            byte positiveByte, short positiveShort, char maxChar, long wide, byte[] payload);
+
     @XmlRootElement
     public static final class Payload {
         public String value;
@@ -119,6 +133,25 @@ public final class PortabilityProbe {
         State state = new State();
         // Codec diagnostics must remain executable if font initialization fails.
         BufferedImage fixture = codecFixture();
+        boolean nativeHost = Boolean.getBoolean("notelite.omr.jniHost");
+        if (nativeHost) gates.run("jni-mixed-primitives", () -> {
+            Object marker = new Object();
+            PortabilityProbe receiver = new PortabilityProbe();
+            byte[] payload = {(byte)-128, 0, 127};
+            for (int trailing : new int[] {0x13579bdf, 0}) {
+                boolean expected = trailing != 0;
+                if (mixedPrimitiveArguments(marker, 1, 2, 3, 4, 5, 6, 7, 8,
+                        true, false, true, trailing, marker,
+                        (byte)-128, (short)-32768, '\ufedc', (byte)127, (short)32767, '\uffff',
+                        0x0123456789abcdefL, payload) != expected
+                        || receiver.mixedInstanceArguments(receiver, 1, 2, 3, 4, 5, 6, 7, 8,
+                        true, false, true, trailing, receiver,
+                        (byte)-128, (short)-32768, '\ufedc', (byte)127, (short)32767, '\uffff',
+                        0x0123456789abcdefL, payload) != expected) {
+                    throw new IllegalStateException("JNI static/instance mixed arguments or boolean return changed across the native ABI");
+                }
+            }
+        });
 
         gates.run("awt-font-raster", () -> {
             if (!GraphicsEnvironment.isHeadless()) throw new IllegalStateException("Headless mode required");
@@ -248,6 +281,8 @@ public final class PortabilityProbe {
         });
 
         String report = "{\"status\":" + quote(gates.passed() ? "SUCCESS" : "FAILED")
+                + ",\"jniMixedPrimitiveArgumentsRequired\":" + nativeHost
+                + ",\"jniMixedPrimitiveArguments\":" + gates.passed("jni-mixed-primitives")
                 + ",\"awtFontRaster\":" + gates.passed("awt-font-raster")
                 + ",\"foregroundPixels\":" + state.foreground
                 + ",\"fontRasterSHA256\":" + (state.fontHash == null ? "null" : quote(state.fontHash))
