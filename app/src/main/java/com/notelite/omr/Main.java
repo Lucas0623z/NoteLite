@@ -48,6 +48,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.Set;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
+import java.util.function.BooleanSupplier;
+import com.notelite.omr.step.ProcessingCancellationException;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -76,6 +82,22 @@ public class Main
 
     /** CLI parameters. */
     private static CLI cli;
+
+    private static boolean embeddedLogInitialized;
+
+    private static EmbeddedPreviousState embeddedPendingRestore;
+
+    private record EmbeddedPreviousState(CLI cli, Locale locale, boolean parallelism) { }
+
+    /** A batch result is returned to an embedded host; it never terminates that host's JVM. */
+    public record BatchResult(BatchStatus status, int completedTasks, List<String> errors)
+    {
+        public BatchResult {
+            errors = List.copyOf(errors);
+        }
+    }
+
+    public enum BatchStatus { SUCCESS, FAILED, CANCELLED, TIMED_OUT }
 
     //~ Constructors -------------------------------------------------------------------------------
 
@@ -302,6 +324,157 @@ public class Main
                 logger.warn(msg);
                 System.exit(status);
             }
+        }
+    }
+
+    /**
+     * Run real CLI processing within an existing JVM. Use {@link EmbeddedOmrEngine#open(Path)}
+     * first so headless mode and sandbox paths are installed before AWT/WellKnowns initialize.
+     * This method accepts only batch recognition options; no arbitrary classes or @files.
+     * Desktop {@link #main(String[])} retains its existing exit behavior.
+     */
+    public static synchronized BatchResult runEmbeddedBatch (String[] args)
+    {
+        return runEmbeddedBatch(args, () -> false);
+    }
+
+    static synchronized BatchResult runEmbeddedBatch (String[] args, BooleanSupplier cancelled)
+    {
+        if (!Boolean.getBoolean("java.awt.headless") || WellKnowns.APP_HOME == null) {
+            throw new IllegalStateException("Initialize EmbeddedOmrEngine before invoking embedded OMR");
+        }
+        if (OMR.gui != null) {
+            throw new IllegalStateException("Embedded processing cannot share an interactive OMR session");
+        }
+        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+            return new BatchResult(BatchStatus.CANCELLED, 0, List.of());
+        }
+        validateEmbeddedArguments(args);
+        final CLI parsed = new CLI(WellKnowns.TOOL_NAME);
+        final CLI.Parameters parameters;
+        try {
+            parameters = parsed.parseParameters(args.clone());
+        } catch (CmdLineException ex) {
+            throw new IllegalArgumentException("Invalid embedded OMR arguments: " + ex.getMessage(), ex);
+        }
+        if (!parameters.batchMode) {
+            throw new IllegalArgumentException("Embedded OMR requires -batch");
+        }
+        if (parameters.helpMode || parameters.versionMode) {
+            return new BatchResult(BatchStatus.SUCCESS, 0, List.of());
+        }
+        try {
+            validateEmbeddedPaths(parameters);
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Invalid embedded OMR path: " + ex.getMessage(), ex);
+        }
+
+        OmrExecutors.restartForEmbedded();
+        // A timed-out job keeps its context until all of its workers have actually stopped.
+        if (embeddedPendingRestore != null) {
+            cli = embeddedPendingRestore.cli();
+            Locale.setDefault(embeddedPendingRestore.locale());
+            OmrExecutors.defaultParallelism.setSpecific(embeddedPendingRestore.parallelism());
+            embeddedPendingRestore = null;
+        }
+        // No CLI values from earlier completed jobs survive in Main.getCli().
+        final CLI previousCli = cli;
+        final Locale previousLocale = Locale.getDefault();
+        final boolean previousParallelism = OmrExecutors.defaultParallelism.getValue();
+        final List<String> errors = new ArrayList<>();
+        BatchStatus status = BatchStatus.SUCCESS;
+        int completed = 0;
+        cli = parsed;
+        try {
+            if (!embeddedLogInitialized) {
+                LogUtil.addFileAppender();
+                embeddedLogInitialized = true;
+            }
+            checkLocale();
+            // Bound concurrency on mobile; jobs and sheets execute in a stable sequence.
+            OmrExecutors.defaultParallelism.setSpecific(false);
+            OMR.engine = BookManager.getInstance();
+            Languages.getInstance().checkSupport();
+            MusicFont.checkMusicFont();
+            final List<CliTask> tasks = parsed.getCliTasks();
+            for (CliTask task : tasks) {
+                if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+                    status = BatchStatus.CANCELLED;
+                    break;
+                }
+                try {
+                    task.call();
+                    completed++;
+                } catch (Exception ex) {
+                    status = ex instanceof ProcessingCancellationException
+                            || ex instanceof InterruptedException
+                            || Thread.currentThread().isInterrupted()
+                            ? BatchStatus.CANCELLED : BatchStatus.FAILED;
+                    errors.add(ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                    logger.warn("Embedded OMR task failed", ex);
+                    break;
+                }
+            }
+            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+                status = BatchStatus.CANCELLED;
+            }
+        } catch (RuntimeException | LinkageError ex) {
+            status = BatchStatus.FAILED;
+            errors.add(ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            logger.warn("Embedded OMR initialization failed", ex);
+        } finally {
+            if (!OmrExecutors.shutdownForEmbedded(status != BatchStatus.SUCCESS, 30_000)) {
+                status = BatchStatus.TIMED_OUT;
+                errors.add("OMR workers did not terminate; a new job is refused until they finish");
+                embeddedPendingRestore = new EmbeddedPreviousState(
+                        previousCli, previousLocale, previousParallelism);
+            } else {
+                OmrExecutors.defaultParallelism.setSpecific(previousParallelism);
+                Locale.setDefault(previousLocale);
+                cli = previousCli;
+            }
+        }
+        return new BatchResult(status, completed, errors);
+    }
+
+    private static void validateEmbeddedArguments (String[] args)
+    {
+        if (args == null) {
+            throw new IllegalArgumentException("Arguments must not be null");
+        }
+        final Set<String> options = Set.of("-batch", "-transcribe", "-export", "-export-midi",
+                "-output", "-step", "-save", "-swap", "-force", "-help", "-version", "--");
+        boolean literal = false;
+        for (String argument : args) {
+            if (argument == null || argument.startsWith("@")) {
+                throw new IllegalArgumentException("Null arguments and @files are not supported");
+            }
+            if (!literal && argument.startsWith("-") && !options.contains(argument)) {
+                throw new IllegalArgumentException("Unsupported embedded option: " + argument);
+            }
+            if (argument.equals("--")) {
+                literal = true;
+            }
+        }
+    }
+
+    private static void validateEmbeddedPaths (CLI.Parameters parameters) throws IOException
+    {
+        final Path root = WellKnowns.APP_HOME.toRealPath();
+        if (parameters.arguments.size() != 1 || parameters.outputFolder == null) {
+            throw new IllegalArgumentException("Embedded OMR requires one input and an output directory");
+        }
+        final Path input = parameters.arguments.get(0).toRealPath();
+        final Path output = parameters.outputFolder.toRealPath();
+        if (!input.startsWith(root) || !output.startsWith(root)
+                || !Files.isRegularFile(input) || !Files.isDirectory(output)) {
+            throw new IllegalArgumentException("Embedded input and output must stay inside appHome");
+        }
+        final String name = input.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (!(name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")
+                || name.endsWith(".tif") || name.endsWith(".tiff") || name.endsWith(".bmp")
+                || name.endsWith(".gif") || name.endsWith(".pdf"))) {
+            throw new IllegalArgumentException("Embedded input must be an image or PDF, not a saved book");
         }
     }
 

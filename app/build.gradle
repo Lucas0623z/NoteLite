@@ -232,6 +232,22 @@ test {
     // Test classes not meant for Junit
     exclude '**/org/notelite/omr/jaxb/basic/**'
     exclude '**/org/notelite/omr/jaxb/facade/**'
+    // Full transcription runs separately with a fresh sandbox and bundled OCR models.
+    exclude '**/EmbeddedOmrEngineTest*'
+}
+
+tasks.register('embeddedOmrTest', Test) {
+    description = 'Exercise the real OMR engine in-process, including MusicXML/MIDI and repeated jobs'
+    group = 'verification'
+    dependsOn tasks.named('testClasses')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter { includeTestsMatching 'com.notelite.omr.EmbeddedOmrEngineTest' }
+    workingDir = project.projectDir
+    maxHeapSize = '3g'
+    systemProperty 'notelite.embeddedTestRoot', layout.buildDirectory.dir('embedded-tests').get().asFile.absolutePath
+    systemProperty 'notelite.embeddedTestInput', rootProject.file('data/examples/chula.png').absolutePath
+    testLogging.showStandardStreams = true
 }
 
 //-------
