@@ -18,6 +18,8 @@ for tool in git curl shasum python3 xcodebuild xcrun autoconf gmake; do
   command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 2; }
 done
 : "${JAVA_HOME:?Set JAVA_HOME to a JDK 26, 27 or 28 bootstrap JDK}"
+: "${MOBILE_JDK_HOST_HOME:?Build and unpack the matching macOS tools with build-mobile-jdk-tools.sh}"
+[[ -x "$MOBILE_JDK_HOST_HOME/bin/jmod" && -x "$MOBILE_JDK_HOST_HOME/bin/jlink" ]] || exit 2
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 work_root="${MOBILE_JDK_WORK_DIR:-$repo_root/build/mobile-jdk/$platform}"
@@ -124,7 +126,9 @@ ffi_headers="$ffi_build/Release-$sdk/include/ffi"
     --enable-headless-only \
     --disable-cds-archive \
     --with-freetype=bundled \
+    --with-zlib=system \
     "--with-boot-jdk=$JAVA_HOME" \
+    "--with-build-jdk=$MOBILE_JDK_HOST_HOME" \
     "--with-sysroot=$sdk_path" \
     "--with-libffi-include=$ffi_headers" \
     "--with-libffi-lib=$(dirname "$ffi_library")" \
@@ -133,7 +137,7 @@ ffi_headers="$ffi_build/Release-$sdk/include/ffi"
     "--with-extra-cxxflags=-target $triple" \
     "--with-extra-ldflags=-target $triple" \
     "--with-jobs=${MOBILE_JDK_JOBS:-3}"
-  gmake "CONF=$conf_name" LOG=info static-libs-image jmods
+  gmake "CONF=$conf_name" LOG=info static-libs-image java copy java.base-gendata release-file
 ) 2>&1 | tee "$logs/openjdk-baseline.log"
 
 build_dir="$source_dir/build/$conf_name"
@@ -141,7 +145,6 @@ mkdir -p "$artifacts/baseline"
 cp -R "$build_dir/images/static-libs" "$artifacts/baseline/"
 cp -R "$build_dir/jdk/include" "$artifacts/baseline/"
 cp "$ffi_library" "$artifacts/baseline/static-libs/lib/"
-cp -R "$build_dir/images/jmods" "$artifacts/baseline/"
 cp "$build_dir/spec.gmk" "$artifacts/baseline/spec.gmk"
 
 # Add actual software raster/font rendering and replace the Cocoa-only platform
@@ -151,13 +154,16 @@ git -C "$source_dir" diff --binary > "$artifacts/ios-headless.patch"
 set +e
 (
   cd "$source_dir"
-  gmake "CONF=$conf_name" LOG=info static-libs-image jmods jdk-image
+  gmake "CONF=$conf_name" LOG=info static-libs-image java copy java.base-gendata release-file || exit $?
+  python3 "$repo_root/tools/audiveris-port/package-mobile-modules.py" \
+    "$build_dir" "$source_dir" "$MOBILE_JDK_HOST_HOME" "$artifacts/headless"
 ) 2>&1 | tee "$logs/openjdk-headless.log"
 headless_status=${PIPESTATUS[0]}
 set -e
 
 # Record all produced libraries even on failure; do not manufacture placeholders.
 python3 - "$build_dir" "$artifacts" "$platform" "$mobile_ref" "$headless_status" <<'PY'
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -169,11 +175,12 @@ libraries = build / "images/static-libs/lib"
 present = sorted(p.relative_to(libraries).as_posix() for p in libraries.rglob("*.a"))
 report = {
     "source_commit": sys.argv[4], "platform": sys.argv[3], "vm": "zero",
+    "adapter_patch_sha256": hashlib.sha256((output / "ios-headless.patch").read_bytes()).hexdigest(),
     "headless_build_exit_code": int(sys.argv[5]),
     "present_libraries": present,
     "missing_required_libraries": [name for name in required if name not in present],
-    "java_desktop_jmod": (build / "images/jmods/java.desktop.jmod").is_file(),
-    "runtime_module_image": (build / "images/jdk/lib/modules").is_file(),
+    "java_desktop_jmod": (output / "headless/jmods/java.desktop.jmod").is_file(),
+    "runtime_module_image": (output / "headless/runtime/lib/modules").is_file(),
     "runtime_tested": False,
     "audiveris_end_to_end_tested": False,
 }
@@ -186,21 +193,8 @@ if [[ "$headless_status" != 0 ]]; then
 fi
 mkdir -p "$artifacts/headless"
 cp -R "$build_dir/images/static-libs" "$artifacts/headless/"
-cp -R "$build_dir/images/jmods" "$artifacts/headless/"
 cp -R "$build_dir/jdk/include" "$artifacts/headless/"
 cp "$ffi_library" "$artifacts/headless/static-libs/lib/"
-# jdk-image uses the matching host build-JDK28 jlink, not the JDK26 bootstrap
-# linker. Preserve its module image, configuration and notices for embedding.
-mkdir -p "$artifacts/headless/runtime/lib"
-cp "$build_dir/images/jdk/lib/modules" "$artifacts/headless/runtime/lib/"
-cp "$build_dir/images/jdk/release" "$artifacts/headless/runtime/"
-cp -R "$build_dir/images/jdk/conf" "$artifacts/headless/runtime/"
-cp -R "$build_dir/images/jdk/legal" "$artifacts/headless/runtime/"
-for resource in tzdb.dat jrt-fs.jar; do
-  if [[ -f "$build_dir/images/jdk/lib/$resource" ]]; then
-    cp "$build_dir/images/jdk/lib/$resource" "$artifacts/headless/runtime/lib/"
-  fi
-done
 # These are the application's original, licensed font files; use the same
 # contours for Audiveris templates. The default text fallback is FinaleJazzText.
 mkdir -p "$artifacts/headless/runtime/lib/fonts"

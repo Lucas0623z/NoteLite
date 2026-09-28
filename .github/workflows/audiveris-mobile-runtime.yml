@@ -10,15 +10,19 @@ on:
         type: choice
         options: [device, simulator, both]
   push:
-    branches: ["codex/audiveris-ios-builds"]
+    branches: ["codex/audiveris-ios-builds", "codex/audiveris-ios-runtime-builds"]
     paths:
       - "tools/audiveris-port/build-mobile-jdk.sh"
+      - "tools/audiveris-port/build-mobile-jdk-tools.sh"
+      - "tools/audiveris-port/package-mobile-modules.py"
       - "tools/audiveris-port/mobile-desktop/**"
       - "tools/audiveris-port/patch-mobile-desktop.py"
       - ".github/workflows/audiveris-mobile-runtime.yml"
   pull_request:
     paths:
       - "tools/audiveris-port/build-mobile-jdk.sh"
+      - "tools/audiveris-port/build-mobile-jdk-tools.sh"
+      - "tools/audiveris-port/package-mobile-modules.py"
       - "tools/audiveris-port/mobile-desktop/**"
       - "tools/audiveris-port/patch-mobile-desktop.py"
       - ".github/workflows/audiveris-mobile-runtime.yml"
@@ -31,7 +35,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  host_tools:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      MOBILE_JDK_JOBS: "3"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore matching macOS module tools
+        id: tools_cache
+        uses: actions/cache@v4
+        with:
+          path: build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz
+          key: mobile-jdk28-tools-c1ed06aaef34-Xcode26.6-${{ runner.arch }}-${{ hashFiles('tools/audiveris-port/build-mobile-jdk-tools.sh') }}
+      - name: Install build tools
+        if: steps.tools_cache.outputs.cache-hit != 'true'
+        run: brew install autoconf make
+      - name: Set up bootstrap JDK
+        if: steps.tools_cache.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "26"
+      - name: Build matching host jmod and jlink
+        if: steps.tools_cache.outputs.cache-hit != 'true'
+        run: bash tools/audiveris-port/build-mobile-jdk-tools.sh
+      - name: Share matching host tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-ios-host-tools
+          retention-days: 14
+          if-no-files-found: error
+          path: build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz
+      - name: Preserve host compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiveris-ios-host-tools-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/mobile-tools/logs/
+            build/mobile-tools/openjdk-mobile/build/**/configure.log
+            build/mobile-tools/openjdk-mobile/build/**/make-support/failure-logs/
   runtime:
+    needs: host_tools
     runs-on: macos-26
     timeout-minutes: 120
     strategy:
@@ -42,8 +91,16 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       MOBILE_JDK_WORK_DIR: ${{ github.workspace }}/build/mobile-jdk
       MOBILE_JDK_JOBS: "3"
+      MOBILE_JDK_HOST_HOME: ${{ github.workspace }}/build/mobile-tools/jdk
     steps:
       - uses: actions/checkout@v6
+      - name: Download matching macOS module tools
+        uses: actions/download-artifact@v4
+        with:
+          name: audiveris-ios-host-tools
+          path: build/mobile-tools/download
+      - name: Unpack matching macOS module tools
+        run: tar -xzf build/mobile-tools/download/mobile-jdk-host-tools.tar.gz -C build/mobile-tools
       - name: Install build tools
         run: brew install autoconf make
       - name: Set up bootstrap JDK
@@ -67,3 +124,4 @@ jobs:
             build/mobile-jdk/artifacts/
             build/mobile-jdk/openjdk-mobile/build/**/configure.log
             build/mobile-jdk/openjdk-mobile/build/**/make-support/failure-summary
+            build/mobile-jdk/openjdk-mobile/build/**/make-support/failure-logs/

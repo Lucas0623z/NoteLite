@@ -7,6 +7,7 @@ Each patch checks its source context and fails if upstream has changed.
 """
 from pathlib import Path
 import argparse
+import re
 import subprocess
 
 SOURCE_COMMIT = "c1ed06aaef34c8dccf71e236d1ffa20918a77cfb"
@@ -33,6 +34,13 @@ def main() -> None:
     replace(root, "make/modules/java.desktop/Lib.gmk",
             "ifeq ($(call isTargetOs, android ios), false)",
             "ifeq ($(call isTargetOs, android), false)")
+    replace(root, "make/modules/java.desktop/Lib.gmk",
+            "include LibCommon.gmk\n",
+            "include LibCommon.gmk\n\n"
+            "# Headless iOS does not compile CUPS code; do not inject macOS SDK headers.\n"
+            "ifeq ($(call isTargetOs, ios), true)\n"
+            "  CUPS_CFLAGS :=\n"
+            "endif\n")
     awt = "make/modules/java.desktop/lib/AwtLibraries.gmk"
     replace(root, awt,
             "ifeq ($(call isTargetOs, linux macosx aix), true)",
@@ -55,6 +63,32 @@ def main() -> None:
             "else ifeq ($(call isTargetOs, macosx), true)",
             "else ifeq ($(call isTargetOs, macosx ios), true)")
 
+    # The OCR bundle contains libjpeg-turbo, while javajpeg contains IJG6b.
+    # A static process must not interpose one implementation's functions onto
+    # the other's private state. Prefix the bundled JDK C symbols, preserving
+    # its JNI entry points and original pixel behavior.
+    jpeg = root / "src/java.desktop/share/native/libjavajpeg"
+    symbols = set()
+    for source in jpeg.glob("*.c"):
+        symbols.update(re.findall(r"\bGLOBAL\s*\([^)]*\)\s*([A-Za-z_]\w*)\s*\(",
+                                  source.read_text(encoding="utf-8")))
+    symbols = {name for name in symbols if not name.startswith(("imageio_", "sun_"))}
+    symbols.update(("jpeg_std_message_table", "jpeg_zigzag_order", "jpeg_natural_order"))
+    if len(symbols) != 102 or "jpeg_CreateDecompress" not in symbols:
+        raise SystemExit(f"Unexpected pinned JPEG symbol inventory: {len(symbols)}")
+    prefix = jpeg / "notelite_jpeg_symbols.h"
+    prefix.write_text(
+        "/* SPDX-License-Identifier: GPL-2.0-only WITH Classpath-exception-2.0 */\n"
+        "/* Isolate bundled IJG6b from the independently linked OCR codec. */\n"
+        "#ifndef NOTELITE_JDK_JPEG_SYMBOLS_H\n#define NOTELITE_JDK_JPEG_SYMBOLS_H\n"
+        + "".join(f"#define {name} notelite_jdk_{name}\n" for name in sorted(symbols))
+        + "#endif\n", encoding="utf-8", newline="\n")
+    replace(root, "make/modules/java.desktop/lib/ClientLibraries.gmk",
+            "    NAME := javajpeg, \\\n",
+            "    NAME := javajpeg, \\\n"
+            "    CFLAGS_ios := -include $(TOPDIR)/src/java.desktop/share/native/"
+            "libjavajpeg/notelite_jpeg_symbols.h, \\\n")
+
     # iOS imports macosx/classes in upstream Modules.gmk. Keep all six classes
     # together there so the matching host build-JDK can also compile this tree.
     source_classes = Path(__file__).resolve().parent / "mobile-desktop"
@@ -76,6 +110,8 @@ def main() -> None:
     # Intent-to-add makes the saved git diff include the new platform classes.
     subprocess.run(["git", "-C", str(root), "add", "--intent-to-add", "--", *installed],
                    check=True)
+    subprocess.run(["git", "-C", str(root), "add", "--intent-to-add", "--",
+                    prefix.relative_to(root).as_posix()], check=True)
     print(f"Applied headless software raster/font adaptation to {commit}")
     print("\n".join(installed))
 
