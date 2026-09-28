@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipFile;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -101,6 +103,46 @@ public class EmbeddedOmrEngineTest
         assertTrue(result.midi().isEmpty());
         assertEquals(Main.BatchStatus.SUCCESS,
                 Main.runEmbeddedBatch(new String[] { "-batch", "-help" }).status());
+    }
+
+    @Test(timeout = 120_000)
+    public void ownedCancellationBeforeEntryCannotCancelFollowingJob () throws Exception
+    {
+        final AtomicBoolean signal = new AtomicBoolean(true);
+        final var old = new EmbeddedOmrEngine.Cancellation(signal::get);
+        final String cancelled = EmbeddedOmrEngine.recognizeToJSON(
+                engine.appHome().toString(), input.toString(), old);
+        assertTrue(cancelled.contains("\"status\":\"CANCELLED\""));
+        assertTrue(cancelled.contains("\"completedTasks\":0"));
+        // A late cancellation of the old token while the following job polls
+        // must never act on the following job's cancellation state.
+        final var next = new EmbeddedOmrEngine.Cancellation(() -> {
+            old.cancel();
+            return false;
+        });
+        final String success = EmbeddedOmrEngine.recognizeToJSON(
+                engine.appHome().toString(), input.toString(), next);
+        assertTrue(success.contains("\"status\":\"SUCCESS\""));
+        assertFalse(next.isCancelled());
+        assertThrows(IllegalArgumentException.class, () ->
+                EmbeddedOmrEngine.recognizeToJSONWithNativeCancellation(
+                        engine.appHome().toString(), input.toString(), 0));
+    }
+
+    @Test
+    public void cancellationAfterEntryIsPolledBeforeRecognitionStarts () throws Exception
+    {
+        final AtomicInteger polls = new AtomicInteger();
+        // The first batch boundary succeeds. Cancellation arrives during
+        // initialization and must be observed again before the CLI task runs.
+        final var cancellation = new EmbeddedOmrEngine.Cancellation(() -> polls.incrementAndGet() >= 2);
+        final String json = EmbeddedOmrEngine.recognizeToJSON(
+                engine.appHome().toString(), input.toString(), cancellation);
+        assertTrue(polls.get() >= 2);
+        assertTrue(json.contains("\"status\":\"CANCELLED\""));
+        assertTrue(json.contains("\"completedTasks\":0"));
+        assertTrue(json.contains("\"musicXML\":[]"));
+        assertTrue(json.contains("\"midi\":[]"));
     }
 
     @Test(timeout = 120_000)

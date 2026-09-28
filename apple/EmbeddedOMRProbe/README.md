@@ -13,6 +13,9 @@ after it has rasterized the Bravura font, round-tripped TIFF through ImageIO and
 Leptonica, initialized legacy Tesseract, exercised JAXB/ProxyMusic, recognized
 the bundled `chula.png`, and parsed pitched notes and sounding MIDI events from
 the actual MusicXML/MIDI exports.
+Before starting the VM, the native worker also submits an already-cancelled
+request with a nonexistent input. It must return the cancellation error before
+reading that input. The following full probe must still initialize and run.
 
 ## Build on macOS
 

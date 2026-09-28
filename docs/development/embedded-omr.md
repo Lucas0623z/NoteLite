@@ -52,7 +52,7 @@ API alone does not establish that these dependencies run on iOS.
 TESSDATA_PREFIX=/path/to/bundled/tessdata ./gradlew :app:embeddedOmrTest
 ```
 
-This opt-in task runs eight integration tests in a fresh sandbox. It rejects
+This opt-in task runs ten integration tests in a fresh sandbox. It rejects
 malformed arguments and outside paths, verifies cancellation and executor
 timeout handling, feeds a corrupt image followed by two complete recognitions
 of `data/examples/chula.png`, and exercises the JNI JSON entry. It parses the

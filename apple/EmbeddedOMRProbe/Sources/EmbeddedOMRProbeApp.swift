@@ -48,8 +48,27 @@ final class ProbeModel: ObservableObject {
                 // Zero interprets Java on the native stack; reserve enough for the initiating worker.
                 let worker = Thread {
                     do {
+                        // This request is cancelled before native entry. It must
+                        // return before touching an input file or starting the VM.
+                        let cancellation = EmbeddedOMRCancellation()
+                        cancellation.cancel()
+                        do {
+                            _ = try EmbeddedJVM.recognize(resourceRoot: resources.path, sandbox: sandbox.path,
+                                                          input: sandbox.appendingPathComponent("must-not-be-read.png").path,
+                                                          cancellation: cancellation)
+                            throw CocoaError(.coderInvalidValue)
+                        } catch let error as NSError {
+                            guard error.domain == NSCocoaErrorDomain && error.code == NSUserCancelledError else {
+                                throw error
+                            }
+                        }
                         let result = try EmbeddedJVM.run(resourceRoot: resources.path, sandbox: sandbox.path)
-                        continuation.resume(returning: result)
+                        guard var report = try JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any] else {
+                            throw CocoaError(.coderReadCorrupt)
+                        }
+                        report["cancelledBeforeVMStart"] = true
+                        let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+                        continuation.resume(returning: String(decoding: data, as: UTF8.self))
                     } catch {
                         continuation.resume(throwing: error)
                     }

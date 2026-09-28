@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <mach/mach.h>
 #include <TargetConditionals.h>
@@ -17,10 +18,47 @@ extern "C" void loadfunctions(void);
 
 static JavaVM *embeddedVM = nullptr;
 static bool startupAttempted = false;
-static std::atomic<JavaVM *> publishedVM(nullptr);
-static std::atomic<bool> cancellationRequested(false);
 static NSString *initializedResources;
 static NSString *initializedSandbox;
+
+@interface EmbeddedOMRCancellation () {
+    std::atomic<bool> _requested;
+}
+- (jlong)nativeHandle;
+@end
+
+@implementation EmbeddedOMRCancellation
+- (instancetype)init {
+    self = [super init];
+    if (self) _requested.store(false);
+    return self;
+}
+- (void)cancel { _requested.store(true); }
+- (BOOL)isCancelled { return _requested.load(); }
+- (jlong)nativeHandle { return static_cast<jlong>(reinterpret_cast<intptr_t>(&_requested)); }
+@end
+
+static std::mutex activeCancellationMutex;
+static EmbeddedOMRCancellation *activeCancellation;
+
+class ActiveCancellationScope {
+public:
+    explicit ActiveCancellationScope(EmbeddedOMRCancellation *token) {
+        std::lock_guard<std::mutex> lock(activeCancellationMutex);
+        activeCancellation = token;
+    }
+    ~ActiveCancellationScope() {
+        std::lock_guard<std::mutex> lock(activeCancellationMutex);
+        activeCancellation = nil;
+    }
+};
+
+static jboolean nativeCancellationRequested(JNIEnv *, jclass, jlong handle) {
+    // Java polls only during the synchronous entry. The owning ObjC token is
+    // retained through that entire call, including shutdown/timeout handling.
+    auto *flag = reinterpret_cast<const std::atomic<bool> *>(static_cast<intptr_t>(handle));
+    return flag && flag->load() ? JNI_TRUE : JNI_FALSE;
+}
 
 // Process-wide samples include the host UI, VM, native OCR, and this sampler.
 // A sampled maximum is not the operating system's exact high-water mark.
@@ -85,7 +123,7 @@ public:
 + (nullable NSString *)invokeWithResourceRoot:(NSString *)resourceRoot sandbox:(NSString *)sandbox
                                  entryClass:(const char *)entryClass method:(const char *)method
                               firstArgument:(NSString *)firstArgument secondArgument:(NSString *)secondArgument
-                                recognition:(BOOL)recognition error:(NSError **)error;
+                                cancellation:(nullable EmbeddedOMRCancellation *)cancellation error:(NSError **)error;
 @end
 
 static void setError(NSError **error, NSString *message) {
@@ -131,44 +169,48 @@ static NSString *pendingException(JNIEnv *environment) {
 @implementation EmbeddedJVM
 + (NSString *)runWithResourceRoot:(NSString *)resourceRoot sandbox:(NSString *)sandbox error:(NSError **)error {
     return [self invokeWithResourceRoot:resourceRoot sandbox:sandbox entryClass:"EmbeddedNativeProbe"
-        method:"run" firstArgument:resourceRoot secondArgument:sandbox recognition:NO error:error];
+        method:"run" firstArgument:resourceRoot secondArgument:sandbox cancellation:nil error:error];
 }
 
 + (NSString *)recognizeWithResourceRoot:(NSString *)resourceRoot sandbox:(NSString *)sandbox
                                   input:(NSString *)input error:(NSError **)error {
+    return [self recognizeWithResourceRoot:resourceRoot sandbox:sandbox input:input
+                             cancellation:[EmbeddedOMRCancellation new] error:error];
+}
+
++ (NSString *)recognizeWithResourceRoot:(NSString *)resourceRoot sandbox:(NSString *)sandbox
+                                  input:(NSString *)input cancellation:(EmbeddedOMRCancellation *)cancellation
+                                  error:(NSError **)error {
     return [self invokeWithResourceRoot:resourceRoot sandbox:sandbox entryClass:"com/notelite/omr/EmbeddedOmrEngine"
-        method:"recognizeToJSON" firstArgument:sandbox secondArgument:input recognition:YES error:error];
+        method:"recognizeToJSONWithNativeCancellation" firstArgument:sandbox secondArgument:input
+        cancellation:cancellation error:error];
 }
 
 + (void)cancelCurrentRecognition {
-    cancellationRequested.store(true);
-    JavaVM *vm = publishedVM.load();
-    if (!vm) return; // The worker checks the flag after bootstrap and before entering Java.
-    JNIEnv *environment = nullptr;
-    bool detach = false;
-    jint status = vm->GetEnv((void **)&environment, JNI_VERSION_1_8);
-    if (status == JNI_EDETACHED) {
-        if (vm->AttachCurrentThread((void **)&environment, nullptr) != JNI_OK) return;
-        detach = true;
-    } else if (status != JNI_OK) return;
-    jclass engine = environment->FindClass("com/notelite/omr/EmbeddedOmrEngine");
-    if (engine && !environment->ExceptionCheck()) {
-        jmethodID cancel = environment->GetStaticMethodID(engine, "cancelCurrentRecognition", "()V");
-        if (cancel && !environment->ExceptionCheck()) environment->CallStaticVoidMethod(engine, cancel);
+    EmbeddedOMRCancellation *token;
+    {
+        // This lock protects only an object reference; it is never held during JNI work.
+        std::lock_guard<std::mutex> lock(activeCancellationMutex);
+        token = activeCancellation;
     }
-    if (environment->ExceptionCheck()) pendingException(environment);
-    if (engine) environment->DeleteLocalRef(engine);
-    if (detach) vm->DetachCurrentThread();
+    [token cancel];
 }
 
 + (NSString *)invokeWithResourceRoot:(NSString *)resourceRoot sandbox:(NSString *)sandbox
                           entryClass:(const char *)entryClass method:(const char *)method
                        firstArgument:(NSString *)firstArgument secondArgument:(NSString *)secondArgument
-                         recognition:(BOOL)recognition error:(NSError **)error {
+                         cancellation:(EmbeddedOMRCancellation *)cancellation error:(NSError **)error {
+    __attribute__((objc_precise_lifetime)) EmbeddedOMRCancellation *ownedCancellation = cancellation;
+    const BOOL recognition = ownedCancellation != nil;
     @synchronized (self) {
         std::unique_ptr<ProbeMemorySampler> memory;
         if (!recognition) memory = std::make_unique<ProbeMemorySampler>();
-        if (recognition) cancellationRequested.store(false);
+        std::unique_ptr<ActiveCancellationScope> activeScope;
+        if (recognition) activeScope = std::make_unique<ActiveCancellationScope>(ownedCancellation);
+        if (ownedCancellation.isCancelled) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil];
+            return nil;
+        }
         if (embeddedVM && (![initializedResources isEqualToString:resourceRoot]
                            || ![initializedSandbox isEqualToString:sandbox])) {
             setError(error, @"The existing JVM belongs to a different resource directory or sandbox");
@@ -259,7 +301,6 @@ static NSString *pendingException(JNIEnv *environment) {
             detach = true;
             initializedResources = [resourceRoot copy];
             initializedSandbox = [sandbox copy];
-            publishedVM.store(embeddedVM);
         } else {
             const jint state = embeddedVM->GetEnv((void **)&environment, JNI_VERSION_1_8);
             if (state == JNI_EDETACHED) {
@@ -274,7 +315,7 @@ static NSString *pendingException(JNIEnv *environment) {
             }
         }
 
-        if (recognition && cancellationRequested.load()) {
+        if (ownedCancellation.isCancelled) {
             if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil];
             if (detach) embeddedVM->DetachCurrentThread();
             return nil;
@@ -285,14 +326,27 @@ static NSString *pendingException(JNIEnv *environment) {
         jclass probe = environment->FindClass(entryClass);
         NSString *exception = pendingException(environment);
         if (probe && !exception) {
-            jmethodID run = environment->GetStaticMethodID(probe, method,
-                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-            exception = pendingException(environment);
+            if (recognition) {
+                JNINativeMethod callback = {const_cast<char *>("nativeCancellationRequested"),
+                    const_cast<char *>("(J)Z"), reinterpret_cast<void *>(&nativeCancellationRequested)};
+                if (environment->RegisterNatives(probe, &callback, 1) != JNI_OK) {
+                    exception = pendingException(environment) ?: @"Could not register request cancellation callback";
+                }
+            }
+            jmethodID run = nullptr;
+            if (!exception) {
+                run = environment->GetStaticMethodID(probe, method,
+                    recognition ? "(Ljava/lang/String;Ljava/lang/String;J)Ljava/lang/String;"
+                                : "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+                exception = pendingException(environment);
+            }
             if (run && !exception) {
                 jstring resources = newJavaString(environment, firstArgument);
                 jstring root = newJavaString(environment, secondArgument);
                 if (!environment->ExceptionCheck()) {
-                    jstring report = (jstring)environment->CallStaticObjectMethod(probe, run, resources, root);
+                    jstring report = recognition
+                        ? (jstring)environment->CallStaticObjectMethod(probe, run, resources, root, [ownedCancellation nativeHandle])
+                        : (jstring)environment->CallStaticObjectMethod(probe, run, resources, root);
                     exception = pendingException(environment);
                     if (!exception) result = javaString(environment, report);
                     if (report) environment->DeleteLocalRef(report);
@@ -304,7 +358,7 @@ static NSString *pendingException(JNIEnv *environment) {
             }
             environment->DeleteLocalRef(probe);
         }
-        if (recognition && cancellationRequested.load() && result) {
+        if (ownedCancellation.isCancelled && result) {
             // Preserve the known output directory so the caller can discard a canceled job.
             // A timeout may still have active workers: retain its status and files for diagnosis.
             NSMutableDictionary *report = [NSJSONSerialization JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding]
@@ -317,8 +371,6 @@ static NSString *pendingException(JNIEnv *environment) {
                 NSData *data = [NSJSONSerialization dataWithJSONObject:report options:0 error:nil];
                 if (data) result = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             }
-        } else if (recognition && cancellationRequested.load() && !result) {
-            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil];
         } else if (!result) setError(error, exception ?: @"Java engine returned no result");
         if (memory && result) {
             NSMutableDictionary *report = [NSJSONSerialization JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding]

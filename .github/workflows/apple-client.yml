@@ -49,6 +49,10 @@ jobs:
             -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
             apple/NoteLite/Models.swift apple/NoteLite/EmbeddedOMRInputPreparation.swift \
             apple/NoteLite/EmbeddedRecognitionService.swift
+          xcrun swiftc -typecheck -parse-as-library \
+            -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
+            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
+            apple/EmbeddedOMRProbe/Sources/EmbeddedOMRProbeApp.swift
 
   native-clients:
     runs-on: macos-26

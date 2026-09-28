@@ -2,6 +2,26 @@ import XCTest
 @testable import NoteLite
 
 final class EmbeddedRecognitionTests: XCTestCase {
+    func testCancellationBeforeWorkerEntryIsRetained() {
+        let ticket = EmbeddedRecognitionService.Ticket()
+        ticket.cancel()
+        XCTAssertThrowsError(try ticket.checkCancellation()) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertThrowsError(try ticket.checkCancellation())
+    }
+
+    func testLateCancellationCannotAffectTheFollowingRequest() throws {
+        let old = EmbeddedRecognitionService.Ticket()
+        try old.checkCancellation()
+        let next = EmbeddedRecognitionService.Ticket()
+        old.cancel()
+        XCTAssertThrowsError(try old.checkCancellation())
+        try next.checkCancellation()
+        old.cancel()
+        try next.checkCancellation()
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

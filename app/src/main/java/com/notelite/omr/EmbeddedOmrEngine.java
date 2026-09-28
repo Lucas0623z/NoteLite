@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
 /**
@@ -128,9 +129,30 @@ public final class EmbeddedOmrEngine
     /** Simple JNI entry: no Java Path/record marshalling is required in the native host. */
     public static String recognizeToJSON (String appHome, String input) throws IOException
     {
+        return recognizeToJSON(appHome, input, new Cancellation());
+    }
+
+    /** The native token is owned by this synchronous call and is never retained by engine workers. */
+    public static String recognizeToJSONWithNativeCancellation (String appHome, String input, long token)
+            throws IOException
+    {
+        if (token == 0) {
+            throw new IllegalArgumentException("A native request cancellation token is required");
+        }
+        return recognizeToJSON(appHome, input, new Cancellation(() -> nativeCancellationRequested(token)));
+    }
+
+    // Registered by the in-process host. The callback only reads that request's atomic flag.
+    private static native boolean nativeCancellationRequested (long token);
+
+    /** Explicit cancellation ownership, also used to test the JNI entry's boundary semantics. */
+    public static String recognizeToJSON (String appHome, String input, Cancellation cancellation) throws IOException
+    {
+        if (cancellation == null) {
+            throw new IllegalArgumentException("Cancellation must not be null");
+        }
         synchronized (Main.class) {
             final long started = System.nanoTime();
-            final Cancellation cancellation = new Cancellation();
             activeNativeCancellation = cancellation;
             final RecognitionResult result;
             try {
@@ -199,6 +221,17 @@ public final class EmbeddedOmrEngine
     public static final class Cancellation
     {
         private final AtomicBoolean cancelled = new AtomicBoolean();
+        private final BooleanSupplier externalSignal;
+
+        public Cancellation ()
+        {
+            this(() -> false);
+        }
+
+        Cancellation (BooleanSupplier externalSignal)
+        {
+            this.externalSignal = java.util.Objects.requireNonNull(externalSignal);
+        }
 
         public void cancel ()
         {
@@ -207,7 +240,7 @@ public final class EmbeddedOmrEngine
 
         public boolean isCancelled ()
         {
-            return cancelled.get();
+            return cancelled.get() || externalSignal.getAsBoolean();
         }
     }
 }

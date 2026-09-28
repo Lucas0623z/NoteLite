@@ -42,6 +42,8 @@ if report.get('status') != 'SUCCESS' or not report.get('fullScoreRecognitionTest
     raise SystemExit('Actual embedded recognition failed; preserved reports and logs contain the evidence')
 if not report.get('sameProcessJNI') or 'Zero' not in report.get('javaVM', ''):
     raise SystemExit('The report was not produced by the embedded Zero JNI runtime')
+if not report.get('cancelledBeforeVMStart'):
+    raise SystemExit('The native pre-entry cancellation gate did not pass')
 if report.get('pitchedNotes', 0) <= 0 or report.get('midiNoteOnEvents', 0) <= 0:
     raise SystemExit('No real musical output was validated')
 memory = report.get('nativeMemory', {})

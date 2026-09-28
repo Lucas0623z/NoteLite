@@ -48,9 +48,8 @@ final class EmbeddedRecognitionService: EmbeddedRecognizing, @unchecked Sendable
                     let worker = Thread {
                         defer { finished.signal() }
                         do {
-                            try ticket.begin()
-                            defer { ticket.finish() }
-                            let artifacts = try self.run(source: source, cancellationCheck: ticket.checkCancellation)
+                            try ticket.checkCancellation()
+                            let artifacts = try self.run(source: source, ticket: ticket)
                             try ticket.checkCancellation()
                             continuation.resume(returning: artifacts)
                         } catch {
@@ -75,7 +74,7 @@ final class EmbeddedRecognitionService: EmbeddedRecognizing, @unchecked Sendable
     }
 
     #if EMBEDDED_OMR_RUNTIME
-    private func run(source: URL, cancellationCheck: () throws -> Void) throws -> [EmbeddedArtifact] {
+    private func run(source: URL, ticket: Ticket) throws -> [EmbeddedArtifact] {
         guard let resources = Bundle.main.url(forResource: "OMRResources", withExtension: nil),
               FileManager.default.fileExists(atPath: resources.appendingPathComponent("runtime/lib/modules").path)
         else { throw EmbeddedRecognitionError.missingResources }
@@ -89,12 +88,20 @@ final class EmbeddedRecognitionService: EmbeddedRecognizing, @unchecked Sendable
         var safeToRemoveJobFiles = true
         defer { if safeToRemoveJobFiles { try? files.removeItem(at: imported) } }
         let prepared = try EmbeddedOMRInputPreparer.prepare(source: source, in: imported,
-                                                            cancellationCheck: cancellationCheck)
-        try cancellationCheck()
+                                                            cancellationCheck: ticket.checkCancellation)
+        try ticket.checkCancellation()
         // A timed-out worker may still own these files. Only a definitive
         // finished-job status permits removing them while this JVM is alive.
         safeToRemoveJobFiles = false
-        let json = try EmbeddedJVM.recognize(resourceRoot: resources.path, sandbox: sandbox.path, input: prepared.url.path)
+        let json: String
+        do {
+            json = try EmbeddedJVM.recognize(resourceRoot: resources.path, sandbox: sandbox.path,
+                                            input: prepared.url.path, cancellation: ticket.nativeCancellation)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSUserCancelledError {
+            // The bridge uses this error only before entering Java recognition.
+            safeToRemoveJobFiles = true
+            throw CancellationError()
+        }
         let report = try JSONDecoder().decode(Report.self, from: Data(json.utf8))
         safeToRemoveJobFiles = ["SUCCESS", "FAILED", "CANCELLED"].contains(report.status)
         let output = URL(fileURLWithPath: report.outputDirectory).resolvingSymlinksInPath().standardizedFileURL
@@ -108,19 +115,15 @@ final class EmbeddedRecognitionService: EmbeddedRecognizing, @unchecked Sendable
         return try Self.readArtifacts(report, inside: output)
     }
 
-    private final class Ticket: @unchecked Sendable {
+    #endif
+
+    /// A fresh request owns a fresh token. Old cancellation can never reach a later job.
+    final class Ticket: @unchecked Sendable {
         private let lock = NSLock()
         private var cancelled = false
-        private var running = false
-        func begin() throws {
-            lock.lock(); defer { lock.unlock() }
-            if cancelled { throw CancellationError() }
-            running = true
-        }
-        func finish() {
-            lock.lock(); defer { lock.unlock() }
-            running = false
-        }
+        #if EMBEDDED_OMR_RUNTIME
+        let nativeCancellation = EmbeddedOMRCancellation()
+        #endif
         func checkCancellation() throws {
             lock.lock(); defer { lock.unlock() }
             if cancelled { throw CancellationError() }
@@ -128,12 +131,12 @@ final class EmbeddedRecognitionService: EmbeddedRecognizing, @unchecked Sendable
         func cancel() {
             lock.lock(); defer { lock.unlock() }
             cancelled = true
-            // Keep the lock until the bridge observes this job's cancellation.
-            // The serial worker cannot finish and start another job in between.
-            if running { EmbeddedJVM.cancelCurrentRecognition() }
+            #if EMBEDDED_OMR_RUNTIME
+            // This stores an atomic flag only: no JNI calls or JVM thread attachment.
+            nativeCancellation.cancel()
+            #endif
         }
     }
-    #endif
 
     struct Report: Decodable {
         let status: String

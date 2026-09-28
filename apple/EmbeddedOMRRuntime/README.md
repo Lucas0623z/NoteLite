@@ -8,10 +8,12 @@ resource image are supplied.
 Swift entry points:
 
 ```swift
+let cancellation = EmbeddedOMRCancellation() // One token per request, kept by its caller.
 let report = try EmbeddedJVM.recognize(
-    resourceRoot: resources.path, sandbox: sandbox.path, input: importedInput.path
+    resourceRoot: resources.path, sandbox: sandbox.path, input: importedInput.path,
+    cancellation: cancellation
 )
-EmbeddedJVM.cancelCurrentRecognition()
+// Another thread can call cancellation.cancel() at any point, including before entry.
 ```
 
 The JSON report contains `status`, `outputDirectory`, `musicXML`, `midi`,
@@ -25,7 +27,13 @@ The output directory remains in a returned `CANCELLED` report for cleanup. A
 Call recognition on a dedicated worker with at least an 8 MiB native stack.
 The Zero interpreter uses that stack for Java execution. The bridge serializes
 engine calls, starts one VM, attaches later workers to that VM, and retains it
-for the app's lifetime. `cancelCurrentRecognition` can run on another thread.
+for the app's lifetime. `cancellation.cancel()` only stores an atomic flag and
+never calls JNI or attaches a Java thread, so it is safe from the UI thread.
+The token is never reset. The Java entry polls that exact token at safe batch
+boundaries through a registered native callback; the token stays alive for the
+whole synchronous call and is never retained by background engine workers.
+A late cancellation of an old request cannot affect a later request. The legacy
+current-job convenience remains available for older callers.
 The resource root and sandbox cannot change after VM creation.
 
 Resources must contain `java/*.jar`, `runtime/lib/modules`, `assets` with music
