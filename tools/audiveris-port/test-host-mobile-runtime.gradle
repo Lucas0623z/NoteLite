@@ -1,0 +1,39 @@
+// Keep Gradle and engine compilation on Java21. Compile the platform patch
+// against, and execute the engine on, the exact source-built host JDK28.
+// Use with oracle.gradle, invoking :app:portProbe :app:embeddedOmrTest.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def runtimeDirectory = System.getenv('MOBILE_JDK_HOST_HOME')
+    if (!runtimeDirectory) throw new GradleException('MOBILE_JDK_HOST_HOME is required')
+    def runtime = new File(runtimeDirectory)
+    def revision = new File(runtime, 'notelite-source-commit')
+    if (!revision.isFile() || revision.text.trim() != 'c1ed06aaef34c8dccf71e236d1ffa20918a77cfb') {
+        throw new GradleException('Use the host JDK built from the pinned Mobile source')
+    }
+    def sources = new File(gradle.rootProject.projectDir,
+                           'tools/audiveris-port/mobile-desktop')
+    def classes = new File(app.buildDir, 'mobile-desktop-jdk28-classes')
+    def sourceFiles = app.fileTree(sources) { include '**/*.java' }.files.sort()
+    def version = app.tasks.register('printHostMobileRuntimeVersion', Exec) {
+        commandLine new File(runtime, 'bin/java').absolutePath, '-version'
+    }
+    def compile = app.tasks.register('compileHostMobileDesktop', Exec) {
+        dependsOn version
+        inputs.files sourceFiles
+        inputs.file revision
+        outputs.dir classes
+        doFirst { classes.mkdirs() }
+        commandLine([new File(runtime, 'bin/javac').absolutePath,
+                     '--patch-module', "java.desktop=${sources.absolutePath}",
+                     '-encoding', 'UTF-8', '-d', classes.absolutePath]
+                    + sourceFiles.collect { it.absolutePath })
+    }
+    ['portProbe', 'embeddedOmrTest'].each { name ->
+        app.tasks.named(name).configure {
+            dependsOn compile
+            executable = new File(runtime, 'bin/java').absolutePath
+            jvmArgs '--patch-module', "java.desktop=${classes.absolutePath}",
+                    "-Dnotelite.omr.fontDirectory=${new File(app.projectDir, 'res').absolutePath}"
+        }
+    }
+}

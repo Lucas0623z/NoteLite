@@ -88,6 +88,7 @@ python tools/audiveris-port/audit_dependencies.py --check-native-artifacts
 本仓库提供：
 
 - `tools/audiveris-port/build-mobile-jdk.sh`：固定源码、libffi 3.5.2 及其 SHA-256；分别编译 iPhoneOS / iPhoneSimulator arm64，保留原始运行时基线和补丁后的产物。
+- `tools/audiveris-port/build-mobile-jdk-tools.sh` 与 `package-mobile-modules.py`：从同一固定源码独立构建 macOS JDK 28 工具，再把 iOS 编译出的全部类、配置、资源与许可打包成运行时模块映像。
 - `tools/audiveris-port/patch-mobile-desktop.py`：检查固定上游上下文，启用软件 AWT / FreeType / HarfBuzz / LCMS / JPEG；排除需要 X11、FontConfig、CUPS 和桌面窗口的路径。
 - `tools/audiveris-port/mobile-desktop/`：用 `MobileGraphicsEnvironment`、`MobileToolkit` 与 `MobileFontManager` 接入真实软件渲染和打包字体。字体轮廓来自原 `app/res` 文件，默认文本后备字体为 `FinaleJazzText.otf`。
 - `.github/workflows/audiveris-mobile-runtime.yml`：macOS 26 / Xcode 26.6 实际编译，上传每次日志与产物。构建成功和运行成功分开记录。
@@ -95,6 +96,9 @@ python tools/audiveris-port/audit_dependencies.py --check-native-artifacts
 在 macOS 的仓库根目录执行：
 
 ```sh
+bash tools/audiveris-port/build-mobile-jdk-tools.sh
+tar -xzf build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz -C build/mobile-tools
+export MOBILE_JDK_HOST_HOME="$PWD/build/mobile-tools/jdk"
 bash tools/audiveris-port/build-mobile-jdk.sh device
 bash tools/audiveris-port/build-mobile-jdk.sh simulator
 ```
@@ -103,13 +107,18 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 
 第一次实际编译遇到 libffi 生成器仍配置 ARMv7、Xcode 26 已移除该目标；第二次发现项目文件仍引用 ARMv7 源与头文件。脚本已同时去除生成调用和对应项目记录，没有建立空源文件来掩盖缺失。修复后必须重新编译验证。
 
+第三次的 device / simulator 均越过 libffi，进入 OpenJDK C++ 编译；直接构建 iOS `jmods` 时触发了上游尚未适配的动态库与交叉宿主构建，Apple 链接器拒绝 Linux 风格的 `-soname`。构建已改为官方 ios-tools 的静态库加目标 class 文件路线，使用独立 macOS 工具生成模块映像；CI 保存失败日志并重新验证该路线。
+
+静态链接还隔离了 JDK 自带 IJG JPEG 与 OCR 的 libjpeg-turbo：JDK JPEG 的 102 个 C 符号加独立前缀，JNI 名称保留，防止同一进程中两种实现错误互相调用。JDK 使用外部 zlib API，避免重复打包到 `libzip.a`。
+
 ### 已执行的宿主适配测试
 
 2026-09-28，在 Windows Java 21 上用相同的六个适配类替换 `java.desktop` 平台入口，实际执行了平台探针和完整进程内识别测试：
 
 - 原 Bravura 音符头渲染为 200 个前景像素；灰度像素 SHA-256 为 `eea016321d734c624626efc4dd5805dcf2fc9f47aceb1a3bd8642b79cec86c18`。
-- PNG 输出、ImageIO TIFF 往返、JAXB Unicode、ProxyMusic 上下文、JavaCPP TIFF 与 legacy OCR 调用通过。
+- PNG 输出、ImageIO JPEG / TIFF 往返、JAXB Unicode、ProxyMusic 上下文、JavaCPP JPEG / TIFF 与 legacy OCR 调用通过；JPEG 同时执行 JDK 与 Leptonica 两条实现路径。
 - 6 个嵌入式测试全部通过；`chula.png` 两次识别均导出 151 个有音高的音符和 220 个 MIDI note-on 事件，第三次通过 JNI 形式的 JSON 入口成功导出。
+- `verify_embedded_score.py` 已对包括此适配器在内的 8 组宿主导出进行语义比较：19 个小节、151 个有音高音符及 7 个其他音符的音高、起点、时值、声部、延音线和 MIDI 事件均与基准相同。
 
 这些结果说明平台 Java 适配没有阻断该样例的完整识别；它们使用宿主原生库，**不能证明 iOS 原生库或运行时已经通过**。可在 Java 21 宿主上重跑：
 
@@ -120,6 +129,16 @@ bash tools/audiveris-port/build-mobile-jdk.sh simulator
 ```
 
 设置 `TESSDATA_PREFIX` 为完整 tessdata 4.1.0 目录，至少包含支持 legacy 模式的 `eng.traineddata`。测试结果保存在 `app/build/port-probe/` 和 `app/build/test-results/embeddedOmrTest/`。
+
+另一个 CI 作业 `host_runtime_validation` 使用上述固定源码构建的 macOS JDK 28：Gradle 与引擎编译仍用 Java 21，六个平台适配类改用该 JDK 28 的 `javac` 编译，探针和完整识别测试改由该 JDK 28 执行。每组导出还要通过 MusicXML / MIDI 语义比较。此作业独立于 iOS 交叉编译，目前尚待实际运行结果。在已准备好 `MOBILE_JDK_HOST_HOME` 的 macOS 主机上，可切换 `JAVA_HOME` 到 Java 21 后运行：
+
+```sh
+./gradlew -I tools/audiveris-port/oracle.gradle \
+  -I tools/audiveris-port/test-host-mobile-runtime.gradle \
+  :app:portProbe :app:embeddedOmrTest
+```
+
+这样可以单独发现 JDK 28 API 与运行行为的差异；该宿主检查仍不能替代 iOS 静态运行时的实机执行。
 
 ## 其他路线的评估
 

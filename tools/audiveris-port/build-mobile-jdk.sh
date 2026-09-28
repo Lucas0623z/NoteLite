@@ -116,6 +116,9 @@ ffi_headers="$ffi_build/Release-$sdk/include/ffi"
 
 # First record the stock runtime. The upstream iOS target deliberately excludes
 # AWT/2D libraries, so this baseline alone cannot run Audiveris.
+# Do not invoke target jmods/jdk-image: upstream then tries to link iOS shared
+# libraries with unsupported ELF flags. Build target classes/data and static
+# archives only; package the classes with the separate matching macOS tools.
 (
   cd "$source_dir"
   bash configure \
