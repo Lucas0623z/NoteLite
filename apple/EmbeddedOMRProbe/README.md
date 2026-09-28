@@ -73,6 +73,17 @@ unexpected native binaries or preview classes fail the build. Original and
 packaged JAR hashes and removed entries are recorded in
 `java-packaging-report.json` in the resources and build evidence.
 
+JNI generation scans the complete Leptonica and Tesseract API packages,
+including object methods such as `TessBaseAPI.Init`, `Recognize` and `End`.
+Generating only the `global` classes leaves those bindings absent even when
+the native libraries load successfully. `verify-jni-bindings.py` reads every
+native declaration directly from the exact API JARs and checks the generated
+sources, static archives and final linked executable. Overloaded native methods
+must each retain their distinct JNI signature. The pinned API JARs contain
+6,836 native declarations across 100 classes; missing declarations fail the
+build, and each audit records the JAR hashes and absent signatures. Compilation
+and symbol coverage still require the real runtime tests below.
+
 This staged-only bundle was validated on Windows with OpenJDK 21.0.12.1,
 using the packaged engine JAR instead of Gradle's loose application classes.
 All 56 packaged JARs passed the native/preview audit after the FlatLaf removal.

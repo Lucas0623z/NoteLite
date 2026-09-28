@@ -27,6 +27,14 @@ jobs=${BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}
 export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
 export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
 
+# Existing C++ files may contain only global C wrappers and omit the C++ API
+# used by Java. Regenerate from the current preset JARs on every invocation.
+(cd "$repo" && bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle :app:portJNI)
+python3 "$repo/tools/audiveris-port/verify-jni-bindings.py" \
+  --jars-manifest "$repo/app/build/ios-jni/binding-jars.json" \
+  --sources-dir "$repo/app/build/ios-jni" \
+  --report "$output/evidence/generated-jni-bindings.json"
+
 fetch_source() {
   local name=$1 url=$2 commit=$3 destination="$source_root/$1"
   if [ ! -d "$destination/.git" ]; then
@@ -119,9 +127,6 @@ build_install tesseract "${codec_paths[@]}" "${codec_imports[@]}" "-DLeptonica_D
   -DOPENMP_BUILD=OFF -DENABLE_NATIVE=OFF -DENABLE_LTO=OFF -DGRAPHICS_DISABLED=ON \
   -DDISABLE_TIFF=OFF -DDISABLE_ARCHIVE=ON -DDISABLE_CURL=ON
 
-if [ ! -f "$repo/app/build/ios-jni/jnileptonica.cpp" ]; then
-  (cd "$repo" && bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle :app:portJNI)
-fi
 native_flags=(-target "$target" -isysroot "$sysroot" -O2 -std=c++17 -fPIC
               "-I$prefix/include" "-I$JAVA_HOME/include" "-I$JAVA_HOME/include/darwin")
 for library in jnijavacpp jnileptonica jnitesseract; do
@@ -161,6 +166,10 @@ codesign --force --sign - "$prefix/bin/ocr-smoke"
 xcrun --sdk "$sdk" lipo "$prefix/bin/ocr-smoke" -verify_arch arm64
 xcrun vtool -show-build "$prefix/bin/ocr-smoke" > "$output/evidence/platform.txt"
 xcrun nm -gU "$prefix/bin/ocr-smoke" > "$output/evidence/linked-symbols.txt"
+python3 "$repo/tools/audiveris-port/verify-jni-bindings.py" \
+  --jars-manifest "$repo/app/build/ios-jni/binding-jars.json" \
+  --symbols "$output/evidence/linked-symbols.txt" \
+  --report "$output/evidence/linked-jni-bindings.json"
 for symbol in JNI_OnLoad_jnijavacpp JNI_OnLoad_jnileptonica JNI_OnLoad_jnitesseract pixReadMemTiff TessBaseAPICreate; do
   grep -q "_$symbol$" "$output/evidence/linked-symbols.txt"
 done

@@ -26,9 +26,21 @@ gradle.projectsEvaluated {
         classpath = app.configurations.runtimeClasspath
         mainClass = 'org.bytedeco.javacpp.tools.Builder'
         workingDir = gradle.rootProject.projectDir
-        args '-Dplatform=ios-arm64', '-d', new File(app.buildDir, 'ios-jni').absolutePath,
-             '-nocompile', 'org.bytedeco.leptonica.global.leptonica',
-             'org.bytedeco.tesseract.global.tesseract'
+        doFirst {
+            def presets = app.configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts.findAll {
+                it.moduleVersion.id.group == 'org.bytedeco' &&
+                it.moduleVersion.id.name in ['leptonica', 'tesseract'] && !it.classifier
+            }.collect { it.file.absolutePath }.sort()
+            if (presets.size() != 2) throw new GradleException('Expected exact Leptonica and Tesseract API JARs')
+            def output = new File(app.buildDir, 'ios-jni')
+            output.mkdirs()
+            new File(output, 'binding-jars.json').text = groovy.json.JsonOutput.toJson(presets)
+            // Builder package scanning needs its own classpath, not only the JVM's.
+            // Include C++ object bindings as well as the global C API wrappers.
+            setArgs(['-classpath', presets.join(File.pathSeparator), '-Dplatform=ios-arm64',
+                     '-d', output.absolutePath, '-nocompile',
+                     'org.bytedeco.leptonica.**', 'org.bytedeco.tesseract.**'])
+        }
     }
     app.tasks.register('portProbe', JavaExec) {
         dependsOn app.tasks.named('compilePortOracle')

@@ -8,12 +8,16 @@ on:
       - tools/audiveris-port/build-ios-ocr.sh
       - tools/audiveris-port/ocr-smoke.cpp
       - tools/audiveris-port/oracle.gradle
+      - tools/audiveris-port/verify-jni-bindings.py
+      - tools/audiveris-port/test_jni_bindings.py
       - .github/workflows/audiveris-ios-ocr.yml
   pull_request:
     paths:
       - tools/audiveris-port/build-ios-ocr.sh
       - tools/audiveris-port/ocr-smoke.cpp
       - tools/audiveris-port/oracle.gradle
+      - tools/audiveris-port/verify-jni-bindings.py
+      - tools/audiveris-port/test_jni_bindings.py
       - .github/workflows/audiveris-ios-ocr.yml
 
 permissions:
@@ -46,8 +50,8 @@ jobs:
           xcodebuild -version
           if ! command -v cmake >/dev/null; then brew install cmake; fi
           if ! command -v ninja >/dev/null; then brew install ninja; fi
-      - name: Generate actual JavaCPP JNI source for iOS
-        run: bash ./gradlew --no-daemon -I tools/audiveris-port/oracle.gradle :app:portJNI
+      - name: Test complete JNI binding audits
+        run: python3 -B tools/audiveris-port/test_jni_bindings.py
       - name: Build OCR dependencies and force-link JNI for arm64
         run: |
           set -o pipefail
@@ -103,3 +107,4 @@ jobs:
             build/ios-ocr/${{ matrix.sdk }}-arm64/evidence/
             build/ios-ocr/${{ matrix.sdk }}-arm64/build/**/CMakeConfigureLog.yaml
             app/build/ios-jni/*.cpp
+            app/build/ios-jni/binding-jars.json

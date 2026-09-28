@@ -79,6 +79,9 @@ for archive in runtime_archives + ocr_jni:
 required = {'JNI_OnLoad_jnijavacpp', 'JNI_OnLoad_jnileptonica', 'JNI_OnLoad_jnitesseract'}
 if not required <= symbols:
     raise SystemExit('Static JNI registration entry points missing: ' + ', '.join(sorted(required-symbols)))
+(generated/'jni-symbols.txt').write_text('\n'.join(sorted(symbols)) + '\n')
+(generated/'binding-jars.json').write_text(json.dumps([str(jar) for jar in sorted((resources/'java').glob('*.jar'))
+                                                    if jar.name.startswith(('leptonica-', 'tesseract-'))]))
 keeper = ['/* Generated from actual target archives and checked static registration requirements. */',
           '#include <stddef.h>', '#include <jni.h>']
 # This pinned OpenJDK library has real JNI entry points but omits the static
@@ -141,6 +144,10 @@ manifest = {'sdk':sdk, 'architecture':'arm64', 'nativeSymbolCount':len(symbols),
 (resources/'build-inventory.json').write_text(json.dumps(manifest, indent=2)+'\n')
 print(json.dumps({'jars':len(jar_inventory),'retainedNativeSymbols':len(symbols),'sdk':sdk}))
 PY
+python3 "$repo/tools/audiveris-port/verify-jni-bindings.py" \
+  --jars-manifest "$project/Generated/binding-jars.json" \
+  --symbols "$project/Generated/jni-symbols.txt" \
+  --report "$output/evidence/archive-preset-bindings.json"
 # Production composition consumes the exact generated configuration/resources/bridge.
 # Absolute header/archive paths remain valid in this build workspace.
 if [ -e "$output/embedding" ]; then mv "$output/embedding" "$work/previous-embedding"; fi
@@ -162,6 +169,11 @@ if [ -e "$output/EmbeddedOMRProbe.app" ]; then
   mv "$output/EmbeddedOMRProbe.app" "$work/previous-app"
 fi
 ditto "$product" "$output/EmbeddedOMRProbe.app"
+xcrun nm -gU "$output/EmbeddedOMRProbe.app/EmbeddedOMRProbe" > "$output/evidence/linked-symbols.txt"
+python3 "$repo/tools/audiveris-port/verify-jni-bindings.py" \
+  --jars-manifest "$project/Generated/binding-jars.json" \
+  --symbols "$output/evidence/linked-symbols.txt" \
+  --report "$output/evidence/linked-preset-bindings.json"
 cp "$resources/build-inventory.json" "$output/evidence/build-inventory.json"
 xcodebuild -version > "$output/evidence/xcode-version.txt"
 printf 'Built %s. Simulator/device execution has not been claimed.\n' "$output/EmbeddedOMRProbe.app"
