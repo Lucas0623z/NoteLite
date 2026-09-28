@@ -79,10 +79,27 @@ for archive in runtime_archives + ocr_jni:
 required = {'JNI_OnLoad_jnijavacpp', 'JNI_OnLoad_jnileptonica', 'JNI_OnLoad_jnitesseract'}
 if not required <= symbols:
     raise SystemExit('Static JNI registration entry points missing: ' + ', '.join(sorted(required-symbols)))
-keeper = ['/* Generated from actual target archives; no manually assumed symbols. */', '#include <stddef.h>']
+keeper = ['/* Generated from actual target archives and checked static registration requirements. */',
+          '#include <stddef.h>', '#include <jni.h>']
+# This pinned OpenJDK library has real JNI entry points but omits the static
+# registration marker. Without it, System.loadLibrary("fallbackLinker") fails,
+# hiding the existing libffi implementation from CABI and HarfBuzz's HBShaper.
+# Match JDK DEF_STATIC_JNI_OnLoad; LibFallback.init still performs real setup.
+fallback_marker = 'JNI_OnLoad_fallbackLinker'
+registration_markers = []
+if fallback_marker not in symbols:
+    fallback_methods = {'Java_jdk_internal_foreign_abi_fallback_LibFallback_' + name
+                        for name in ('init', 'doDowncall', 'createClosure', 'freeClosure',
+                                     'ffi_1prep_1cif', 'ffi_1default_1abi')}
+    if not fallback_methods <= symbols:
+        raise SystemExit('The real fallback linker JNI implementation is incomplete')
+    keeper += [f'JNIEXPORT jint JNICALL {fallback_marker}(JavaVM *vm, void *reserved) {{',
+               '    (void)vm; (void)reserved; return JNI_VERSION_1_8;', '}']
+    registration_markers.append(fallback_marker)
 keeper += [f'extern void {symbol}(void);' for symbol in sorted(symbols)]
 keeper += ['static void (* volatile retained[])(void) = {']
 keeper += [f'    &{symbol},' for symbol in sorted(symbols)]
+keeper += [f'    (void (*)(void))&{symbol},' for symbol in registration_markers]
 keeper += ['};', 'void loadfunctions(void) {',
            '    for (size_t i = 0; i < sizeof(retained)/sizeof(retained[0]); ++i) {',
            '        void (* volatile symbol)(void) = retained[i]; (void)symbol;', '    }', '}']
@@ -117,6 +134,7 @@ for jar in sorted((resources / 'java').glob('*.jar')):
     jar_inventory.append({'name':jar.name,'bytes':jar.stat().st_size,
                           'sha256':hashlib.sha256(jar.read_bytes()).hexdigest()})
 manifest = {'sdk':sdk, 'architecture':'arm64', 'nativeSymbolCount':len(symbols),
+            'addedStaticRegistrationMarkers':registration_markers,
             'jars':jar_inventory, 'runtimeTested':False, 'fullScoreRecognitionTested':False,
             'nativeArchives':[{'path':str(p),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
                               for p in runtime_archives + ocr_jni + ocr_codecs]}
