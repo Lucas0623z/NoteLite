@@ -56,7 +56,11 @@ final class OfflineRecognitionUITests: XCTestCase {
         let end = app.webViews.textFields.matching(identifier: "结束小节序号").firstMatch
         XCTAssertTrue(end.waitForExistence(timeout: 10))
         XCTAssertEqual(end.value as? String, "19", "The restored recognized score must retain all 19 measures")
-        app.webViews.buttons.matching(identifier: "完成").firstMatch.tap()
+        let done = app.webViews.buttons.matching(identifier: "完成").firstMatch
+        XCTAssertTrue(done.isHittable, "The settings close control must stay reachable with the number keyboard open")
+        XCTAssertGreaterThanOrEqual(done.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(done.frame.maxX, app.frame.maxX)
+        done.tap()
         let player = app.webViews.buttons.matching(identifier: "开始练习").firstMatch
         let ready = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == true AND enabled == true"), object: player)
