@@ -53,8 +53,7 @@ final class OfflineRecognitionUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 90), .completed,
                        "The restored recognized MusicXML must load in the bundled practice renderer")
         (fullRange.exists ? fullRange : compactRange).tap()
-        let end = app.webViews.descendants(matching: .any)
-            .matching(identifier: "结束小节序号").firstMatch
+        let end = app.webViews.textFields.matching(identifier: "结束小节序号").firstMatch
         XCTAssertTrue(end.waitForExistence(timeout: 10))
         XCTAssertEqual(end.value as? String, "19", "The restored recognized score must retain all 19 measures")
         app.webViews.buttons.matching(identifier: "完成").firstMatch.tap()

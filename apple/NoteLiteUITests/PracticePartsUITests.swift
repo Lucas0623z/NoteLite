@@ -68,8 +68,7 @@ final class PracticePartsUITests: XCTestCase {
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
         (fullRange.exists ? fullRange : compactRange).tap()
-        let end = app.webViews.descendants(matching: .any)
-            .matching(identifier: "结束小节序号").firstMatch
+        let end = app.webViews.textFields.matching(identifier: "结束小节序号").firstMatch
         XCTAssertTrue(end.waitForExistence(timeout: 10))
         XCTAssertEqual(end.value as? String, "19", "The saved part must contain all 19 measures")
         app.webViews.buttons.matching(identifier: "完成").firstMatch.tap()
