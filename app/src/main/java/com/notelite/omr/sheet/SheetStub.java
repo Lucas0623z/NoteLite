@@ -22,6 +22,7 @@
 package com.notelite.omr.sheet;
 
 import com.notelite.omr.Main;
+import com.notelite.omr.EmbeddedStepDiagnostics;
 import com.notelite.omr.OMR;
 import com.notelite.omr.WellKnowns;
 import com.notelite.omr.constant.Constant;
@@ -79,6 +80,7 @@ import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
@@ -482,6 +484,7 @@ public class SheetStub
     {
         final int timeout = Main.getSheetStepTimeOut();
         Future<Void> future = null;
+        final AtomicReference<EmbeddedStepDiagnostics.Step> diagnostic = new AtomicReference<>();
 
         try {
             // Make sure sheet is available
@@ -491,6 +494,9 @@ public class SheetStub
 
             // Implement a timeout for this step on the stub
             future = OmrExecutors.getCachedLowExecutor().submit( () -> {
+                final EmbeddedStepDiagnostics.Step timing = EmbeddedStepDiagnostics.beginStep(getId(), step.name());
+                diagnostic.set(timing);
+                boolean completed = false;
                 sheet.getWatch().start(step.name());
                 LogUtil.start(SheetStub.this);
 
@@ -503,6 +509,7 @@ public class SheetStub
                         step.doit(sheet); // Standard processing on an existing sheet
                         done(step); // Full completion
                         StepMonitoring.notifyStep(SheetStub.this, step);
+                        completed = true;
                     } catch (StepPause sp) {
                         done(step);
                         StepMonitoring.notifyStep(SheetStub.this, step);
@@ -511,12 +518,25 @@ public class SheetStub
                 } finally {
                     LogUtil.stopStub();
                     sheet.getWatch().stop();
+                    if (timing != null) timing.sample(completed ? "completed" : "failed", false);
                 }
 
                 return null;
             });
 
-            future.get(timeout, TimeUnit.SECONDS);
+            final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeout);
+            while (true) {
+                final long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) throw new TimeoutException();
+                try {
+                    future.get(Math.min(remaining, TimeUnit.SECONDS.toNanos(30)), TimeUnit.NANOSECONDS);
+                    break;
+                } catch (TimeoutException interval) {
+                    if (System.nanoTime() >= deadline) throw interval;
+                    final EmbeddedStepDiagnostics.Step timing = diagnostic.get();
+                    if (timing != null) timing.sample("running", true);
+                }
+            }
 
             // At end of each step, save sheet to disk?
             if ((OMR.gui == null) && Main.getCli().isSave()) {
@@ -525,6 +545,8 @@ public class SheetStub
             }
         } catch (TimeoutException tex) {
             logger.warn("Timeout {} seconds for step {}", timeout, step, tex);
+            final EmbeddedStepDiagnostics.Step timing = diagnostic.get();
+            if (timing != null) timing.timedOut();
 
             // Signal the on-going step processing to stop (if possible)
             if (future != null) {

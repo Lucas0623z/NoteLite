@@ -57,6 +57,8 @@ import com.notelite.omr.step.ProcessingCancellationException;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Class <code>Main</code> is the main class for OMR application.
@@ -163,7 +165,13 @@ public class Main
      */
     public static int getSheetStepTimeOut ()
     {
+        if (usesNativeEmbeddedBudgets()) return 300;
         return constants.sheetStepTimeOut.getValue();
+    }
+
+    private static boolean usesNativeEmbeddedBudgets ()
+    {
+        return WellKnowns.APP_HOME != null && Boolean.getBoolean("notelite.omr.jniHost");
     }
 
     //---------------------//
@@ -385,6 +393,88 @@ public class Main
         BatchStatus status = BatchStatus.SUCCESS;
         int completed = 0;
         cli = parsed;
+        final ScopedCancellation jobCancellation = new ScopedCancellation(cancelled);
+        EmbeddedStepDiagnostics.beginJob(parameters.outputFolder);
+        try {
+            final BatchResult work = usesNativeEmbeddedBudgets()
+                    ? runWithEmbeddedDeadline(() -> executeEmbeddedTasks(parsed, jobCancellation), 900_000)
+                    : executeEmbeddedTasks(parsed, jobCancellation);
+            status = work.status();
+            completed = work.completedTasks();
+            errors.addAll(work.errors());
+        } catch (TimeoutException ex) {
+            status = BatchStatus.TIMED_OUT;
+            errors.add("Embedded recognition exceeded its 900 second total job budget");
+            logger.warn("Embedded OMR total job deadline exceeded", ex);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            status = BatchStatus.CANCELLED;
+            errors.add("Embedded recognition was interrupted");
+        } catch (Exception | LinkageError ex) {
+            status = BatchStatus.FAILED;
+            errors.add(ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            logger.warn("Embedded OMR initialization failed", ex);
+        } finally {
+            // A deadline may leave a worker alive after the JNI caller releases
+            // its token. Close the short atomic callback before returning.
+            jobCancellation.close();
+            if (!OmrExecutors.shutdownForEmbedded(status != BatchStatus.SUCCESS, 30_000)) {
+                EmbeddedStepDiagnostics.dumpThreads("workers-did-not-terminate");
+                status = BatchStatus.TIMED_OUT;
+                errors.add("OMR workers did not terminate; a new job is refused until they finish");
+                embeddedPendingRestore = new EmbeddedPreviousState(
+                        previousCli, previousLocale, previousParallelism);
+            } else {
+                OmrExecutors.defaultParallelism.setSpecific(previousParallelism);
+                Locale.setDefault(previousLocale);
+                cli = previousCli;
+            }
+            EmbeddedStepDiagnostics.endJob();
+        }
+        return new BatchResult(status, completed, errors);
+    }
+
+    static final class ScopedCancellation implements BooleanSupplier, AutoCloseable
+    {
+        private final BooleanSupplier external;
+        private boolean closed;
+
+        ScopedCancellation (BooleanSupplier external) { this.external = external; }
+
+        @Override public synchronized boolean getAsBoolean ()
+        {
+            return closed || external.getAsBoolean();
+        }
+
+        @Override public synchronized void close () { closed = true; }
+    }
+
+    /** The tracked pool retains timed-out workers so later jobs cannot overlap them. */
+    static <T> T runWithEmbeddedDeadline (Callable<T> work, long timeoutMillis) throws Exception
+    {
+        if (timeoutMillis <= 0 || timeoutMillis > 900_000) {
+            throw new IllegalArgumentException("Embedded job budget must be within 1..900000 milliseconds");
+        }
+        final Future<T> future = OmrExecutors.getCachedLowExecutor().submit(work);
+        try {
+            return future.get(timeoutMillis, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException ex) {
+            EmbeddedStepDiagnostics.dumpThreads("job-deadline");
+            throw ex;
+        } catch (ExecutionException ex) {
+            if (ex.getCause() instanceof Exception cause) throw cause;
+            if (ex.getCause() instanceof Error cause) throw cause;
+            throw ex;
+        } finally {
+            if (!future.isDone()) future.cancel(true);
+        }
+    }
+
+    private static BatchResult executeEmbeddedTasks (CLI parsed, BooleanSupplier cancelled)
+    {
+        final List<String> errors = new ArrayList<>();
+        BatchStatus status = BatchStatus.SUCCESS;
+        int completed = 0;
         try {
             if (!embeddedLogInitialized) {
                 LogUtil.addFileAppender();
@@ -422,17 +512,6 @@ public class Main
             status = BatchStatus.FAILED;
             errors.add(ex.getClass().getSimpleName() + ": " + ex.getMessage());
             logger.warn("Embedded OMR initialization failed", ex);
-        } finally {
-            if (!OmrExecutors.shutdownForEmbedded(status != BatchStatus.SUCCESS, 30_000)) {
-                status = BatchStatus.TIMED_OUT;
-                errors.add("OMR workers did not terminate; a new job is refused until they finish");
-                embeddedPendingRestore = new EmbeddedPreviousState(
-                        previousCli, previousLocale, previousParallelism);
-            } else {
-                OmrExecutors.defaultParallelism.setSpecific(previousParallelism);
-                Locale.setDefault(previousLocale);
-                cli = previousCli;
-            }
         }
         return new BatchResult(status, completed, errors);
     }

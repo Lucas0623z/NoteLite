@@ -57,7 +57,7 @@ API alone does not establish that these dependencies run on iOS.
 TESSDATA_PREFIX=/path/to/bundled/tessdata ./gradlew :app:embeddedOmrTest
 ```
 
-This opt-in task runs eleven integration tests in a fresh sandbox. It rejects
+This opt-in task runs eighteen integration tests in a fresh sandbox. It rejects
 malformed arguments and outside paths, verifies cancellation and executor
 timeout handling, feeds a corrupt image followed by two complete recognitions
 of `data/examples/chula.png`, and exercises the JNI JSON entry. It parses the
@@ -66,5 +66,12 @@ note events. A two-page TIFF and a two-page scanned PDF each run through the
 complete pipeline and must export both copies of the fixture: 302 pitched
 notes and 440 MIDI note-on events. A persisted 600 DPI setting is loaded and
 preserved while an embedded one-inch PDF page actually renders at 300 pixels.
+The native scheduling path is also exercised with a real recognition and full
+desktop semantic comparison. Native jobs use a 300-second step budget and a
+900-second total budget covering exports. Regression tests keep uncooperative
+workers tracked after a deadline, reject overlapping jobs, and ensure late
+workers cannot call a native cancellation token after its owner returns.
+Step diagnostics record wall/CPU time, GC deltas and asynchronous timeout
+thread dumps; an unavailable measurement stays explicit.
 The tests do not claim transcription accuracy against a human-verified
 score or substitute for a device run.

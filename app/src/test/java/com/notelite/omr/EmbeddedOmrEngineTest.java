@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -75,6 +76,144 @@ public class EmbeddedOmrEngineTest
         assertEquals(engine.appHome(), EmbeddedOmrEngine.open(engine.appHome()).appHome());
         assertThrows(IllegalStateException.class,
                 () -> EmbeddedOmrEngine.open(engine.appHome().resolve("different")));
+    }
+
+    @Test
+    public void nativeStepBudgetLeavesHostSettingUnchanged ()
+    {
+        final String previous = System.getProperty("notelite.omr.jniHost");
+        try {
+            System.clearProperty("notelite.omr.jniHost");
+            final int desktop = Main.getSheetStepTimeOut();
+            System.setProperty("notelite.omr.jniHost", "true");
+            assertEquals(300, Main.getSheetStepTimeOut());
+            System.clearProperty("notelite.omr.jniHost");
+            assertEquals(desktop, Main.getSheetStepTimeOut());
+        } finally {
+            if (previous == null) System.clearProperty("notelite.omr.jniHost");
+            else System.setProperty("notelite.omr.jniHost", previous);
+        }
+    }
+
+    @Test(timeout = 10_000)
+    public void totalDeadlineRetainsUncooperativeWorkersAndRejectsOverlap () throws Exception
+    {
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        OmrExecutors.restartForEmbedded();
+        try {
+            assertThrows(TimeoutException.class, () -> Main.runWithEmbeddedDeadline(() -> {
+                started.countDown();
+                // Model a native/image call that does not stop at interruption.
+                while (release.getCount() != 0) {
+                    try { release.await(); }
+                    catch (InterruptedException ignored) { }
+                }
+                return "late success must not be returned";
+            }, 500));
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+            assertFalse(OmrExecutors.shutdownForEmbedded(true, 0));
+            assertThrows(IllegalStateException.class, OmrExecutors::restartForEmbedded);
+        } finally {
+            release.countDown();
+            assertTrue(OmrExecutors.shutdownForEmbedded(true, 2_000));
+            OmrExecutors.restartForEmbedded();
+        }
+        assertEquals("next independent job", Main.runWithEmbeddedDeadline(() -> "next independent job", 1_000));
+        assertTrue(OmrExecutors.shutdownForEmbedded(false, 2_000));
+    }
+
+    @Test(timeout = 10_000)
+    public void deadlineRejectsInvalidBudgetsAndPreservesWorkerExceptions () throws Exception
+    {
+        assertThrows(IllegalArgumentException.class, () -> Main.runWithEmbeddedDeadline(() -> "", 0));
+        assertThrows(IllegalArgumentException.class, () -> Main.runWithEmbeddedDeadline(() -> "", 900_001));
+        OmrExecutors.restartForEmbedded();
+        try {
+            final IOException expected = new IOException("original worker failure");
+            final IOException actual = assertThrows(IOException.class,
+                    () -> Main.runWithEmbeddedDeadline(() -> { throw expected; }, 1_000));
+            assertSame(expected, actual);
+        } finally {
+            assertTrue(OmrExecutors.shutdownForEmbedded(true, 2_000));
+        }
+    }
+
+    @Test(timeout = 10_000)
+    public void closedCancellationNeverTouchesTheReleasedNativeCallback () throws Exception
+    {
+        final AtomicInteger calls = new AtomicInteger();
+        final Main.ScopedCancellation scoped = new Main.ScopedCancellation(() -> {
+            calls.incrementAndGet();
+            return false;
+        });
+        assertFalse(scoped.getAsBoolean());
+        scoped.close();
+        final var worker = Executors.newSingleThreadExecutor();
+        try {
+            assertTrue(worker.submit(scoped::getAsBoolean).get(1, TimeUnit.SECONDS));
+            assertEquals("The late worker must not use a released JNI token", 1, calls.get());
+            final Main.ScopedCancellation next = new Main.ScopedCancellation(() -> false);
+            assertFalse("A fresh job has independent cancellation", next.getAsBoolean());
+            next.close();
+        } finally {
+            worker.shutdownNow();
+            assertTrue(worker.awaitTermination(1, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test(timeout = 600_000)
+    public void nativeDeadlineSchedulingPreservesRealScoreAndRecordsStepTiming () throws Exception
+    {
+        final String previous = System.getProperty("notelite.omr.jniHost");
+        try {
+            // Exercises the native scheduling/budget path with real host OCR.
+            // It is not evidence of Zero or iOS performance.
+            System.setProperty("notelite.omr.jniHost", "true");
+            final var result = engine.recognize(input);
+            assertEquals(result.batch().errors().toString(), Main.BatchStatus.SUCCESS, result.batch().status());
+            assertEquals(151, countPitchedNotes(result.musicXML().get(0)));
+            assertEquals(220, countNoteOnEvents(result.midi().get(0)));
+            final String timing = Files.readString(result.outputDirectory().resolve("embedded-step-timing.jsonl"));
+            assertTrue(timing.contains("\"event\":\"completed\""));
+            assertTrue(timing.contains("\"step\":\"BEAMS\""));
+            assertTrue(timing.contains("\"workerCPUMilliseconds\":"));
+            assertTrue(timing.contains("\"processGCMilliseconds\":"));
+            assertNull(Main.getCli());
+        } finally {
+            if (previous == null) System.clearProperty("notelite.omr.jniHost");
+            else System.setProperty("notelite.omr.jniHost", previous);
+        }
+    }
+
+    @Test(timeout = 10_000)
+    public void stepDiagnosticsPreserveTimingAndAsynchronousThreadEvidence () throws Exception
+    {
+        final Path directory = Files.createTempDirectory(engine.appHome(), "diagnostics-");
+        EmbeddedStepDiagnostics.beginJob(directory);
+        try {
+            final var step = EmbeddedStepDiagnostics.beginStep("diagnostic-fixture", "WAITING");
+            assertNotNull(step);
+            step.sample("running", true);
+            step.timedOut();
+            step.sample("completed", false);
+        } finally {
+            EmbeddedStepDiagnostics.endJob();
+        }
+        final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        boolean captured = false;
+        while (!captured && System.nanoTime() < deadline) {
+            try (var paths = Files.list(directory)) {
+                captured = paths.anyMatch(path -> path.getFileName().toString().startsWith("embedded-threads-"));
+            }
+            if (!captured) Thread.sleep(20);
+        }
+        assertTrue("The daemon sampler must preserve the thread dump", captured);
+        final String timing = Files.readString(directory.resolve("embedded-step-timing.jsonl"));
+        assertTrue(timing.contains("\"workerCPUMilliseconds\":"));
+        assertTrue(timing.contains("\"wallMilliseconds\":"));
+        assertTrue(timing.contains("\"cpuTimeStatus\":"));
+        assertTrue(timing.contains("\"event\":\"completed\""));
     }
 
     @Test

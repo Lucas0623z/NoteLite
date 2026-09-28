@@ -107,6 +107,16 @@ prints up to 40 new lines from each log every 60 seconds while waiting,
 and the last 120 stderr lines on failure. Complete logs remain in the artifacts.
 The default timeout is 1800 seconds because this VM uses an interpreter; override
 with `NOTELITE_PROBE_TIMEOUT_SECONDS` when needed.
+Inside the native app, each recognition job has a 900-second total deadline,
+including initialization and exports, and each sheet step has a 300-second
+limit. Desktop and ordinary host sessions retain their existing timeout.
+An interrupted worker that remains alive keeps its job context; another job
+is refused until it stops. The limits never convert a partial result to success.
+Every job preserves `embedded-step-timing.jsonl` with step wall time, worker CPU
+time and process GC deltas. Unavailable CPU/GC measurements are explicit nulls.
+While a step runs, samples are emitted every 30 seconds; timeout and failed
+worker shutdown request bounded thread dumps. Stack collection uses a separate
+daemon because waiting for a VM safepoint must not delay the job deadline.
 The runner also compares the exported MusicXML and MIDI against the committed
 desktop semantic reference using `verify_embedded_score.py`. A difference in
 notes, timing, voices, staves, musical attributes, or MIDI events fails the run
