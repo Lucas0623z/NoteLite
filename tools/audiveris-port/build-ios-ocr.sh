@@ -71,7 +71,16 @@ common=(
 build_install() {
   local name=$1
   shift
-  cmake -S "$source_root/$name" -B "$build_root/$name" "${common[@]}" "$@"
+  local source="$source_root/$name"
+  if [ "$name" = zlib ]; then
+    # zlib 1.3.1's CMake renames its tracked zconf.h in the source tree.
+    # Configure a per-platform archive copy so pinned source verification also
+    # works on the next invocation (or when building both SDKs locally).
+    source="$build_root/zlib-source"
+    mkdir -p "$source"
+    git -C "$source_root/zlib" archive HEAD | tar -x -C "$source"
+  fi
+  cmake -S "$source" -B "$build_root/$name" "${common[@]}" "$@"
   cmake --build "$build_root/$name" --parallel "$jobs"
   cmake --install "$build_root/$name"
 }
@@ -149,14 +158,14 @@ printf 'tessdata/eng\t%s\tsha256:%s\n' "$model_commit" "$model_hash" >> "$output
   "$prefix/lib/libpng16.a" "$prefix/lib/libjpeg.a" "$prefix/lib/libz.a" \
   -framework Foundation -o "$prefix/bin/ocr-smoke"
 codesign --force --sign - "$prefix/bin/ocr-smoke"
-xcrun --sdk "$sdk" lipo -verify_arch arm64 "$prefix/bin/ocr-smoke"
+xcrun --sdk "$sdk" lipo "$prefix/bin/ocr-smoke" -verify_arch arm64
 xcrun vtool -show-build "$prefix/bin/ocr-smoke" > "$output/evidence/platform.txt"
 xcrun nm -gU "$prefix/bin/ocr-smoke" > "$output/evidence/linked-symbols.txt"
 for symbol in JNI_OnLoad_jnijavacpp JNI_OnLoad_jnileptonica JNI_OnLoad_jnitesseract pixReadMemTiff TessBaseAPICreate; do
   grep -q "_$symbol$" "$output/evidence/linked-symbols.txt"
 done
 for library in z png16 jpeg tiff leptonica tesseract jnijavacpp jnileptonica jnitesseract; do
-  xcrun --sdk "$sdk" lipo -verify_arch arm64 "$prefix/lib/lib$library.a"
+  xcrun --sdk "$sdk" lipo "$prefix/lib/lib$library.a" -verify_arch arm64
   shasum -a 256 "$prefix/lib/lib$library.a"
 done > "$output/evidence/archive-sha256.txt"
 xcodebuild -version > "$output/evidence/toolchain.txt"
