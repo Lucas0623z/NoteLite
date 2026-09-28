@@ -43,7 +43,9 @@ public final class EmbeddedOmrEngine
             Files.createDirectories(appHome);
             final Path root = appHome.toRealPath();
             final String previous = System.getProperty("notelite.appHome");
-            if (previous != null && !Path.of(previous).toAbsolutePath().normalize().equals(root)) {
+            // Apple exposes the same sandbox through /var and /private/var. Resolve
+            // both identities before enforcing the one-sandbox-per-JVM boundary.
+            if (previous != null && !Path.of(previous).toRealPath().equals(root)) {
                 throw new IllegalStateException("This JVM is already configured for a different appHome");
             }
             for (String folder : List.of("config", "data", "log", "tmp", "jobs")) {

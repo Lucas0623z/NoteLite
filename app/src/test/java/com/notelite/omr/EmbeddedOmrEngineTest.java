@@ -6,6 +6,7 @@ import com.notelite.omr.text.tesseract.TesseractOCR;
 import com.notelite.omr.constant.Constant;
 import com.notelite.omr.image.ImageLoading;
 import com.notelite.omr.util.OmrExecutors;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,6 +34,7 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.junit.BeforeClass;
+import org.junit.Assume;
 import org.junit.Test;
 import org.w3c.dom.Document;
 import static org.junit.Assert.*;
@@ -54,6 +56,8 @@ public class EmbeddedOmrEngineTest
         Files.createDirectories(sandbox.resolve("config"));
         Files.writeString(sandbox.resolve("config/run.properties"),
                 "com.notelite.omr.image.ImageLoading.pdfResolution=600\n");
+        // Match the native host, which supplies the sandbox as a VM property.
+        System.setProperty("notelite.appHome", sandbox.toString());
         engine = EmbeddedOmrEngine.open(sandbox);
         input = engine.appHome().resolve("chula.png");
         Files.copy(Path.of(System.getProperty("notelite.embeddedTestInput")), input,
@@ -71,6 +75,39 @@ public class EmbeddedOmrEngineTest
         assertEquals(engine.appHome(), EmbeddedOmrEngine.open(engine.appHome()).appHome());
         assertThrows(IllegalStateException.class,
                 () -> EmbeddedOmrEngine.open(engine.appHome().resolve("different")));
+    }
+
+    @Test
+    public void acceptsAliasesOfTheSameSandboxButRejectsOtherDirectories () throws Exception
+    {
+        final Path links = Files.createTempDirectory(engine.appHome().getParent(), "aliases-");
+        final Path alias = links.resolve("sandbox");
+        final String previous = System.getProperty("notelite.appHome");
+        try {
+            try {
+                Files.createSymbolicLink(alias, engine.appHome());
+            } catch (IOException | UnsupportedOperationException ex) {
+                // Windows may require an administrator to create a symlink. On
+                // macOS/Linux this regression must run, including the iOS host CI.
+                if (!System.getProperty("os.name").startsWith("Windows")) {
+                    throw ex;
+                }
+                Assume.assumeNoException("Windows symlink creation is unavailable", ex);
+            }
+            // The native host sets this property before open() first runs. The
+            // textual path may differ from the real path passed by the caller.
+            System.setProperty("notelite.appHome", alias.toString());
+            assertEquals(engine.appHome(), EmbeddedOmrEngine.open(engine.appHome()).appHome());
+            assertEquals(engine.appHome(), EmbeddedOmrEngine.open(alias).appHome());
+            assertThrows(IllegalStateException.class,
+                    () -> EmbeddedOmrEngine.open(links.resolve("different")));
+            assertEquals(engine.appHome().toString(), System.getProperty("notelite.appHome"));
+        } finally {
+            System.setProperty("notelite.appHome", previous);
+            Files.deleteIfExists(alias);
+            Files.deleteIfExists(links.resolve("different"));
+            Files.delete(links);
+        }
     }
 
     @Test
