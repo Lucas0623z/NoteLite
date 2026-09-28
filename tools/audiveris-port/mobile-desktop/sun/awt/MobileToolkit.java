@@ -22,9 +22,11 @@ public final class MobileToolkit extends Toolkit {
     @Override public Dimension getScreenSize() { throw new HeadlessException(); }
     @Override public int getScreenResolution() { throw new HeadlessException(); }
     @Override public ColorModel getColorModel() { return ColorModel.getRGBdefault(); }
+    @SuppressWarnings("deprecation") // Toolkit still requires this legacy abstract method.
     @Override public String[] getFontList() {
         return GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
     }
+    @SuppressWarnings("deprecation") // Toolkit still requires this legacy abstract method.
     @Override public FontMetrics getFontMetrics(Font font) { return FontDesignMetrics.getMetrics(font); }
     @Override public void sync() { /* Software BufferedImage rendering is synchronous. */ }
     @Override public Image getImage(String path) { return createImage(path); }

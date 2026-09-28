@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: mobile-jdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform || 'both' }}
@@ -51,17 +52,42 @@ jobs:
         with:
           path: build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz
           key: mobile-jdk28-tools-c1ed06aaef34-Xcode26.6-${{ runner.arch }}-${{ hashFiles('tools/audiveris-port/build-mobile-jdk-tools.sh') }}
-      - name: Install build tools
+      - name: Reuse proven matching tools across experimental branches
+        id: previous_tools
         if: steps.tools_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Actions caches are branch-scoped. This successful source build also
+          # provides the same tools to sibling branches; expiry falls back to a rebuild.
+          mkdir -p build/mobile-tools/artifacts
+          gh run download 36406804700 --repo "$GITHUB_REPOSITORY" \
+            --name audiveris-ios-host-tools --dir build/mobile-tools/artifacts
+          python3 - <<'PY'
+          from pathlib import Path
+          import tarfile
+          script = Path('tools/audiveris-port/build-mobile-jdk-tools.sh').read_text()
+          expected = 'c1ed06aaef34c8dccf71e236d1ffa20918a77cfb'
+          if 'mobile_ref=' + expected not in script:
+              raise SystemExit('Pinned host source changed; rebuild matching tools')
+          archive = Path('build/mobile-tools/artifacts/mobile-jdk-host-tools.tar.gz')
+          with tarfile.open(archive) as source:
+              marker = source.extractfile('jdk/notelite-source-commit')
+              if marker is None or marker.read().decode().strip() != expected:
+                  raise SystemExit('Downloaded host tools do not match pinned target source')
+          PY
+      - name: Install build tools
+        if: steps.tools_cache.outputs.cache-hit != 'true' && steps.previous_tools.outcome != 'success'
         run: brew install autoconf make
       - name: Set up bootstrap JDK
-        if: steps.tools_cache.outputs.cache-hit != 'true'
+        if: steps.tools_cache.outputs.cache-hit != 'true' && steps.previous_tools.outcome != 'success'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "26"
       - name: Build matching host jmod and jlink
-        if: steps.tools_cache.outputs.cache-hit != 'true'
+        if: steps.tools_cache.outputs.cache-hit != 'true' && steps.previous_tools.outcome != 'success'
         run: bash tools/audiveris-port/build-mobile-jdk-tools.sh
       - name: Share matching host tools
         uses: actions/upload-artifact@v4
