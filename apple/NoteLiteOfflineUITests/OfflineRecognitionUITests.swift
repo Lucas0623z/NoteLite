@@ -27,10 +27,32 @@ final class OfflineRecognitionUITests: XCTestCase {
         result.name = "Offline-recognition-complete"
         result.lifetime = .keepAlways
         add(result)
-        practice.tap()
+
+        // Reopen the stored result without a fixture-import argument or another
+        // recognition request. The script also checks its persisted XML/MIDI.
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        let restoredScore = app.descendants(matching: .any).matching(identifier: "score-row").firstMatch
+        XCTAssertTrue(restoredScore.waitForExistence(timeout: 30))
+        restoredScore.tap()
+        let restoredPractice = app.buttons["practice-start"]
+        XCTAssertTrue(restoredPractice.waitForExistence(timeout: 20),
+                      "The saved recognized score must remain playable after restarting the app")
+        XCTAssertFalse(app.buttons["recognition-start"].exists)
+        restoredPractice.tap()
+
+        // The empty HTML already contains the start button. Require metadata
+        // loaded from this fixture's actual 19-measure MusicXML as well.
+        let loadedScore = app.webViews.staticTexts.matching(NSPredicate(
+            format: "label == %@ OR value == %@", "共 19 小节", "共 19 小节")).firstMatch
+        XCTAssertTrue(loadedScore.waitForExistence(timeout: 90),
+                      "The restored recognized MusicXML must load in the bundled practice renderer")
         let player = app.webViews.buttons.matching(identifier: "开始练习").firstMatch
-        XCTAssertTrue(player.waitForExistence(timeout: 90),
-                      "The real newly recognized MusicXML must load in the bundled practice renderer")
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND enabled == true"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed,
+                       "Practice must finish loading and enable its start control")
         XCTAssertTrue(player.isHittable)
         let rendered = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         rendered.name = "Recognized-score-practice"
