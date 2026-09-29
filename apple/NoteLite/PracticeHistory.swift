@@ -113,7 +113,6 @@ struct PracticeHistoryView: View {
     @EnvironmentObject private var library: LibraryStore
     @State private var practicing: PracticeSelection?
     #if DEBUG
-    @State private var catalogReview = false
     #endif
 
     var body: some View {
@@ -138,18 +137,15 @@ struct PracticeHistoryView: View {
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }.padding(.vertical, 8)
                     }
+                    #if DEBUG
+                    .accessibilityIdentifier(UICatalog.enabled ? "catalog-history-row" : "practice-history-row")
+                    #endif
                 }.listStyle(.plain)
             }
         }
         .navigationTitle("练习记录")
         #if DEBUG
         .accessibilityIdentifier(UICatalog.enabled ? "catalog-history-content" : "practice-history-content")
-        .navigationDestination(isPresented: $catalogReview) {
-            if let record = history.records.first { review(record) }
-        }
-        .task {
-            if UICatalog.enabled && UICatalog.scenario == "review" { catalogReview = true }
-        }
         #endif
         #if os(iOS)
         .fullScreenCover(item: $practicing) { selection in

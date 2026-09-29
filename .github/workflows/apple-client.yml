@@ -3,6 +3,15 @@ name: Apple clients
 # Documentation-only workflow on codex/ui-inventory. No signing, upload, or release jobs.
 on:
   workflow_dispatch:
+    inputs:
+      family:
+        type: choice
+        default: all
+        options: [all, iPhone, iPad, macOS]
+      scope:
+        type: choice
+        default: all
+        options: [all, remaining]
 
 permissions:
   contents: read
@@ -11,7 +20,7 @@ env:
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
 concurrency:
-  group: apple-ui-catalog-${{ github.ref }}
+  group: apple-ui-catalog-${{ github.ref }}-${{ inputs.scope }}
   cancel-in-progress: true
 
 jobs:
@@ -22,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: [iPhone, iPad, macOS]
+        family: ${{ fromJSON(inputs.family == 'all' && '["iPhone","iPad","macOS"]' || format('["{0}"]', inputs.family)) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,6 +69,7 @@ jobs:
         env:
           DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
           DEVICE_FAMILY: ${{ matrix.family }}
+          CATALOG_SCOPE: ${{ inputs.scope }}
         run: |
           set -euo pipefail
           if [ "$DEVICE_FAMILY" = macOS ]; then
@@ -71,9 +81,11 @@ jobs:
             tests=NoteLiteUITests
             destination="platform=iOS Simulator,id=$DEVICE_ID"
           fi
+          selected="$tests/UICatalogUITests"
+          if [ "$CATALOG_SCOPE" = remaining ]; then selected="$selected/testCatalogRemainingPages"; fi
           xcodebuild test -project NoteLite.xcodeproj -scheme "$scheme" \
             -configuration Debug -destination "$destination" \
-            -only-testing:"$tests/UICatalogUITests" -parallel-testing-enabled NO \
+            -only-testing:"$selected" -parallel-testing-enabled NO \
             -resultBundlePath "TestResults-Catalog-$DEVICE_FAMILY.xcresult" \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 900 \
             -maximum-test-execution-time-allowance 1200 \
