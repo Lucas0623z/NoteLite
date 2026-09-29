@@ -1,16 +1,18 @@
-# NoteLite for iPhone / iPad / Mac
+# 音伴-你的音乐搭子 for iPhone / iPad / Mac
 
-原生 SwiftUI 客户端，最低支持 **iOS 16 / iPadOS 16 / macOS 13**。界面采用 [NoteLite Figma 设计](https://www.figma.com/design/auKshwj0bSnA6UxzLpcqlN?node-id=22-4648)，分别使用手机导航、平板分栏和 Mac 工作区。
+音伴的原生 SwiftUI 客户端，最低支持 **iOS 16 / iPadOS 16 / macOS 13**。界面采用 [音伴 Figma 设计](https://www.figma.com/design/auKshwj0bSnA6UxzLpcqlN?node-id=22-4648)，分别使用手机导航、平板分栏和 Mac 工作区。
 
-**完整 iOS 构建已接入应用内 Audiveris 引擎，并通过 iPhone / iPad 模拟器完整识谱验收。** 打包真实运行时的构建在设备上识别新导入的扫描谱，不要求用户配置服务器，也没有将新任务切换到服务器的选项。只运行 `apple/project.yml` 得到的是基础客户端，不包含体积较大的 Java 运行时、OCR 库和识谱资源；该构建仍通过可选的 [桥接服务](../bridge/README.md) 识别扫描谱。直接导入 MusicXML 后练习，两种构建均可离线使用。原有 Java 桌面校谱工具继续可用。
+**完整 iOS 构建已接入应用内 Orpheus AI 引擎，并通过 iPhone / iPad 模拟器完整识谱验收。** 打包真实运行时的构建在设备上识别新导入的扫描谱，不要求用户配置服务器，也没有将新任务切换到服务器的选项。只运行 `apple/project.yml` 得到的是基础客户端，不包含体积较大的 Java 运行时、OCR 库和识谱资源；该构建仍通过可选的 [桥接服务](../bridge/README.md) 识别扫描谱。直接导入 MusicXML 后练习，两种构建均可离线使用。原有 Java 桌面校谱工具继续可用。
 
-练习页以本地 WKWebView 复用 NoteLite 的谱面排版和逐音评分，不需要联网加载脚本。MIDI 通过 CoreMIDI 输入，麦克风通过 AVAudioEngine 输入并在本机做 Pitchy 单音检测。麦克风不能可靠判断和弦或合奏；不评价踏板、音色或触键。原生硬件输入仍需要使用真实乐器做设备验收。
+Orpheus AI 是本项目识谱引擎的产品名称，基于 Audiveris。上游来源、版权与许可证保持原有归属，见 [第三方说明](AudiverisCore/NOTICE.md)。
+
+练习页以本地 WKWebView 复用音伴的谱面排版和逐音评分，不需要联网加载脚本。MIDI 通过 CoreMIDI 输入，麦克风通过 AVAudioEngine 输入并在本机做 Pitchy 单音检测。麦克风不能可靠判断和弦或合奏；不评价踏板、音色或触键。原生硬件输入仍需要使用真实乐器做设备验收。
 
 ## 已实现
 
 - iPhone 单栏导航；iPad 自适应侧栏与详情，支持旋转、分屏和可调整窗口、动态字体。
 - 从“文件”导入 PDF / PNG / JPEG / TIFF / MusicXML / MXL，单文件上限 25 MiB（进入陪练时上限 15 MB）。MusicXML 可以直接练习；扫描谱完成识别后，打开生成的 MusicXML 练习。原稿复制到应用自己的存储，列表重启后仍在；文件协调与复制在后台线程进行。
-- 完整 iOS 构建通过同进程 JNI 调用真正的 Audiveris，静态链接 OpenJDK Mobile Zero、JavaCPP、Leptonica 和 Tesseract，包含字体、分类器及完整英文 OCR 模型。生成的 MusicXML / MIDI 接入原有曲谱库、分享与练习流程。新任务使用本机；已有服务器任务继续在原服务器上查询和清理。
+- 完整 iOS 构建通过同进程 JNI 调用 Orpheus AI，静态链接 OpenJDK Mobile Zero、JavaCPP、Leptonica 和 Tesseract，包含字体、分类器及完整英文 OCR 模型。生成的 MusicXML / MIDI 接入原有曲谱库、分享与练习流程。新任务使用本机；已有服务器任务继续在原服务器上查询和清理。
 - 本机输入会校正图片 EXIF 方向、把透明区域合成白色，并限制解码尺寸；无需校正的 PNG / JPEG / TIFF 保留原字节，多页 TIFF 保留所有页面。PDF 保留完整文件，由 PDFBox 按 300 DPI 处理；预检全部页面的有效裁剪尺寸，过大时拒绝整份文件。输入准备、引擎执行和文件处理均在后台进行。
 - 练习支持谱面乐器推断、手动调整、声部/小节选择、试听、校对确认、暂停继续、错音定位与重练。结束后的回顾保存在本机，最多保留 500 次，不包含录音。
 - Quick Look 预览原稿、系统分享原稿；不要求连接服务器。
@@ -26,7 +28,7 @@
 
 **编译、模拟器运行及签名 iPhone / iPad 应用，需要 Mac 上的完整 Xcode 和 iOS SDK。** Windows 可以编辑代码和运行桥接服务；安装 Windows Swift 编译器不能获得 iOS SDK，也不能代替 Xcode 完成 iOS 构建。仓库 CI 使用 GitHub 的 macOS runner 构建并运行模拟器单元测试。
 
-原生 Mac 客户端选择 `NoteLiteMac` scheme，当前使用基础客户端构建；完整嵌入引擎脚本面向 arm64 iPhone / iPad 真机和模拟器。原有 Java 桌面编辑器构建依赖仍是 JDK 21 和 Gradle，参见桌面打包说明。
+原生 Mac 客户端选择 `NoteLiteMac` scheme，生成 `音伴-你的音乐搭子.app`，当前使用基础客户端构建；完整嵌入引擎脚本面向 arm64 iPhone / iPad 真机和模拟器。内部工程、scheme、模块和可执行文件继续使用原有名称。原有 Java 桌面编辑器构建依赖仍是 JDK 21 和 Gradle，参见桌面打包说明。
 
 ## 基础客户端构建
 
@@ -56,7 +58,7 @@ open NoteLite.xcodeproj
 
 1. [运行时工作流](../.github/workflows/audiveris-mobile-runtime.yml) 构建 OpenJDK Mobile Zero 及无窗口的 `java.desktop`。使用产生完整 `headless/` 目录的构建结果。
 2. [OCR 工作流](../.github/workflows/audiveris-ios-ocr.yml) 构建 Leptonica、Tesseract、PNG / JPEG / TIFF 编解码库和实际 JavaCPP JNI 静态库；它还在模拟器执行传统与 LSTM 两种 OCR 模式的测试。
-3. [完整验收工作流](../.github/workflows/audiveris-ios-embedded-probe.yml) 接收前两项的运行 ID，分别组合真机和模拟器构建，先运行同进程 Java 识谱探针，再构建实际 NoteLite 应用并测试离线识谱至练习的流程。工作流保留原生符号、资源校验和、真实识谱导出文件、日志和界面截图。
+3. [完整验收工作流](../.github/workflows/audiveris-ios-embedded-probe.yml) 接收前两项的运行 ID，分别组合真机和模拟器构建，先运行同进程 Java 识谱探针，再构建实际音伴应用并测试离线识谱至练习的流程。工作流保留原生符号、资源校验和、真实识谱导出文件、日志和界面截图。
 
 也可在同一台 Mac 上，从已解压的真实依赖组合构建。`RUNTIME_DIR` 指向含 `include/`、`runtime/lib/modules`、`static-libs/` 的 `headless` 目录；`OCR_DIR` 指向含 `lib/`、`include/`、`share/tessdata/` 的 OCR `install` 目录。两个目录必须与选定 SDK 和 arm64 架构一致。
 

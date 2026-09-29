@@ -67,6 +67,9 @@ public abstract class WellKnowns
     /** Application name (organization name on GitHub): {@value}. */
     public static final String TOOL_NAME = ProgramId.PROGRAM_NAME;
 
+    /** User-facing name; TOOL_NAME remains the stable storage/repository identity. */
+    public static final String TOOL_DISPLAY_NAME = "音伴-你的音乐搭子";
+
     /** Application id (repository name on GitHub) : {@value}. */
     public static final String TOOL_ID = ProgramId.PROGRAM_ID;
 

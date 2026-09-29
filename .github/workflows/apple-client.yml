@@ -115,7 +115,7 @@ jobs:
           set -euo pipefail
           for resources in \
             Build/Build/Products/Release-iphonesimulator/NoteLite.app \
-            Build/Build/Products/Release/NoteLite.app/Contents/Resources; do
+            Build/Build/Products/Release/音伴-你的音乐搭子.app/Contents/Resources; do
             for file in index.html app.js style.css demo.musicxml THIRD-PARTY.txt; do
               test -s "$resources/practice/$file"
             done
@@ -126,13 +126,13 @@ jobs:
       - name: Package unsigned native builds
         working-directory: apple
         run: |
-          ditto -c -k --keepParent Build/Build/Products/Release/NoteLite.app NoteLite-macOS-unsigned.zip
+          ditto -c -k --keepParent Build/Build/Products/Release/音伴-你的音乐搭子.app 音伴-macOS-unsigned.zip
           ditto -c -k --keepParent Build/Build/Products/Release-iphonesimulator/NoteLite.app NoteLite-iOS-simulator.zip
       - uses: actions/upload-artifact@v4
         with:
           name: apple-native-builds
           path: |
-            apple/NoteLite-macOS-unsigned.zip
+            apple/音伴-macOS-unsigned.zip
             apple/NoteLite-iOS-simulator.zip
             apple/NoteLite-iOS-device-unsigned.zip
       - name: Test native macOS app

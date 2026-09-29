@@ -3,7 +3,7 @@
   <id>com.notelite.notelite</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0</project_license>
-  <name>NoteLite</name>
+  <name>音伴-你的音乐搭子</name>
   <summary>Optical Music Recognition (OMR) Application</summary>
   <description>
     <p>
@@ -17,11 +17,11 @@
       transposition and arrangement.
     </p>
     <p>
-      NoteLite provides outputs in two main digital formats: its OMR format
+      音伴 provides outputs in two main digital formats: its OMR format
       and standard MusicXML format. It has a graphical user
       interface focused on quick verification and manual
       correction of the OMR outputs. Other music editors, such as MuseScore,
-      Finale, or Lilypond, can be used on NoteLite MusicXML output.
+      Finale, or Lilypond, can be used on 音伴 MusicXML output.
     </p>
   </description>
   <categories>

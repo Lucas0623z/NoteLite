@@ -1,8 +1,10 @@
-# NoteLite 识谱桥接服务
+# 音伴-你的音乐搭子 · 识谱桥接服务
 
-为 iPhone、iPad 和其他 HTTP 客户端提供真正的 NoteLite 识谱接口。服务把上传的 PDF / PNG / JPEG / TIFF 交给本仓库的 Java 批处理引擎，返回 MusicXML、MIDI 和引擎生成的 `.omr` 文件。识谱在运行本服务的电脑或服务器上完成，不在 iPhone / iPad 上运行 Java。
+为音伴的基础 Apple 客户端和其他 HTTP 客户端提供 Orpheus AI 识谱接口。服务把上传的 PDF / PNG / JPEG / TIFF 交给本仓库的 Java 批处理引擎，返回 MusicXML、MIDI 和引擎生成的 `.omr` 文件。使用桥接服务时，识谱在运行本服务的电脑或服务器上完成。音伴的完整 iPhone / iPad 构建使用设备内引擎识别新任务，无需此服务；已有远端任务仍可继续连接。
 
-仅使用 Python 标准库，无需 `pip install`。需要 **Python 3.10+、JDK 21、本机平台的 NoteLite 分发包**，以及与桌面版相同的 OCR 语言数据。Java 21 的预览功能已启用，因此不要将 Java 21 构建的包直接换用其他主版本运行。服务不会自动下载 JDK、语言数据或启动模拟识谱引擎。
+仅使用 Python 标准库，无需 `pip install`。需要 **Python 3.10+、JDK 21、本机平台的音伴分发包**，以及与桌面版相同的 OCR 语言数据。Java 21 的预览功能已启用，因此不要将 Java 21 构建的包直接换用其他主版本运行。服务不会自动下载 JDK、语言数据或启动模拟识谱引擎。
+
+Orpheus AI 基于 Audiveris，保留上游来源、版权与许可证。以下命令中的脚本名、Java 主类、JAR 文件名、存储目录和环境变量沿用内部标识，改名不影响已有配置。
 
 ## 构建与启动
 

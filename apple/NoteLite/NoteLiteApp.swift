@@ -7,7 +7,7 @@ struct NoteLiteApp: App {
     @StateObject private var history = PracticeHistoryStore()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("音伴-你的音乐搭子") {
             LibraryView()
                 .environmentObject(library)
                 .environmentObject(history)

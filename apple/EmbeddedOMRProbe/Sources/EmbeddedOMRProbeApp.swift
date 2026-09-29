@@ -32,7 +32,7 @@ struct EmbeddedOMRProbeApp: App {
         WindowGroup {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Audiveris embedded probe").font(.title2.bold())
+                    Text("Orpheus AI embedded probe").font(.title2.bold())
                     Text(model.status).font(.headline)
                     Text("This test runs the bundled Java engine, fonts, OCR and score export in this app's process.")
                     if model.running { ProgressView() }

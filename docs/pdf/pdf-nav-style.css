@@ -31,6 +31,6 @@
 
 @page {
     background: rgba(255, 255, 60, 0.14) !important;		
-    @top-center {content: "NoteLite Handbook - Table of Contents";}    
+    @top-center {content: "音伴使用手册 - 目录";}
     @bottom-center {content: "Contents - " counter(page, upper-roman)}
 }

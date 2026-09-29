@@ -1,6 +1,6 @@
 # macOS desktop build
 
-The desktop app remains the full Java/Swing NoteLite editor. It builds separately for
+The desktop app remains the full Java/Swing 音伴 editor. It builds separately for
 Apple Silicon (`arm64`) and Intel (`x86_64`), with a matching bundled Java runtime and
 native Tesseract/Leptonica libraries. End users do not need to install Java.
 
@@ -23,22 +23,22 @@ bash ./gradlew :app:test --tests com.notelite.omr.ui.MacApplicationTest
 bash ./gradlew :packaging:jpackage -PinstallerType=DMG
 ```
 
-The output is `packaging/build/dist/NoteLite-5.13.0-macosx-arm64.dmg` or
-`NoteLite-5.13.0-macosx-x86_64.dmg`, depending on the JDK architecture. A JDK running
+The output is `packaging/build/dist/音伴-你的音乐搭子-5.13.1-macosx-arm64.dmg` or
+`音伴-你的音乐搭子-5.13.1-macosx-x86_64.dmg`, depending on the JDK architecture. A JDK running
 under Rosetta produces an Intel package. Do not override `targetOS` to pretend to
 cross-compile an installer: the build rejects a mismatch between the native libraries
 and the JRE. Use the corresponding Mac/JDK, or the CI workflow, for each architecture.
 
 Icons are generated with macOS's built-in `sips` and `iconutil`; no Homebrew or
 ImageMagick installation is performed. Tesseract language data is downloaded through
-NoteLite's language settings and is not embedded in the installer.
+音伴's language settings and is not embedded in the installer.
 
 ## GitHub Actions
 
 [macos-desktop.yml](../.github/workflows/macos-desktop.yml) runs on `macos-15`
 (Apple Silicon) and `macos-15-intel`. It compiles the app, tests shortcut conversion,
 builds a DMG, mounts it, verifies the launcher's architecture and runs the bundled
-Java runtime and `NoteLite -help`, then recognizes the bundled `chula.png` score using
+Java runtime and `音伴-你的音乐搭子 -help`, then recognizes the bundled `chula.png` score using
 the packaged launcher and checks its MusicXML and MIDI output. Download the two unsigned DMGs from the workflow's
 artifacts. The workflow does not publish a release or upload to an app store.
 
@@ -68,9 +68,9 @@ No signing credentials are stored in this repository. After configuring a
 artifact and staple Apple's accepted ticket:
 
 ```sh
-xcrun notarytool submit packaging/build/dist/NoteLite-5.13.0-macosx-arm64.dmg \
+xcrun notarytool submit packaging/build/dist/音伴-你的音乐搭子-5.13.1-macosx-arm64.dmg \
   --keychain-profile notelite-notary --wait
-xcrun stapler staple packaging/build/dist/NoteLite-5.13.0-macosx-arm64.dmg
+xcrun stapler staple packaging/build/dist/音伴-你的音乐搭子-5.13.1-macosx-arm64.dmg
 ```
 
 Only staple after notarization reports **Accepted**. Substitute `x86_64` for the Intel

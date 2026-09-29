@@ -1,6 +1,6 @@
 # App Store 简体中文资料草稿
 
-本文件供发布者录入 App Store Connect。公开文案对应包含完整 Audiveris 引擎的 iPhone / iPad 版本；最后的审核信息和发布核对项不属于商店描述。资料保存到公开主分支并验证可访问后，才能将相应网页地址填入商店。
+本文件供发布者录入 App Store Connect。公开文案对应包含完整 Orpheus AI 引擎的 iPhone / iPad 版本；最后的审核信息和发布核对项不属于商店描述。资料保存到公开主分支并验证可访问后，才能将相应网页地址填入商店。
 
 ## 基本信息
 
@@ -32,7 +32,7 @@
 从“文件”导入 PDF、PNG、JPEG、TIFF、MusicXML 或 MXL。原稿和识谱结果保存在设备上，方便预览与分享。
 
 【在设备上识谱】
-内置基于 Audiveris 的识谱引擎，在 iPhone 和 iPad 上将 PDF 和乐谱图片转换为 MusicXML 与 MIDI。新导入的曲谱无需上传或配置服务器，识别完成后可继续练习或导出结果。
+内置 Orpheus AI 识谱引擎，在 iPhone 和 iPad 上将 PDF 和乐谱图片转换为 MusicXML 与 MIDI。新导入的曲谱无需上传或配置服务器，识别完成后可继续练习或导出结果。
 
 【逐音练习与回顾】
 直接导入 MusicXML，或打开识别生成的乐谱，选择声部和小节，使用麦克风或已连接的 MIDI 乐器练习。通过音符和节奏反馈找到需要再练的地方，并在本机查看练习记录。包含多个部分的识谱结果可分别选择练习。
@@ -50,11 +50,11 @@
 
 ## 本版本更新说明草稿
 
-新增 iPhone / iPad 设备内 Audiveris 识谱，可将 PDF 和图片转换为 MusicXML 与 MIDI。支持多部分结果分别练习，并更新本机处理、旧服务器任务和数据保留的说明。
+新增 iPhone / iPad 设备内 Orpheus AI 识谱，可将 PDF 和图片转换为 MusicXML 与 MIDI。支持多部分结果分别练习，并更新本机处理、旧服务器任务和数据保留的说明。
 
 ## App Review 审核说明草稿（仅审核信息字段）
 
-This iPhone/iPad build includes the Audiveris-based recognition engine and its runtime, OCR, fonts, and model resources in the app. Newly imported PDF and image scores are processed on device and exported as MusicXML and MIDI. No account, login, server address, or token is required for this workflow. It does not download executable code or recognition models when recognition starts.
+This iPhone/iPad build includes the Orpheus AI recognition engine and its runtime, OCR, fonts, and model resources in the app. Newly imported PDF and image scores are processed on device and exported as MusicXML and MIDI. No account, login, server address, or token is required for this workflow. It does not download executable code or recognition models when recognition starts.
 
 To test offline recognition:
 1. Save a score PDF, PNG, JPEG, or TIFF in Files before disconnecting the network. A repository sample is available at https://raw.githubusercontent.com/Lucas0623z/NoteLite/main/data/examples/chula.png.
