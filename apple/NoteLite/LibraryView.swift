@@ -413,6 +413,9 @@ struct ScoreDetailView: View {
         #if DEBUG
         .task {
             guard UICatalog.enabled else { return }
+            // On a phone, the destination's task starts before its navigation animation ends.
+            // Presenting a dialog/sheet at that point is discarded by UIKit.
+            try? await Task.sleep(nanoseconds: 750_000_000)
             if UICatalog.scenario == "part-picker" { choosingPart = true }
             if UICatalog.scenario == "source-preview" { showingOriginal = true }
         }
