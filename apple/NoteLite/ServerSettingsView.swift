@@ -55,7 +55,7 @@ struct ServerSettingsView: View {
 
                 Section("识谱与本地曲谱") {
                     if library.hasLocalEngine {
-                        Text("新导入的 PDF 和图片使用设备内的 Audiveris 引擎识别，原稿和结果保存在本机。填写服务器地址不会改变新任务的处理方式；本机识谱失败也不会自动上传。MusicXML 可直接导入练习。")
+                        Text("新导入的 PDF 和图片使用设备内的 Orpheus AI 引擎识别，原稿和结果保存在本机。填写服务器地址不会改变新任务的处理方式；本机识谱失败也不会自动上传。MusicXML 可直接导入练习。")
                         Text("识谱时请保持应用在前台。离开应用后会请求停止识谱，返回后可重新开始。")
                     } else {
                         Text("原稿和识谱结果保存在此设备。PDF 和图片通过你配置的服务器识谱；原稿只有在你点选“开始识别”时才上传。MusicXML 可直接导入练习。")

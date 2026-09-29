@@ -1,4 +1,4 @@
-NoteLite practice third-party notices
+音伴练习 · 第三方开源许可
 
 
 --- opensheetmusicdisplay 2.1.3 (BSD-3-Clause) ---

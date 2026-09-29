@@ -1,4 +1,4 @@
-# Embedded Audiveris iOS probe
+# Embedded Orpheus AI iOS probe
 
 This separate test app links the real OpenJDK Mobile Zero interpreter, headless
 Java desktop libraries, and OCR/JavaCPP archives into one iOS process. It calls

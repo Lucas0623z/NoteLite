@@ -135,14 +135,14 @@ final class NativePracticeInput {
             #endif
         } else if mode == "midi" {
             let decoder = MIDIStreamDecoder()
-            let clientStatus = MIDIClientCreateWithBlock("NoteLite Practice" as CFString, &midiClient) { [weak self] _ in
+            let clientStatus = MIDIClientCreateWithBlock("音伴-你的音乐搭子" as CFString, &midiClient) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, self.generation == current else { return }
                     self.refreshMIDISources()
                 }
             }
             guard clientStatus == noErr else { stop(); throw NoteLiteError.server("无法启动 MIDI 服务（\(clientStatus)）。") }
-            let portStatus = MIDIInputPortCreateWithBlock(midiClient, "Practice Input" as CFString, &midiPort) { [weak self] list, connection in
+            let portStatus = MIDIInputPortCreateWithBlock(midiClient, "音伴演奏输入" as CFString, &midiPort) { [weak self] list, connection in
                 let source = UInt(bitPattern: connection)
                 var packet = UnsafeRawPointer(list).advanced(by: MemoryLayout<MIDIPacketList>.offset(of: \.packet)!)
                     .assumingMemoryBound(to: MIDIPacket.self)

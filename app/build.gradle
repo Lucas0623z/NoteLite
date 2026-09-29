@@ -23,7 +23,7 @@ def app = project(':app')
 
 // Central location for application version
 // REMINDER: Also update the "notelite_functional_version" in docs/_config.yml
-project.version = '5.13.0'
+project.version = '5.13.1'
 println "version: ${project.version}"
 
 // Central location for the specific versions of tesseract dependencies
@@ -79,6 +79,7 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 // Keep Gradle launches, generated start scripts and packaged applications consistent.
+ext.displayName = '音伴-你的音乐搭子'
 ext.runtimeJvmArgs = ['--enable-preview',
                       '-Dfile.encoding=UTF-8',
                       '-Djava.util.PropertyResourceBundle.encoding=UTF-8',
@@ -87,7 +88,7 @@ ext.runtimeJvmArgs = ['--enable-preview',
                       '--enable-native-access=ALL-UNNAMED']
 if (ext.targetOS.startsWith('macosx-')) {
     ext.runtimeJvmArgs += ['-Dapple.laf.useScreenMenuBar=true',
-                          '-Dapple.awt.application.name=NoteLite']
+                          "-Dapple.awt.application.name=${app.ext.displayName}".toString()]
 }
 
 tasks.withType(JavaExec).configureEach {
@@ -380,7 +381,7 @@ jar {
 
     manifest {
         attributes 'Built-By': app.ext.companyName
-        attributes 'Specification-Title': app.ext.programName
+        attributes 'Specification-Title': app.ext.displayName
         attributes 'Specification-Vendor': app.ext.companyName
         attributes 'Specification-Version': project.version
         attributes 'Implementation-Version': project.version
@@ -484,7 +485,9 @@ compileJava.dependsOn('generateProgramId')
 
 // Customization of start scripts to force a check of Java version at run time
 tasks.withType(CreateStartScripts).configureEach {
-    applicationName = rootProject.name
+    applicationName = app.ext.displayName
+    optsEnvironmentVar = 'NOTELITE_OPTS'
+    exitEnvironmentVar = 'NOTELITE_EXIT_CONSOLE'
     doFirst {
         // Copy our own templates while updating THE_MIN_JAVA_VERSION token
         copy {

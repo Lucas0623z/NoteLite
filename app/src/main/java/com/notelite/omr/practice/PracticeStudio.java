@@ -50,7 +50,7 @@ public final class PracticeStudio {
         new SwingWorker<List<Score>, Void>() {
             @Override protected List<Score> doInBackground () throws Exception {
                 if (!book.transcribe(book.getValidSelectedStubs(), book.getScores(), false))
-                    throw new IOException("乐谱识别未完成，请先在 NoteLite 中完成识谱并校对。");
+                    throw new IOException("乐谱识别未完成，请先在音伴中完成识谱并校对。");
                 return List.copyOf(book.getScores());
             }
             @Override protected void done () {
@@ -60,7 +60,7 @@ public final class PracticeStudio {
                     int index = 0;
                     if (scores.size() > 1) {
                         String[] labels = scores.stream().map(s -> "乐章 " + s.getId()).toArray(String[]::new);
-                        Object selected = JOptionPane.showInputDialog(OMR.gui.getFrame(), "选择练习乐章", "NoteLite 陪练", JOptionPane.QUESTION_MESSAGE, null, labels, labels[0]);
+                        Object selected = JOptionPane.showInputDialog(OMR.gui.getFrame(), "选择练习乐章", "音伴陪练", JOptionPane.QUESTION_MESSAGE, null, labels, labels[0]);
                         if (selected == null) return;
                         index = java.util.Arrays.asList(labels).indexOf(selected);
                     }
@@ -84,7 +84,7 @@ public final class PracticeStudio {
     private static void showError (Exception ex) {
         Throwable cause = ex.getCause() == null ? ex : ex.getCause();
         SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(OMR.gui.getFrame(),
-                "无法打开陪练：" + cause.getMessage(), "NoteLite 陪练", JOptionPane.ERROR_MESSAGE));
+                "无法打开陪练：" + cause.getMessage(), "音伴陪练", JOptionPane.ERROR_MESSAGE));
     }
 
     /** Start an isolated, read-only HTTP session with bundled assets and one score. */

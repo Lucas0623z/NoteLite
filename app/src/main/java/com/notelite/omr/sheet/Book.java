@@ -1585,11 +1585,11 @@ public class Book
 
                     case PROGRAM_TOO_OLD -> {
                         final String msg = bookPath + " version " + version
-                                + "\nPlease use a more recent NoteLite version";
+                                + "\nPlease use a more recent 音伴 version";
                         logger.warn(msg);
 
                         if (OMR.gui != null) {
-                            OMR.gui.displayWarning(msg, "Too old NoteLite software version");
+                            OMR.gui.displayWarning(msg, "音伴 software update required");
                         }
 
                         return false;

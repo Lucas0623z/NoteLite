@@ -103,7 +103,7 @@ function processAudio(samples,sampleRate){
 }
 async function context(){audioContext??=new AudioContext();if(audioContext.state==='suspended')await audioContext.resume();return audioContext;}
 async function connectMic(){
-  const generation=inputGeneration;if(!navigator.mediaDevices?.getUserMedia)throw new Error('此浏览器不能录音，请使用原生 NoteLite，或在支持录音的浏览器打开。');
+  const generation=inputGeneration;if(!navigator.mediaDevices?.getUserMedia)throw new Error('此浏览器不能录音，请使用音伴原生应用，或在支持录音的浏览器打开。');
   const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
   if(generation!==inputGeneration){stream.getTracks().forEach(t=>t.stop());return false;}
   let ctx;try{ctx=await context();}catch(error){stream.getTracks().forEach(t=>t.stop());throw error;}
@@ -118,7 +118,7 @@ function refreshMidi(){
 }
 function selectMidi(){if(selectedMidi)selectedMidi.onmidimessage=null;selectedMidi=midiAccess?.inputs.get($('midi-device').value);if(selectedMidi)selectedMidi.onmidimessage=({data,timeStamp})=>{if((data[0]&0xf0)===0x90&&data[2]>0)receive(data[1],timeStamp);};}
 async function connectMidi(){
-  const generation=inputGeneration;if(!navigator.requestMIDIAccess)throw new Error('此浏览器不支持 MIDI，请使用原生 NoteLite，或在 Chrome / Edge 打开。');
+  const generation=inputGeneration;if(!navigator.requestMIDIAccess)throw new Error('此浏览器不支持 MIDI，请使用音伴原生应用，或在 Chrome / Edge 打开。');
   const access=midiAccess||await navigator.requestMIDIAccess({sysex:false});if(generation!==inputGeneration)return false;
   midiAccess=access;midiAccess.onstatechange=()=>{if(phase==='active')refreshMidi();};if(!refreshMidi())throw new Error('未找到 MIDI 乐器。连接后重试，或在设置中选择电脑键盘演示。');return true;
 }
@@ -227,7 +227,7 @@ function showReview(){if(phase==='active')pause();renderReport();view('review');
 function downloadReport(){
   if(!session)throw new Error('先完成一次练习再保存记录。');const report=lastReport||reportData();
   if(bridge.available){message('本次记录会在结束练习后保存到曲谱库。');return;}
-  const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='NoteLite-练习记录.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+  const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='音伴-练习记录.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 async function readFile(file){if(file.size>15*1024*1024)throw new Error('乐谱文件过大，请导入不超过 15 MB 的文件。');return readBytes(new Uint8Array(await file.arrayBuffer()));}
 function readBytes(bytes){

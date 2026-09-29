@@ -358,7 +358,7 @@ public class Main
             return new BatchResult(BatchStatus.CANCELLED, 0, List.of());
         }
         validateEmbeddedArguments(args);
-        final CLI parsed = new CLI(WellKnowns.TOOL_NAME);
+        final CLI parsed = new CLI(WellKnowns.TOOL_DISPLAY_NAME);
         final CLI.Parameters parameters;
         try {
             parameters = parsed.parseParameters(args.clone());
@@ -564,7 +564,7 @@ public class Main
     {
         try {
             // First get the provided parameters if any
-            cli = new CLI(WellKnowns.TOOL_NAME);
+            cli = new CLI(WellKnowns.TOOL_DISPLAY_NAME);
             cli.parseParameters(args);
         } catch (CmdLineException ex) {
             logger.warn("Error in command line: {}", ex.getLocalizedMessage(), ex);
@@ -668,7 +668,7 @@ public class Main
     {
         return String.join(
                 WellKnowns.LINE_SEPARATOR,
-                "NoteLite",
+                WellKnowns.TOOL_DISPLAY_NAME,
                 "- Version:      " + WellKnowns.TOOL_REF,
                 "- Commit:       " + WellKnowns.TOOL_BUILD,
                 "- OS:           " + System.getProperty("os.name") + //

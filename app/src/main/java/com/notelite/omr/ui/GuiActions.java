@@ -444,16 +444,16 @@ public class GuiActions
             extends ConstantSet
     {
         private final Constant.String webSiteUrl = new Constant.String(
-                "http://www.notelite.example.com",
-                "URL of NoteLite home page");
+                "https://github.com/Lucas0623z/NoteLite",
+                "URL of 音伴 home page");
 
         private final Constant.String wikiUrl = new Constant.String(
-                "https://github.com/ORG/notelite/wiki",
-                "URL of NoteLite wiki");
+                "https://github.com/Lucas0623z/NoteLite/wiki",
+                "URL of 音伴 wiki");
 
         private final Constant.String manualUrl = new Constant.String(
-                "https://notelite.example.com/notelite/",
-                "URL of NoteLite manual");
+                "https://github.com/Lucas0623z/NoteLite#readme",
+                "URL of 音伴 manual");
     }
 
     //----------------------//

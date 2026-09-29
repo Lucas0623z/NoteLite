@@ -3,7 +3,7 @@
 #---------------------------------------------------------------------------------------------------
 #                                     p d f - b u i l d . s h
 #---------------------------------------------------------------------------------------------------
-# Generation of a PDF version of NoteLite HANDBOOK.
+# Generation of a PDF version of the 音伴 handbook.
 #
 # This is derived from the file hamoid / justTheDocsToPDF.bash
 # found at https://gist.github.com/hamoid
@@ -24,7 +24,7 @@
 # a local generator found at http://localhost:4000
 # Otherwise, it is retrieved from GitHub NoteLite at https://notelite.example.com
 #
-# Path to the resulting file is build/pdf/NoteLite_Handbook.pdf
+# Path to the resulting file is build/pdf/音伴_使用手册.pdf
 #---------------------------------------------------------------------------------------------------
 
 # Variables
@@ -43,7 +43,7 @@ TARGET="build/pdf"
 CORE="$TARGET/core.html"
 CATALOG="$TARGET/catalog.txt"
 NAV="$TARGET/nav.html"
-HANDBOOK="$TARGET/NoteLite_Handbook.pdf"
+HANDBOOK="$TARGET/音伴_使用手册.pdf"
 STYLE="../../pdf/pdf-nav-style.css"
 
 mkdir -p $TARGET
@@ -79,7 +79,7 @@ sed "s,$PREFIX,\n$PREFIX,g" $CORE | sed "s,\".*,,g" | tail +2 >> $CATALOG
 echo "<!DOCTYPE html>" > $NAV
 echo "<html>" >> $NAV
 echo "<head>" >> $NAV
-echo "<title>NoteLite HandBook</title>" >> $NAV
+echo "<title>音伴-你的音乐搭子 使用手册</title>" >> $NAV
 echo "<link rel='stylesheet' href='$STYLE'/>" >> $NAV
 echo "</head>" >> $NAV
 echo "<body>" >> $NAV

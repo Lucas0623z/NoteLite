@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=NoteLite
+Name=音伴-你的音乐搭子
 GenericName=Optical Music Recognition (OMR)
-Exec=NoteLite
+Exec=音伴-你的音乐搭子
 Type=Application
 Icon=com.notelite.notelite
 Comment=Convert sheet music to XML
