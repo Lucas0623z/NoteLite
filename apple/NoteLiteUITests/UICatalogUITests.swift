@@ -70,7 +70,7 @@ final class UICatalogUITests: XCTestCase {
             element = app.buttons["停止识谱"].firstMatch
             #endif
         case "detail-ready": element = app.buttons["practice-start"].firstMatch
-        case "part-picker": element = app.descendants(matching: .any).matching(identifier: "practice-part-练习曲.mvt1.musicxml").firstMatch
+        case "part-picker": element = app.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", "第 1 部分", "practice-part-练习曲.mvt1.musicxml")).firstMatch
         case "source-preview": element = app.buttons["完成"].firstMatch
         case "settings": element = app.buttons["检查服务器连接"].firstMatch
         case "privacy": element = app.descendants(matching: .any).matching(identifier: "catalog-privacy-content").firstMatch
