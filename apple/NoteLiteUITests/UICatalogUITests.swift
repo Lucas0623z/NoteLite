@@ -73,9 +73,9 @@ final class UICatalogUITests: XCTestCase {
         case "part-picker": element = app.buttons["practice-part-练习曲.mvt1.musicxml"].firstMatch
         case "source-preview": element = app.buttons["完成"].firstMatch
         case "settings": element = app.buttons["检查服务器连接"].firstMatch
-        case "privacy": element = app.staticTexts["保存在设备上的内容"].firstMatch
-        case "history": element = app.staticTexts["晨光练习曲 · 模拟练习"].firstMatch
-        case "review": element = app.staticTexts["需要再练的地方"].firstMatch
+        case "privacy": element = app.descendants(matching: .any).matching(identifier: "catalog-privacy-content").firstMatch
+        case "history": element = app.descendants(matching: .any).matching(identifier: "catalog-history-content").firstMatch
+        case "review": element = app.descendants(matching: .any).matching(identifier: "catalog-review-content").firstMatch
         case "error-alert": element = app.alerts.firstMatch
         default: XCTFail("Unknown scene: \(scene)"); return
         }

@@ -143,6 +143,7 @@ struct PracticeHistoryView: View {
         }
         .navigationTitle("练习记录")
         #if DEBUG
+        .accessibilityIdentifier(UICatalog.enabled ? "catalog-history-content" : "practice-history-content")
         .navigationDestination(isPresented: $catalogReview) {
             if let record = history.records.first { review(record) }
         }
@@ -195,5 +196,8 @@ struct PracticeHistoryView: View {
                 }
             }
         }.listStyle(.plain).navigationTitle("练习回顾")
+        #if DEBUG
+        .accessibilityIdentifier(UICatalog.enabled ? "catalog-review-content" : "practice-review-content")
+        #endif
     }
 }

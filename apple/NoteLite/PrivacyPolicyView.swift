@@ -72,5 +72,8 @@ struct PrivacyPolicyView: View {
         .navigationTitle("隐私政策")
         .noteLiteInlineTitle()
         .tint(NoteLiteTheme.accent)
+        #if DEBUG
+        .accessibilityIdentifier(UICatalog.enabled ? "catalog-privacy-content" : "privacy-policy-content")
+        #endif
     }
 }
