@@ -134,6 +134,23 @@ final class LibraryStore: ObservableObject {
     }
 
     #if DEBUG
+    /// Frozen presentation data, guarded by the explicit screenshot launch flag.
+    /// The server variant does not create a job and therefore cannot resume a network request.
+    func prepareCatalogPresentation(_ scene: String) {
+        guard UICatalog.enabled, let index = records.firstIndex(where: { $0.id == UICatalog.originalID }) else { return }
+        if scene == "detail-running" {
+            records[index].phase = .running
+            records[index].recognitionLocation = UICatalog.localEngine ? .device : .server
+            activeIDs.insert(records[index].id)
+        } else if scene == "detail-failed" {
+            records[index].phase = .failed
+            records[index].recognitionLocation = UICatalog.localEngine ? .device : .server
+            records[index].lastError = UICatalog.localEngine
+                ? "本地识谱未生成有效的 MusicXML 和 MIDI 文件。"
+                : "无法连接识谱服务器，请检查网络和服务器地址后重试。"
+        }
+    }
+
     /// UI navigation tests provide real desktop exports without running OMR.
     /// This import route and its launch argument do not exist in Release builds.
     func importPracticeUITestFixture(_ data: Data) async {

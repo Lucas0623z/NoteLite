@@ -8,6 +8,9 @@ struct ServerSettingsView: View {
     @State private var status: String?
     @State private var isChecking = false
     @State private var checkTask: Task<Void, Never>?
+    #if DEBUG
+    @State private var catalogPrivacy = false
+    #endif
 
     init(address: String) { _address = State(initialValue: address) }
 
@@ -77,6 +80,12 @@ struct ServerSettingsView: View {
                 }
             }
             .navigationTitle("服务器设置")
+            #if DEBUG
+            .navigationDestination(isPresented: $catalogPrivacy) { PrivacyPolicyView() }
+            .task {
+                if UICatalog.enabled && UICatalog.scenario == "privacy" { catalogPrivacy = true }
+            }
+            #endif
             .noteLiteInlineTitle()
             .formStyle(.grouped)
             .tint(NoteLiteTheme.accent)
@@ -106,6 +115,9 @@ struct ServerSettingsView: View {
             }
             .onDisappear { checkTask?.cancel() }
         }
+        #if DEBUG
+        .catalogWatermark()
+        #endif
     }
 
     @MainActor

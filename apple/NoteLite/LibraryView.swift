@@ -34,6 +34,7 @@ struct LibraryView: View {
     @State private var showingSettings = false
     #if DEBUG
     @State private var showingLocalOMR = false
+    @State private var catalogTab = 0
     #endif
     @State private var deleting: ScoreRecord?
     @State private var phonePath: [UUID] = []
@@ -128,6 +129,20 @@ struct LibraryView: View {
             Text(deleting?.job != nil ? "已有服务器任务会先被清理；仍在运行或无法连接时保留本地记录，请稍后再试。" : "将删除保存在这台设备上的原稿和识谱结果。")
         }
         .task { library.resumePending() }
+        #if DEBUG
+        .task {
+            guard UICatalog.enabled else { return }
+            if let id = UICatalog.detailID {
+                selection = id
+                if compact { phonePath = [id] }
+            }
+            if ["history", "review"].contains(UICatalog.scenario) {
+                if compact { catalogTab = 1 } else { section = .history }
+            }
+            if ["settings", "privacy"].contains(UICatalog.scenario) { showingSettings = true }
+            if UICatalog.scenario == "error-alert" { library.errorMessage = "单个文件不能超过 25 MiB。" }
+        }
+        #endif
         .onChange(of: library.records.map(\.id)) { ids in
             if let selection, !ids.contains(selection) { self.selection = nil }
             phonePath.removeAll { !ids.contains($0) }
@@ -143,15 +158,27 @@ struct LibraryView: View {
     }
 
     private var phoneLibrary: some View {
+        #if DEBUG
+        TabView(selection: $catalogTab) { phoneTabs }
+        #else
         TabView {
+            phoneTabs
+        }
+        #endif
+    }
+
+    private var phoneTabs: some View {
+        Group {
             NavigationStack(path: $phonePath) {
                 scoreList.navigationDestination(for: UUID.self) { id in
                     if let record = library.record(id) { ScoreDetailView(record: record) }
                 }
             }
             .tabItem { Label("曲谱", systemImage: "book") }
+            .tag(0)
             NavigationStack { PracticeHistoryView() }
                 .tabItem { Label("练习记录", systemImage: "clock") }
+                .tag(1)
         }
     }
 
@@ -383,6 +410,13 @@ struct ScoreDetailView: View {
             .background(NoteLiteTheme.window)
         }
         .navigationTitle(record.displayTitle).noteLiteInlineTitle()
+        #if DEBUG
+        .task {
+            guard UICatalog.enabled else { return }
+            if UICatalog.scenario == "part-picker" { choosingPart = true }
+            if UICatalog.scenario == "source-preview" { showingOriginal = true }
+        }
+        #endif
         .toolbar {
             if library.sourceURL(record) != nil {
                 Button { showingOriginal = true } label: {
@@ -419,6 +453,9 @@ struct ScoreDetailView: View {
             }
             #if os(macOS)
             .noteLiteSheetSize(idealWidth: 900, idealHeight: 900)
+            #endif
+            #if DEBUG
+            .catalogWatermark()
             #endif
         }
         .sheet(isPresented: $showingSettings) {

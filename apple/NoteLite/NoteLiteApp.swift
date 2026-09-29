@@ -3,12 +3,28 @@ import SwiftUI
 @main
 @MainActor
 struct NoteLiteApp: App {
-    @StateObject private var library = LibraryStore()
-    @StateObject private var history = PracticeHistoryStore()
+    @StateObject private var library: LibraryStore
+    @StateObject private var history: PracticeHistoryStore
+
+    init() {
+        #if DEBUG
+        if UICatalog.enabled {
+            let stores = UICatalog.stores()
+            _library = StateObject(wrappedValue: stores.0)
+            _history = StateObject(wrappedValue: stores.1)
+            return
+        }
+        #endif
+        _library = StateObject(wrappedValue: LibraryStore())
+        _history = StateObject(wrappedValue: PracticeHistoryStore())
+    }
 
     var body: some Scene {
         WindowGroup {
             LibraryView()
+                #if DEBUG
+                .catalogWatermark()
+                #endif
                 .environmentObject(library)
                 .environmentObject(history)
                 .tint(NoteLiteTheme.accent)

@@ -1,188 +1,36 @@
 name: Apple clients
 
+# Documentation-only workflow on codex/ui-inventory. No signing, upload, or release jobs.
 on:
-  push:
-    branches: [main, master, codex/audiveris-apple-builds]
-    paths:
-      - "apple/**"
-      - "practice-web/**"
-      - "app/res/practice/**"
-      - "tools/audiveris-port/manage-embedded-simulators.py"
-      - "tools/audiveris-port/test_manage_embedded_simulators.py"
-      - ".github/workflows/apple-client.yml"
-  pull_request:
-    paths:
-      - "apple/**"
-      - "practice-web/**"
-      - "app/res/practice/**"
-      - "tools/audiveris-port/manage-embedded-simulators.py"
-      - "tools/audiveris-port/test_manage_embedded_simulators.py"
-      - ".github/workflows/apple-client.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  # Pin the stable toolchain; the runner also contains preview Xcode versions.
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
 concurrency:
-  group: apple-client-${{ github.ref }}
+  group: apple-ui-catalog-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  embedded-bridge-interface:
+  ui-catalog:
+    name: ${{ matrix.family }} UI catalog
     runs-on: macos-26
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - name: Check embedded runtime interfaces and enabled production service
-        run: |
-          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
-          xcrun --sdk iphonesimulator clang++ -fsyntax-only -std=c++17 -fobjc-arc \
-            -target arm64-apple-ios16.0-simulator -isysroot "$sdk" \
-            -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/darwin" \
-            apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.mm
-          xcrun swiftc -typecheck -parse-as-library -D EMBEDDED_OMR_RUNTIME \
-            -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
-            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
-            apple/NoteLite/Models.swift apple/NoteLite/EmbeddedOMRInputPreparation.swift \
-            apple/NoteLite/EmbeddedRecognitionService.swift
-          xcrun swiftc -typecheck -parse-as-library \
-            -target arm64-apple-ios16.0-simulator -sdk "$sdk" \
-            -import-objc-header apple/EmbeddedOMRRuntime/Sources/EmbeddedJVM.h \
-            apple/EmbeddedOMRProbe/Sources/EmbeddedOMRProbeApp.swift
-
-  native-clients:
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: practice-web/package-lock.json
-      - name: Build and test bundled practice view
-        working-directory: practice-web
-        run: |
-          npm ci
-          npm test
-          npm run build
-      - name: Generate Xcode project
-        id: generate
-        working-directory: apple
-        run: |
-          xcodebuild -version
-          sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
-          test "${sdk_version%%.*}" -ge 26
-          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          xcodegen generate --spec project.yml
-      - name: Build iOS simulator app without signing
-        id: build_ios
-        working-directory: apple
-        run: |
-          xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
-            -configuration Release -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath Build \
-            CODE_SIGNING_ALLOWED=NO
-      - name: Build native macOS app without signing
-        id: build_macos
-        working-directory: apple
-        run: |
-          xcodebuild build -project NoteLite.xcodeproj -scheme NoteLiteMac \
-            -configuration Release -destination 'platform=macOS' \
-            -derivedDataPath Build \
-            CODE_SIGNING_ALLOWED=NO
-      - name: Build iPhone and iPad arm64 app without signing
-        working-directory: apple
-        run: |
-          xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
-            -configuration Release -destination 'generic/platform=iOS' \
-            -derivedDataPath Build-device \
-            CODE_SIGNING_ALLOWED=NO
-          lipo Build-device/Build/Products/Release-iphoneos/NoteLite.app/NoteLite -verify_arch arm64
-          ditto -c -k --keepParent Build-device/Build/Products/Release-iphoneos/NoteLite.app NoteLite-iOS-device-unsigned.zip
-      - name: Verify bundled practice resources
-        working-directory: apple
-        shell: bash
-        run: |
-          set -euo pipefail
-          for resources in \
-            Build/Build/Products/Release-iphonesimulator/NoteLite.app \
-            Build/Build/Products/Release/NoteLite.app/Contents/Resources; do
-            for file in index.html app.js style.css demo.musicxml THIRD-PARTY.txt; do
-              test -s "$resources/practice/$file"
-            done
-            if [ -d ../app/res/practice/icons ]; then
-              diff -r ../app/res/practice/icons "$resources/practice/icons"
-            fi
-          done
-      - name: Package unsigned native builds
-        working-directory: apple
-        run: |
-          ditto -c -k --keepParent Build/Build/Products/Release/NoteLite.app NoteLite-macOS-unsigned.zip
-          ditto -c -k --keepParent Build/Build/Products/Release-iphonesimulator/NoteLite.app NoteLite-iOS-simulator.zip
-      - uses: actions/upload-artifact@v4
-        with:
-          name: apple-native-builds
-          path: |
-            apple/NoteLite-macOS-unsigned.zip
-            apple/NoteLite-iOS-simulator.zip
-            apple/NoteLite-iOS-device-unsigned.zip
-      - name: Test native macOS app
-        if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_macos.outcome == 'success' }}
-        working-directory: apple
-        run: |
-          xcodebuild test -project NoteLite.xcodeproj -scheme NoteLiteMac \
-            -destination 'platform=macOS' -parallel-testing-enabled NO \
-            -resultBundlePath TestResults-macOS.xcresult CODE_SIGNING_ALLOWED=NO
-      - name: Export native interface screenshots
-        if: always()
-        working-directory: apple
-        continue-on-error: true
-        run: |
-          export_failed=0
-          for result in TestResults-*.xcresult; do
-            if [ -d "$result" ]; then
-              name="${result%.xcresult}"
-              if ! xcrun xcresulttool export attachments --path "$result" --output-path "Screenshots/$name"; then
-                echo "::warning::Could not export attachments from $result; continuing with other devices"
-                export_failed=1
-              fi
-            fi
-          done
-          exit "$export_failed"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: apple-client-test-results
-          path: |
-            apple/TestResults-*.xcresult
-            apple/Screenshots/
-          if-no-files-found: ignore
-
-  simulator-clients:
-    name: ${{ matrix.family }} interface
-    runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        family: [iPhone, iPad]
+        family: [iPhone, iPad, macOS]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
           cache: npm
           cache-dependency-path: practice-web/package-lock.json
-      - name: Build bundled practice view
+      - name: Build bundled practice resources
         working-directory: practice-web
         run: |
           npm ci
@@ -191,53 +39,85 @@ jobs:
         working-directory: apple
         run: |
           xcodebuild -version
-          sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
-          test "${sdk_version%%.*}" -ge 26
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen generate --spec project.yml
-      - name: Create and boot dedicated screenshot simulator
+      - name: Create screenshot simulator
+        if: matrix.family != 'macOS'
         id: simulator
         timeout-minutes: 5
         env:
           DEVICE_FAMILY: ${{ matrix.family }}
         run: |
           set -euo pipefail
-          python3 -B tools/audiveris-port/test_manage_embedded_simulators.py
-          python3 tools/audiveris-port/manage-embedded-simulators.py create \
-            apple/SimulatorResults --family "$DEVICE_FAMILY" --screenshot
+          python3 tools/audiveris-port/manage-embedded-simulators.py create apple/SimulatorResults --family "$DEVICE_FAMILY" --screenshot
           DEVICE_ID=$(python3 -c 'import json, os; from pathlib import Path; print(json.loads((Path("apple/SimulatorResults") / os.environ["DEVICE_FAMILY"] / "device.json").read_text())["udid"])')
           echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$DEVICE_ID"
-          xcrun simctl bootstatus "$DEVICE_ID" -b | tee apple/SimulatorResults/boot.log
-      - name: Test native interface and model
-        timeout-minutes: 15
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcrun simctl status_bar "$DEVICE_ID" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
+      - name: Capture real SwiftUI screens with labelled mock data
         working-directory: apple
         env:
           DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+          DEVICE_FAMILY: ${{ matrix.family }}
         run: |
-          xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
-            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-            -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
-            -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
-            -maximum-test-execution-time-allowance 360 \
+          set -euo pipefail
+          if [ "$DEVICE_FAMILY" = macOS ]; then
+            scheme=NoteLiteMac
+            tests=NoteLiteMacUITests
+            destination='platform=macOS'
+          else
+            scheme=NoteLite
+            tests=NoteLiteUITests
+            destination="platform=iOS Simulator,id=$DEVICE_ID"
+          fi
+          xcodebuild test -project NoteLite.xcodeproj -scheme "$scheme" \
+            -configuration Debug -destination "$destination" \
+            -only-testing:"$tests/UICatalogUITests" -parallel-testing-enabled NO \
+            -resultBundlePath "TestResults-Catalog-$DEVICE_FAMILY.xcresult" \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 900 \
+            -maximum-test-execution-time-allowance 1200 \
             NOTELITE_SIM_SWIFT_PATH= CODE_SIGNING_ALLOWED=NO
-      - name: Remove dedicated simulator
-        if: always()
-        run: python3 tools/audiveris-port/manage-embedded-simulators.py cleanup apple/SimulatorResults
-      - name: Export native interface screenshots
+      - name: Export screenshots and provenance
         if: always()
         working-directory: apple
+        env:
+          DEVICE_FAMILY: ${{ matrix.family }}
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          result='TestResults-${{ matrix.family }}.xcresult'
+          set -euo pipefail
+          result="TestResults-Catalog-$DEVICE_FAMILY.xcresult"
+          output="Screenshots/$DEVICE_FAMILY"
+          mkdir -p "$output"
           if [ -d "$result" ]; then
-            xcrun xcresulttool export attachments --path "$result" --output-path 'Screenshots/TestResults-${{ matrix.family }}'
+            xcrun xcresulttool export attachments --path "$result" --output-path "$output"
           fi
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          family = os.environ['DEVICE_FAMILY']
+          target = Path('Screenshots') / family / 'catalog-provenance.json'
+          target.write_text(json.dumps({
+              'source_sha': os.environ['SOURCE_SHA'],
+              'production_base_sha': '65d565bc97821b641734a1e47b29fca91cf800c2',
+              'run_url': os.environ['RUN_URL'], 'platform': family,
+              'data': 'simulated fixtures, visibly watermarked',
+              'renderer': 'real SwiftUI native views',
+              'recognition_engine_executed': False,
+              'server_accessed': False,
+              'scenes': ['empty','library','detail-new','detail-running','detail-failed','detail-ready','part-picker','source-preview','settings','privacy','history','review','error-alert']
+          }, ensure_ascii=False, indent=2), encoding='utf-8')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: apple-client-test-results-${{ matrix.family }}
+          name: ui-catalog-${{ matrix.family }}
           path: |
-            apple/TestResults-*.xcresult
             apple/Screenshots/
+            apple/TestResults-Catalog-*.xcresult
             apple/SimulatorResults/
-          if-no-files-found: ignore
+          if-no-files-found: warn
+      - name: Remove dedicated simulator
+        if: always() && matrix.family != 'macOS'
+        run: python3 tools/audiveris-port/manage-embedded-simulators.py cleanup apple/SimulatorResults
