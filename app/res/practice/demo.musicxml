@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <score-partwise version="4.0">
   <work><work-title>晨光练习曲 · 单音示范</work-title></work>
-  <identification><creator type="composer">NoteLite 原创练习 · C 大调</creator></identification>
+  <identification><creator type="composer">音伴原创练习 · C 大调</creator></identification>
   <defaults><scaling><millimeters>7</millimeters><tenths>40</tenths></scaling></defaults>
   <part-list><score-part id="P1"><part-name>Flute 长笛</part-name><score-instrument id="I1"><instrument-name>Flute</instrument-name></score-instrument><midi-instrument id="I1"><midi-channel>1</midi-channel><midi-program>74</midi-program></midi-instrument></score-part></part-list>
   <part id="P1">

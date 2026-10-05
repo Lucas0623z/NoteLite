@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="app/res/icon-256.png" alt="NoteLite logo" width="112" height="112">
+<img src="app/res/icon-256.png" alt="音伴-你的音乐搭子 logo" width="112" height="112">
 
-# NoteLite
+# 音伴-你的音乐搭子
 
 **Turn printed music into scores you can refine, listen to, and practice.**
 
@@ -19,11 +19,11 @@ Score recognition and editing · MusicXML / MIDI export · Guided practice
 
 ---
 
-NoteLite builds on the Audiveris optical music recognition engine, keeping the original desktop editor and adding a separate practice mode. Recognize a PDF or image, review and correct the score, then export MusicXML / MIDI or start playing along.
+音伴 uses the Orpheus AI optical music recognition engine, keeping the original desktop editor and adding a separate practice mode. Recognize a PDF or image, review and correct the score, then export MusicXML / MIDI or start playing along.
 
 | Original desktop editor | Practice mode |
 | :---: | :---: |
-| [![NoteLite desktop recognition and score editor](docs/images/desktop-editor.png)](docs/images/desktop-editor.png) | [![NoteLite guided practice workspace](docs/images/practice-workspace.png)](docs/images/practice-workspace.png) |
+| [![音伴 desktop recognition and score editor](docs/images/desktop-editor.png)](docs/images/desktop-editor.png) | [![音伴 guided practice workspace](docs/images/practice-workspace.png)](docs/images/practice-workspace.png) |
 | Recognize, inspect, and correct the score | Follow the score, find mistakes, and review a session |
 
 Both screenshots show the same piece, *Minuet in G major*. The original editor remains available. Open practice from the **Book** menu to launch it in a local browser window.
@@ -49,26 +49,26 @@ Practice offers a wait mode that advances when the expected notes are played, an
 
 Instrument suggestions use the score's instrument names, parts, and MIDI programs. You can select an instrument manually when that information is missing. Practice does not assess tone, pedal use, fingering, or touch. Continuous playing across real instruments still needs further validation.
 
-If you have [PianoBooster](https://www.pianobooster.org/) installed, the desktop menu can also send it the current score or an external MIDI file. MusicXML / MXL exported by other recognition tools can be imported directly into NoteLite. These integrations use file exchange.
+If you have [PianoBooster](https://www.pianobooster.org/) installed, the desktop menu can also send it the current score or an external MIDI file. MusicXML / MXL exported by other recognition tools can be imported directly into 音伴. These integrations use file exchange.
 
 ## Platforms
 
 | Version | Main features | Requirements and layout |
 | --- | --- | --- |
 | Windows / Linux / macOS desktop | Full recognition, manual score editing, export, and practice | Java desktop editor; macOS packaging supports Apple Silicon and Intel |
-| Native iPhone / iPad client | Score library, source previews, recognition jobs, practice, and session history | iOS / iPadOS 16+; phone navigation and a split view on iPad |
-| Native macOS client | Score library, recognition jobs, practice, and session history | macOS 13+; SwiftUI split workspace |
+| Native iPhone / iPad client | Score library, source previews, on-device recognition, practice, and session history | iOS / iPadOS 16+; phone navigation and a split view on iPad |
+| Native macOS client | Score library, server recognition jobs, practice, and session history | macOS 13+; SwiftUI split workspace |
 
-Native Apple clients send PDFs and images to the [recognition bridge](bridge/README.md) you configure; they do not run the Java recognition engine on the device. Existing MusicXML files can go straight into practice. Full manual score correction remains in the desktop editor.
+The App Store iPhone / iPad build bundles Orpheus AI and processes newly imported PDFs and images on the device. It needs no recognition server, account, or login for this workflow. Existing remote jobs remain available through their original server. The native macOS client uses the [recognition bridge](bridge/README.md) you configure for PDF and image recognition; the Java desktop version performs recognition locally. Existing MusicXML files can go straight into local practice on all clients. Full manual score correction remains in the desktop editor.
 
-Apple builds are currently for development and testing, with no App Store release. Installing on a physical device or distributing a build requires your own signing setup. See the [Apple client guide](apple/README.md) and [macOS desktop packaging guide](packaging/MACOS.md).
+The first iPhone / iPad version has been submitted for App Store review. Submission does not mean it is available in the store yet. Installing a development build on a physical device or distributing your own build requires a signing setup. See the [Apple client guide](apple/README.md), [iPhone / iPad support](docs/app-store/support.md), and [macOS desktop packaging guide](packaging/MACOS.md).
 
 ## Quick start
 
 ### Use the desktop app
 
 1. Download a package for your system from [Releases](https://github.com/Lucas0623z/NoteLite/releases), following that version's release notes.
-2. For a ZIP distribution, extract it and run `bin/NoteLite.bat` on Windows or `bin/NoteLite` on Linux / macOS. These packages require **Java 21**. macOS installers that bundle Java do not need a separate runtime.
+2. For a ZIP distribution, extract it and run `bin/音伴-你的音乐搭子.bat` on Windows or `bin/音伴-你的音乐搭子` on Linux / macOS. These packages require **Java 21**. macOS installers that bundle Java do not need a separate runtime.
 3. Open a PDF or sheet music image, run recognition, and review the result in the editor.
 4. Export MusicXML / MIDI, or choose **Book → Instrument practice studio...**.
 

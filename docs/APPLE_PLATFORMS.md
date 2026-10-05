@@ -1,8 +1,9 @@
-# NoteLite 苹果端适配
+# 音伴-你的音乐搭子 苹果端适配
 
-原有界面使用 Java 21 / Swing，识别引擎依赖 Java 桌面 API、Tesseract 和 Leptonica。
-macOS 保留完整桌面应用，iOS / iPadOS 使用独立原生客户端，通过自己的识别服务复用
-现有引擎。此次移动端采用联网识别方案。
+完整桌面界面使用 Java 21 / Swing，识别引擎依赖 Java 桌面 API、Tesseract 和 Leptonica。
+macOS 保留完整桌面应用，也提供独立 SwiftUI 客户端。App Store iPhone / iPad 版本已内置
+Orpheus AI 识谱引擎，新导入的 PDF 和图片在设备上处理，无需账号或识谱服务器。
+原生 macOS 客户端的 PDF 和图片识谱仍使用自行配置的服务；MusicXML 可直接本机练习。
 
 ## 是否需要安装苹果编译工具
 
@@ -37,36 +38,50 @@ Java 官方文档说明，`jpackage` 必须在目标系统运行，签名和自�
 
 ## iOS / iPadOS
 
-新的 SwiftUI 客户端面向 iOS 16 / iPadOS 16 及以上，支持手机导航和 iPad 分栏布局，
-使用系统文件选择器导入 PDF、PNG、JPEG、TIFF，在本地保存原始乐谱，提交后台识别任务，
-查看任务状态并下载、分享结果。服务地址由使用者配置，访问令牌保存在 Keychain。
+SwiftUI 客户端面向 iOS 16 / iPadOS 16 及以上，支持手机导航和 iPad 分栏布局。
+App Store 版本使用系统文件选择器导入 PDF、PNG、JPEG、TIFF，在本地保存原稿，
+通过内置引擎识谱，查看处理进度并分享生成的 MusicXML 和 MIDI。
 
 ```text
 iPhone / iPad 导入乐谱
-        ↓ HTTPS + 访问令牌
-自己的识别服务（Python）
-        ↓ 有限队列、独立 Java 进程
-NoteLite OMR 引擎
+        ↓ 设备内处理
+随应用附带的 Orpheus AI 识谱引擎
         ↓
-MusicXML + MIDI → 下载 / 分享
+MusicXML + MIDI → 本机练习 / 分享
 ```
 
-识别需要网络和已运行的服务。未提供完全离线 OMR、桌面版逐符号人工校正、音频演奏评测、
-iCloud 同步或多人账户系统。MIDI 沿用现有引擎的试听用途及其限制。客户端可以预览导入
-的原谱；MusicXML 的专业排版编辑应交给支持该格式的软件。
+新任务不上传原稿，也不会在本机识谱失败后自动切换服务器。识谱时需保持应用在前台；
+耗时取决于设备、页数和谱面复杂度。进入后台或选择停止后，引擎在安全处理边界响应取消。
+包含多个部分的结果可以分别练习，识别结果需先试听或校对。
 
-1. 按 [bridge/README.md](../bridge/README.md) 构建 Java 分发包并启动自己的识别服务。
-2. 为移动设备提供可访问、证书可信的 HTTPS 地址，配置服务访问令牌。
-3. 按 [apple/README.md](../apple/README.md) 生成 Xcode 工程，在模拟器或真机运行。
-4. 在客户端设置中填写服务地址与令牌，导入测试乐谱，识别后下载 MusicXML / MIDI。
+客户端支持麦克风单音旋律和 MIDI 乐器练习反馈，谱面按书写顺序练习，暂不展开反复和跳转。
+麦克风不支持和弦评分；多声部请使用 MIDI。未提供桌面版逐符号人工校正、iCloud 同步或多人
+账户系统。MusicXML 的专业排版编辑应交给支持该格式的软件。
 
-服务直接调用此命令能力：
+1. 按 [apple/README.md](../apple/README.md) 准备内置引擎资源、生成 Xcode 工程并构建。
+2. 导入测试乐谱，进入详情并选择“开始识别”，保持应用在前台。
+3. 识谱完成后分享 MusicXML / MIDI，或选择“开始练习”。已有 MusicXML 可直接导入练习。
+
+“服务器设置”保留用于兼容已有远端任务，填写地址不会改变新导入曲谱的本机识谱方式。
+已有远端任务继续通过原服务器查询、下载和清理；重新识别远端任务时会重新上传原稿。
+详细行为见[支持文档](app-store/support.md)和[隐私政策](app-store/privacy.md)。
+
+## 原生 macOS 客户端与识谱服务
+
+独立 SwiftUI macOS 客户端当前使用自己配置的识谱服务处理 PDF 和图片，完整本地识谱与
+人工校正可使用前述 Java 桌面应用。原生客户端也可直接导入 MusicXML / MXL 本机练习。
+
+1. 按 [bridge/README.md](../bridge/README.md) 构建 Java 分发包并启动自己的识谱服务。
+2. 提供可访问、证书可信的 HTTPS 地址，并配置服务访问令牌。
+3. 在原生客户端设置中填写地址与令牌，导入测试乐谱，识谱后下载或分享结果。
+
+服务调用的命令入口仍使用内部程序名：
 
 ```sh
-NoteLite -batch -transcribe -export -export-midi -output output -- score.pdf
+音伴-你的音乐搭子 -batch -transcribe -export -export-midi -output output -- score.pdf
 ```
 
-`-export-midi` 是本次新增参数，可与 `-export` 一起使用，多乐章生成独立 MIDI 文件。
+`-export-midi` 可与 `-export` 一起使用，多乐章生成独立 MIDI 文件。
 文字识别还需要 Tesseract 语言数据；缺少语言包时，歌词、标题等文字不会正常识别。
 
 ## 发布前验证
@@ -79,5 +94,6 @@ NoteLite -batch -transcribe -export -export-midi -output output -- score.pdf
 - 从“文件”导入、原谱预览、识别失败提示、结果保存与分享。
 - Mac 两种架构上的窗口、Command 快捷键、Finder 打开、取消退出以及识别导出。
 
-CI 编译通过也不等于已完成 App Store 发布。证书、团队 ID、应用标识和分发渠道应由
-项目所有者在准备发布时配置。
+首个 iPhone / iPad 版本已提交 App Store 审核，提交审核不等于已在商店公开上架。
+后续版本仍需核对构建、签名、审核状态和实际分发情况。自行构建时，证书、团队 ID、
+应用标识和分发渠道由项目所有者配置。

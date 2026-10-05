@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Authenticated HTTP adapter for the real NoteLite batch engine (Python 3.10+)."""
+"""音伴-你的音乐搭子：Orpheus AI 识谱桥接服务（Python 3.10+）。"""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ class JavaEngine:
             raise ValueError("Distribution must contain lib/notelite.jar; run :app:installDist first.")
         with zipfile.ZipFile(app_jar) as archive:
             if "NoteLite.class" not in archive.namelist():
-                raise ValueError("lib/notelite.jar does not contain the NoteLite main class.")
+                raise ValueError("lib/notelite.jar does not contain the required engine entry point.")
         executable = shutil.which(java)
         if executable is None or Path(executable).suffix.lower() in {".bat", ".cmd"}:
             raise ValueError("--java must identify the Java executable, not a shell script.")
@@ -349,7 +349,7 @@ class BridgeServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "NoteLiteBridge/1"
+    server_version = "YinbanBridge/1"
     sys_version = ""
 
     def setup(self):
@@ -367,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         if status == 401:
-            self.send_header("WWW-Authenticate", 'Bearer realm="NoteLite"')
+            self.send_header("WWW-Authenticate", 'Bearer realm="Yinban"')
         if status == 503:
             self.send_header("Retry-After", "5")
         self.end_headers()

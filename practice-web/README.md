@@ -1,6 +1,6 @@
-# NoteLite local practice studio
+# 音伴-你的音乐搭子 · Local practice studio
 
-The NoteLite Book menu opens the currently recognized score or imports an existing MusicXML/MXL from another notation/OMR product. Java serves a random loopback-only URL with bundled assets. Microphone samples are processed inside the browser; there are no telemetry, upload, CDN or cloud API calls.
+The 音伴 Book menu opens the currently recognized score or imports an existing MusicXML/MXL from another notation/OMR product. Java serves a random loopback-only URL with bundled assets. Microphone samples are processed inside the browser; there are no telemetry, upload, CDN or cloud API calls.
 
 Use Node 20+ to rebuild the checked-in runtime assets:
 
@@ -22,7 +22,7 @@ Then run `gradlew :app:test :app:installDist` with JDK 21. Node is only a build 
 - Practice reads repeats in written order and discloses that limit. MIDI export has separate repeat expansion. Notes under unsupported jump/ornament constructs are not promised as full performance interpretation.
 - OMR bar lengths exceeding the time signature are flagged and cannot be used for assessment until corrected or excluded from the selected range. A user must review the reference score before starting.
 
-OpenSheetMusicDisplay is a mature notation component and Pitchy is a pitch detector; the NoteLite assessment layer is new. The PianoBooster menu is a separate, real product bridge for MIDI keyboards. It launches an independently installed PianoBooster and does not pretend it is a microphone SDK. Cross-instrument PhonicScore/Practice Bird technology is a researched commercial option, not a bundled integration; obtaining its SDK/licence remains necessary.
+OpenSheetMusicDisplay is a mature notation component and Pitchy is a pitch detector; the 音伴 assessment layer is new. The PianoBooster menu is a separate, real product bridge for MIDI keyboards. It launches an independently installed PianoBooster and does not pretend it is a microphone SDK. Cross-instrument PhonicScore/Practice Bird technology is a researched commercial option, not a bundled integration; obtaining its SDK/licence remains necessary.
 
 External OMR integration currently uses MusicXML/MXL interchange. ScanScore exports can be imported directly; this does not imply ScanScore is installed, embedded or benchmarked. No commercial licence is purchased automatically.
 

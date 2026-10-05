@@ -18,12 +18,12 @@
 # You can create any custom variable you would like, and they will be accessible
 # in the templates via {{ site.myvariable }}.
 
-title: NoteLite Pages
-author: NoteLite Contributors
+title: 音伴-你的音乐搭子
+author: 音伴贡献者
 email: contact@example.com
 
 description: >- # this means to ignore newlines until "baseurl:"
-  NoteLite documentation
+  音伴产品文档
 
 baseurl: "/notelite" # the subpath of your site, e.g. /blog
 url: "https://notelite.example.com" # the base hostname & protocol for your site, e.g. http://example.com
@@ -60,8 +60,8 @@ kramdown:
     block:
       line_numbers: false
 
-# Set a path/url to a logo that will be displayed instead of the title
-logo: "_pages/assets/images/splash.png"
+# Show the product title in the site header.
+# logo: "_pages/assets/images/splash.png"
 
 # Enable or disable the site search
 search_enabled: true
@@ -77,8 +77,8 @@ heading_anchors: true
 
 # Aux links for the upper right navigation
 aux_links:
-  "NoteLite organization on GitHub":
-    - "https://github.com/ORG"
+  "音伴 GitHub 仓库":
+    - "https://github.com/Lucas0623z/NoteLite"
 
 # navigation sidebar
 nav_enabled: true

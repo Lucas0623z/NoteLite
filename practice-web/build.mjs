@@ -11,7 +11,7 @@ try {
   if (error.code !== 'ENOENT') throw error;
 }
 const packages = ['opensheetmusicdisplay','pitchy','fflate','vexflow','fft.js','jszip','loglevel','typescript-collections','pako','lie','immediate','readable-stream','safe-buffer','string_decoder','core-util-is','inherits','isarray','process-nextick-args','util-deprecate','setimmediate'];
-let notices = 'NoteLite practice third-party notices\n\n';
+let notices = '音伴练习 · 第三方开源许可\n\n';
 for (const name of packages) {
   const pkg = JSON.parse(await readFile(`node_modules/${name}/package.json`,'utf8'));
   let license;

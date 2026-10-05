@@ -39,7 +39,7 @@ targets:
     info:
       path: Generated/Info.plist
       properties:
-        CFBundleDisplayName: Audiveris Probe
+        CFBundleDisplayName: Orpheus AI Probe
         CFBundleShortVersionString: "0.1"
         CFBundleVersion: "1"
         UILaunchScreen: {}

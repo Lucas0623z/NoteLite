@@ -132,7 +132,7 @@ tasks.register('macCreateFolder') {
     }
 }
 
-def src = "$appDir/res/icon-256.png"
+def src = "$appDir/res/logo-1024.png"
 
 tasks.register('macSimples') {
     description = "Generate icons in simple size"
@@ -189,6 +189,20 @@ tasks.register('macConvertIcons', Exec) {
             "build/macos.iconset"
 }
 
+// Windows jpackage loses Chinese command-line arguments on non-UTF-8 systems.
+// Read the public branding through a UTF-8 argument file instead.
+def brandingArgs = layout.buildDirectory.file('branding.args')
+tasks.register('writeBrandingArguments') {
+    inputs.property('displayName', app.ext.displayName)
+    outputs.file(brandingArgs)
+    doLast {
+        def target = brandingArgs.get().asFile
+        target.parentFile.mkdirs()
+        target.setText("--name\n\"${app.ext.displayName}\"\n" +
+                '--vendor\n"音伴"\n--description\n"音伴 · 乐谱识别、校对与练习"\n', 'UTF-8')
+    }
+}
+
 // Configure the jpackage task
 tasks.jpackage {
     dependsOn 'customJre'
@@ -201,10 +215,10 @@ tasks.jpackage {
 
     runtimeImage        = layout.buildDirectory.dir("custom-jre")
 
-    appName             = app.ext.programName
-    vendor              = "notelite.example.com"
+    appName             = app.ext.displayName
+    vendor              = "音伴"
     licenseFile         = file(rootDir.toPath().resolve('LICENSE'))
-    appDescription      = "Optical Music Recognition"
+    appDescription      = "音伴 · 乐谱识别、校对与练习"
     appVersion          = app.version
     mainJar             = "${app.ext.programId}.jar"
     mainClass           = app.ext.mainClass
@@ -226,11 +240,18 @@ tasks.jpackage {
     }
 
     windows {
+        dependsOn 'writeBrandingArguments'
+        appName.unset()
+        vendor.unset()
+        appDescription.unset()
+        additionalParameters = ['-J-Dfile.encoding=UTF-8', "@${brandingArgs.get().asFile.absolutePath}".toString()]
         icon = file("$appDir/res/icon-256.ico")   // Path to the icon of the application package
         winDirChooser = true                // Let the user choose the installation directory
         winMenu = true                      // Add a Start Menu shortcut
         winShortcutPrompt = true            // Let the user decide on shortcuts
         winShortcut = true                  // Create a desktop shortcut
+        // Preserve the upgrade identity used by earlier NoteLite installers.
+        winUpgradeUuid = 'f0b69074-d4f1-3a74-ba7a-b9eb3fff8184'
         ///winPerUserInstall = true            // Perform an install on a per-user basis (vs system basis)
 
         // Create a console launcher? (Useful only for errors)
@@ -254,7 +275,7 @@ tasks.jpackage {
         icon = layout.buildDirectory.file("NoteLite.icns")
 
         macPackageIdentifier = "com.notelite.app"
-        macPackageName = app.ext.programName
+        macPackageName = "音伴"
         macAppCategory = "public.app-category.music"
 
         // Developer ID signing is opt-in; CI can build reviewable unsigned artifacts.
@@ -282,6 +303,7 @@ tasks.jpackage {
         dependsOn 'linuxGetVersion'
         icon = file("$appDir/res/icon-256.png")   // Path to the icon of the application package
         linuxShortcut = true                // Create a shortcut for the application
+        linuxPackageName = app.ext.programId // Package identifiers must remain ASCII.
 
         // Check validity of installerType for Linux
         if (installerType != null) {
@@ -307,7 +329,7 @@ tasks.jpackage {
             def suffix = oldName.substring(dot)
 
             // Forge artifact new file
-            def newName = "${app.ext.programName}-${app.version}-${pkg.ext.osname}${pkg.ext.option}-${app.ext.hostOSArch}$suffix"
+            def newName = "${app.ext.displayName}-${app.version}-${pkg.ext.osname}${pkg.ext.option}-${app.ext.hostOSArch}$suffix"
             def newFile = Paths.get("$dest", newName).toFile()
             println "newFile: ${newFile}"
 

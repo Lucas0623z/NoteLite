@@ -72,10 +72,10 @@ jobs:
             hdiutil detach "$mountpoint"
           }
           trap cleanup EXIT
-          bundle="$mountpoint/NoteLite.app"
-          lipo "$bundle/Contents/MacOS/NoteLite" -verify_arch "$EXPECTED_ARCH"
+          bundle="$mountpoint/音伴-你的音乐搭子.app"
+          lipo "$bundle/Contents/MacOS/音伴-你的音乐搭子" -verify_arch "$EXPECTED_ARCH"
           "$bundle/Contents/runtime/Contents/Home/bin/java" -version
-          "$bundle/Contents/MacOS/NoteLite" -help
+          "$bundle/Contents/MacOS/音伴-你的音乐搭子" -help
           # Use only the installed runtime and jars, so missing jlink modules fail this check.
           practice_log="$RUNNER_TEMP/notelite-practice.log"
           "$bundle/Contents/runtime/Contents/Home/bin/java" --enable-preview -cp "$bundle/Contents/app/*" \
@@ -108,13 +108,13 @@ jobs:
             --output "$TESSDATA_PREFIX/eng.traineddata"
           smoke_output="$RUNNER_TEMP/notelite-recognition"
           mkdir -p "$smoke_output"
-          "$bundle/Contents/MacOS/NoteLite" -batch -transcribe -export -export-midi \
+          "$bundle/Contents/MacOS/音伴-你的音乐搭子" -batch -transcribe -export -export-midi \
             -output "$smoke_output" -- "$GITHUB_WORKSPACE/data/examples/chula.png"
           test -n "$(find "$smoke_output" -name '*.mxl' -size +0c -print -quit)"
           test -n "$(find "$smoke_output" -name '*.mid' -size +0c -print -quit)"
       - name: Upload unsigned installer
         uses: actions/upload-artifact@v4
         with:
-          name: NoteLite-macos-${{ matrix.architecture }}-unsigned
+          name: 音伴-macos-${{ matrix.architecture }}-unsigned
           path: packaging/build/dist/*.dmg
           if-no-files-found: error

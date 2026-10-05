@@ -1,6 +1,6 @@
 # 音伴-你的音乐搭子 支持
 
-音伴帮助你整理乐谱、识别扫描谱并练习 MusicXML。本 App Store iPhone / iPad 版本内置 Audiveris 识谱引擎，可在设备上将 PDF 和图片转换为 MusicXML 与 MIDI。
+音伴帮助你整理乐谱、识别扫描谱并练习 MusicXML。本 App Store iPhone / iPad 版本内置 Orpheus AI 识谱引擎，可在设备上将 PDF 和图片转换为 MusicXML 与 MIDI。
 
 ## 联系我们
 

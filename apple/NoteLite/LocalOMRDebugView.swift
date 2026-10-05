@@ -16,7 +16,7 @@ struct LocalOMRDebugView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("尚未完成音符识别")
                         .font(.headline).accessibilityIdentifier("local-omr-incomplete")
-                    Text("本阶段测试 Audiveris 的页面二值化与前景游程。不能生成 MusicXML。所有处理都在本机进行，不会上传文件。")
+                    Text("本阶段测试 Orpheus AI 的页面二值化与前景游程。不能生成 MusicXML。所有处理都在本机进行，不会上传文件。")
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("选择 PDF 或图片") { importing = true }

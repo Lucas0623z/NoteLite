@@ -48,7 +48,7 @@ targets:
   NoteLiteMac:
     type: application
     platform: macOS
-    productName: NoteLite
+    productName: 音伴-你的音乐搭子
     sources:
       - path: NoteLite
         excludes: ["**/*.plist", "**/*.entitlements"]
@@ -58,10 +58,12 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac
-        PRODUCT_NAME: NoteLite
+        PRODUCT_NAME: 音伴-你的音乐搭子
+        EXECUTABLE_NAME: NoteLite
         PRODUCT_MODULE_NAME: NoteLite
-        MARKETING_VERSION: 5.13.0
-        CURRENT_PROJECT_VERSION: 2
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: 5.13.1
+        CURRENT_PROJECT_VERSION: 3
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: NoteLite/Info-macOS.plist
         CODE_SIGN_ENTITLEMENTS: NoteLite/NoteLite-macOS.entitlements
@@ -99,7 +101,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac.tests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/NoteLite.app/Contents/MacOS/NoteLite"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/音伴-你的音乐搭子.app/Contents/MacOS/NoteLite"
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: NoteLiteMac
