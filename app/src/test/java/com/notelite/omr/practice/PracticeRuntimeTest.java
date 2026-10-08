@@ -241,6 +241,48 @@ public class PracticeRuntimeTest {
         assertArrayEquals(outside,Files.readAllBytes(sentinel));
     }
 
+    @Test public void liveFreeMissingAndUncertainReplayUseAcceptedNeighborsInTheSelectedScore() throws Exception {
+        java.util.ArrayList<Map<String,Object>> full=new java.util.ArrayList<>();double[] onsets={0,4,5,9,10,14,20,28,32,33,34,35,36};int[] pitches={60,62,64,65,67};
+        for(int i=0;i<onsets.length;i++)full.add(PracticeEngine.fields("onset",onsets[i],"mi",i,"notes",List.of(PracticeEngine.fields(
+                "id","P1:"+i,"sourceNoteId","P1:"+i,"occurrenceId","P1:"+i+"@0","midi",i>=8?pitches[i-8]:72,"duration",1))));
+        Map<String,Object> options=Map.of("mode","free","bpm",120,"startTimeMs",10000,"gradeDuration",false);
+        PracticeEngine engine=new PracticeEngine(PracticeTimeline.fromGroups(full.subList(8,13),120),PracticeEngine.Config.fromMap(options));
+        Object[][] attacks={{"c",60,0d,.95},{"weak",69,500d,.3},{"d",62,1000d,.95},{"c",69,2000d,.95},{"f",65,4000d,.95},{"g",67,5000d,.95}};
+        for(Object[] attack:attacks){double onset=10000+(double)attack[2];String id=(String)attack[0];
+            engine.receive(PracticeEngine.fields("type","note-on","id",id,"midi",attack[1],"onsetMs",onset,"confidence",attack[3],"voiced",true));
+            engine.receive(PracticeEngine.fields("type","note-off","id",id,"midi",attack[1],"onsetMs",onset,"offsetMs",onset+50,"durationMs",50,"confidence",attack[3],"voiced",false));
+        }
+        Map<String,Object> raw=engine.finish();String rawEvents=PracticeJson.stringify(raw.get("events"));
+        Map<String,Object> missing=((List<?>)raw.get("errors")).stream().map(PracticeJson::object).filter(e->"missing".equals(e.get("kind"))).findFirst().orElseThrow();
+        assertEquals(11000d,missing.get("expectedTimeMs"));assertEquals(List.of("P1:10"),missing.get("sourceNoteIds"));assertNull(missing.get("eventId"));
+        PracticeRuntime runtime=new PracticeRuntime(score(false,false),"{}");
+        try{
+            set(runtime,"prepared",Map.of("groups",full));set(runtime,"config",options);set(runtime,"sessionEpoch",10000d);
+            var replay=PracticeRuntime.class.getDeclaredMethod("withReplayPositions",Map.class);replay.setAccessible(true);
+            Map<String,Object> saved=PracticeJson.object(replay.invoke(runtime,raw));
+            assertEquals(0d,row(saved,"played").get("replayMs"));
+            Map<String,Object> located=((List<?>)saved.get("errors")).stream().map(PracticeJson::object).filter(e->"missing".equals(e.get("kind"))).findFirst().orElseThrow();
+            assertEquals(2500d,located.get("replayMs"));assertEquals(11000d,located.get("expectedTimeMs"));assertEquals(1000d,located.get("onsetMs"));
+            assertEquals(List.of("P1:10"),located.get("sourceNoteIds"));assertEquals(rawEvents,PracticeJson.stringify(raw.get("events")));assertEquals(rawEvents,PracticeJson.stringify(saved.get("events")));
+            Map<String,Object> jsonReload=PracticeJson.object(PracticeJson.parse(PracticeJson.stringify(raw)));
+            Map<String,Object> reloaded=PracticeJson.object(replay.invoke(runtime,jsonReload));
+            assertEquals(2500d,((List<?>)reloaded.get("errors")).stream().map(PracticeJson::object).filter(e->"missing".equals(e.get("kind"))).findFirst().orElseThrow().get("replayMs"));
+            // A generic pending-review position needs the same free-mode mapping.
+            Map<String,Object> uncertain=new LinkedHashMap<>(raw),generic=new LinkedHashMap<>(missing);generic.put("kind","uncertain");uncertain.put("errors",List.of(generic));
+            assertEquals(2500d,row(PracticeJson.object(replay.invoke(runtime,uncertain)),"errors").get("replayMs"));
+            // Strict positions keep their clock; actual event errors keep actual time.
+            Map<String,Object> strict=new LinkedHashMap<>(raw);strict.put("mode","strict");
+            Map<String,Object> strictSaved=PracticeJson.object(replay.invoke(runtime,strict));
+            assertEquals(1000d,((List<?>)strictSaved.get("errors")).stream().map(PracticeJson::object).filter(e->"missing".equals(e.get("kind"))).findFirst().orElseThrow().get("replayMs"));
+            assertEquals(2000d,((List<?>)strictSaved.get("errors")).stream().map(PracticeJson::object).filter(e->"wrong".equals(e.get("kind"))).findFirst().orElseThrow().get("replayMs"));
+            // A recorded alignment already supplied a time estimate; leave it alone.
+            Map<String,Object> recorded=new LinkedHashMap<>(raw),mapped=new LinkedHashMap<>(missing);mapped.put("expectedTimeMs",12750d);
+            recorded.put("errors",List.of(mapped));recorded.put("alignment",Map.of("kind","free-following","expectedTimeBasis","accepted-neighbor-anchors"));
+            assertEquals(2750d,row(PracticeJson.object(replay.invoke(runtime,recorded)),"errors").get("replayMs"));
+            assertEquals(11000d,missing.get("expectedTimeMs"));assertFalse(missing.containsKey("replayMs"));
+        }finally{runtime.close();}
+    }
+
     private static void installScoredSession(PracticeRuntime runtime,List<PracticeWave.Segment> segments) throws Exception {
         List<?> groups=List.of(PracticeEngine.fields("onset",0,"measure","1","mi",0,"beat",1,"notes",List.of(
                 PracticeEngine.fields("id","P1:0","sourceNoteId","P1:0","occurrenceId","P1:0@0","part","P1","staff","1","midi",60,"duration",1))));

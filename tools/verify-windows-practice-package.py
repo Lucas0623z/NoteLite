@@ -144,7 +144,8 @@ class Audit:
                 if not local.is_file():
                     continue
                 relative = local.relative_to(self.repo / local_tree)
-                if any(p in {"build", "test-output", "work", "cache", "__pycache__"} for p in relative.parts) or local.suffix == ".pyc":
+                if (any(p in {"build", "test-output", "work", "cache", "__pycache__"} for p in relative.parts)
+                        or local.suffix == ".pyc" or local.name in {".gitignore", ".gitattributes"}):
                     continue
                 path = runtime + packed_tree + "/" + relative.as_posix()
                 count += 1
@@ -155,7 +156,7 @@ class Audit:
                         actual = sha_stream(stream)
                     if actual != sha_file(local):
                         failed.append({"path": path, "reason": "source differs from current repository"})
-        self.check("complete-corresponding-native-sources", count > 0 and not failed, {"checkedFiles": count, "mismatches": failed})
+        self.check("complete-corresponding-native-sources", count > 0 and not failed, {"checkedFiles": count, "excludedVersionControlMetadata": [".gitignore", ".gitattributes"], "mismatches": failed})
         self.compare(z, runtime + "sources/tools/build-local-audio.ps1", self.repo / "tools/build-local-audio.ps1", "corresponding-build-entry")
 
     def dependencies(self, z, runtime, lock):

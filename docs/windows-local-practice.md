@@ -72,7 +72,11 @@ For shorter context, comparison is explicitly marked unevaluated; the common
 judge still assesses the actual detected notes without invented baseline pairs.
 Strict recorded analysis removes one global starting offset using multi-note
 context, unless an explicit start time is supplied. It does not warp individual
-timing mistakes away. Free mode reports its different timing scope.
+timing mistakes away. Free mode reports its different timing scope. Recorded
+weak intervals and missing-note replay use accepted source/occurrence identities
+as actual-time anchors. Missing attacks have no measured timestamp: neighboring
+interpolation or a declared endpoint estimate supplies their replay location,
+without changing the acoustic trace or inventing a played note.
 Live microphone chord separation is not provided.
 
 The complete pinned Python 3.11.9/model runtime is bundled; users need no separate

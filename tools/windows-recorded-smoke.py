@@ -34,10 +34,12 @@ def run(url,manifest_path,output):
             assert service.request('takes/report?id='+report['takeId'])['errors']==report['errors']
             counts={kind:sum(e['kind']==kind and not e.get('resolved') for e in report['errors']) for kind in ('wrong','missing','extra','early','late','short','long','intonation','uncertain')}
             # Recognition uncertainty is recorded, not hidden behind a success assertion.
-            if engine=='aubio' and case['name']=='correct_repeated_flute':
-                assert not any(counts[k] for k in ('wrong','missing','extra'))
-            if case['name']=='wrong_octave_flute':assert counts['wrong']>=1
-            if engine=='aubio' and case['name']=='missed_flute':assert counts['missing']==1
+            expected_feedback={key:0 for key in counts}
+            if case['name']=='wrong_octave_flute':expected_feedback['wrong']=1
+            if case['name']=='missed_flute':expected_feedback['missing']=1
+            assert counts==expected_feedback,(case['name'],engine,counts)
+            expected_attacks=5 if case['name']=='missed_flute' else 6
+            assert len(report['transcription']['notes'])==expected_attacks,(case['name'],engine)
             entry={'case':case['name'],'engine':engine,'takeId':report['takeId'],'completed':report['completed'],'feedback':counts,'notes':len(report['transcription']['notes']),'errors':report['errors']}
             results.append(entry);print(json.dumps({k:v for k,v in entry.items() if k!='errors'}),flush=True)
     # Exercise the persisted JSON boundary, not just a fresh inference request.

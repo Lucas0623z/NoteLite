@@ -53,6 +53,7 @@ public final class PracticeEngine {
     private String alignment = "live";
     private Double detectorMinMidi, detectorMaxMidi;
     private boolean noReliableRecordingEvidence;
+    private Map<Integer,Double> recordedExpectedTimes=Map.of();
 
     public PracticeEngine(PracticeTimeline timeline, Config config) {
         this.timeline=timeline; this.config=config; this.startedAt=config.startTimeMs; this.localBpm=config.bpm;
@@ -72,6 +73,10 @@ public final class PracticeEngine {
     }
     private PracticeTimeline.Group current(){return index<timeline.groups().size()?timeline.groups().get(index):null;}
     private double due(PracticeTimeline.Group g){return startedAt+g.onsetMs();}
+    private Double expectedTime(PracticeTimeline.Group g){
+        if(config.mode.equals("free")&&!alignment.equals("live")&&recordedExpectedTimes.containsKey(g.index()))return recordedExpectedTimes.get(g.index());
+        return startedAt==null?null:due(g);
+    }
     public synchronized Map<String,Object> note(Map<?,?> raw) { receive(raw); return snapshot(); }
     /** Feed native/recorded events without repeatedly allocating an entire take snapshot. */
     public synchronized void receive(Map<?,?> raw) {
@@ -250,10 +255,16 @@ public final class PracticeEngine {
         if(detectorMinMidi!=null&&detectorMaxMidi!=null&&detectorMinMidi>detectorMaxMidi)throw new IllegalArgumentException("听音引擎音域无效。");
         noReliableRecordingEvidence=noReliableNotes;
     }
+    /** Estimated recorded locations are separate from score and actual-event clocks. */
+    synchronized void recordedExpectedTimes(Map<Integer,Double> times){
+        for(Map.Entry<Integer,Double> time:times.entrySet())if(time.getKey()<0||time.getKey()>=timeline.groups().size()
+                ||time.getValue()==null||!Double.isFinite(time.getValue())||time.getValue()<0)throw new IllegalArgumentException("录音位置估计无效。");
+        recordedExpectedTimes=Map.copyOf(times);
+    }
     private String unjudgedReason(int midi,PracticeTimeline.Group g){
         if(detectorMinMidi!=null&&midi<detectorMinMidi||detectorMaxMidi!=null&&midi>detectorMaxMidi)return "outside-detector-range";
         if(noReliableRecordingEvidence)return "no-reliable-note-events";
-        if(startedAt!=null&&(config.mode.equals("strict")||!alignment.equals("live")?weakAt(midi,due(g)):
+        if(startedAt!=null&&(config.mode.equals("strict")||!alignment.equals("live")?weakAt(midi,expectedTime(g)):
                 uncertain.values().stream().anyMatch(e->e.get("index") instanceof Integer i&&i==g.index())))return "uncertain-acoustic-evidence";
         return null;
     }
@@ -262,20 +273,20 @@ public final class PracticeEngine {
         List<Integer> remaining=g.pitches().stream().filter(p->!matched.contains(p)).toList();
         List<Integer> weak=remaining.stream().filter(p->unjudgedReason(p,g)!=null).toList();
         List<Integer> missing=remaining.stream().filter(p->!weak.contains(p)).toList();
-        Map<String,Object> expectedTiming=fields("expectedTimeMs",startedAt==null?null:due(g));
+        Map<String,Object> expectedTiming=fields("expectedTimeMs",expectedTime(g));
         if(missed&&!missing.isEmpty()){
             Map<Integer,Map<String,Object>> substitutions=new LinkedHashMap<>();
             for(Map<String,Object> wrong:errors)if(wrong.get("kind").equals("wrong")&&(int)wrong.get("index")==g.index()&&(int)wrong.get("attempt")==attempt
                     &&wrong.get("substitutedPitch") instanceof Integer pitch&&missing.contains(pitch))substitutions.putIfAbsent(pitch,wrong);
             // Keep raw missing provenance, but count one reliable wrong identity
             // once. Other missing chord pitches remain independent judgments.
-            for(Map.Entry<Integer,Map<String,Object>> substitution:substitutions.entrySet())error("missing",g,fields("expectedTimeMs",startedAt==null?null:due(g),
+            for(Map.Entry<Integer,Map<String,Object>> substitution:substitutions.entrySet())error("missing",g,fields("expectedTimeMs",expectedTime(g),
                     "expected",List.of(substitution.getKey()),"eventId",substitution.getValue().get("eventId"),"coveredByWrong",substitution.getValue().get("eventId"),"resolved",true,"reason","same-position-wrong-note"));
             List<Integer> uncovered=missing.stream().filter(p->!substitutions.containsKey(p)).toList();
             if(!uncovered.isEmpty()){expectedTiming.put("expected",uncovered);error("missing",g,expectedTiming);}
         }
         if(missed&&!weak.isEmpty()&&errors.stream().noneMatch(e->(int)e.get("index")==g.index()&&(int)e.get("attempt")==attempt&&e.get("kind").equals("uncertain"))){
-            Map<String,Object> evidence=fields("expected",weak,"expectedTimeMs",startedAt==null?null:due(g),"reason",unjudgedReason(weak.getFirst(),g));error("uncertain",g,evidence);
+            Map<String,Object> evidence=fields("expected",weak,"expectedTimeMs",expectedTime(g),"reason",unjudgedReason(weak.getFirst(),g));error("uncertain",g,evidence);
             unjudged.add(fields("type","unjudged","index",g.index(),"expected",weak,"reason",evidence.get("reason"),"sourceNoteIds",g.location().get("sourceNoteIds"),"occurrenceIds",g.location().get("occurrenceIds")));
         }
         boolean bad=errors.stream().anyMatch(e->(int)e.get("index")==g.index()&&(int)e.get("attempt")==attempt&&!e.get("kind").equals("uncertain"));

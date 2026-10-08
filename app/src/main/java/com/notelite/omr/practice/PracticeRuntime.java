@@ -185,24 +185,42 @@ final class PracticeRuntime {
     private Map<String,Object> withReplayPositions(Map<String,Object> snapshot){
         Map<String,Object> result=new LinkedHashMap<>(snapshot);List<Map<String,Object>> errors=new ArrayList<>();
         List<Map<String,Object>> playedEvents=new ArrayList<>();
-        for(Object sound:(List<?>)snapshot.getOrDefault("played",List.of())){Map<String,Object> played=new LinkedHashMap<>(PracticeJson.object(sound));double time=PracticeWave.number(played.get("time"),0);played.put("replayMs",Math.max(0,time>sessionEpoch&&sessionEpoch>0?time-sessionEpoch:time));playedEvents.add(played);}
+        for(Object sound:(List<?>)snapshot.getOrDefault("played",List.of())){Map<String,Object> played=new LinkedHashMap<>(PracticeJson.object(sound));double time=PracticeWave.number(played.get("time"),0);played.put("replayMs",Math.max(0,time>=sessionEpoch&&sessionEpoch>0?time-sessionEpoch:time));playedEvents.add(played);}
         result.put("played",playedEvents);
+        java.util.Set<List<Object>> acceptedAttacks=new java.util.HashSet<>();
+        for(Object position:(List<?>)snapshot.getOrDefault("results",List.of()))for(Object value:(List<?>)PracticeJson.object(position).getOrDefault("notes",List.of())){
+            Map<String,Object> note=PracticeJson.object(value);if(!Boolean.TRUE.equals(note.get("matched"))||!(note.get("actual") instanceof Map<?,?> actual))continue;
+            if(PracticeWave.number(actual.get("confidence"),0)>=PracticeWave.number(config.get("confidenceThreshold"),.4)
+                    &&java.util.Objects.equals(actual.get("midi"),note.get("midi"))&&actual.get("sourceNoteIds") instanceof List<?> sources&&sources.contains(note.get("sourceNoteId"))
+                    &&actual.get("occurrenceIds") instanceof List<?> occurrences&&occurrences.contains(note.get("occurrenceId")))acceptedAttacks.add(replayAnchorKey(actual));
+        }
+        List<Map<String,Object>> accepted=playedEvents.stream().filter(p->acceptedAttacks.contains(replayAnchorKey(p))).toList();
         for(Object object:(List<?>)snapshot.getOrDefault("errors",List.of())){Map<String,Object> error=new LinkedHashMap<>(PracticeJson.object(object));
-            double replay=PracticeWave.number(error.get("expectedTimeMs"),0);if(replay>sessionEpoch&&sessionEpoch>0)replay-=sessionEpoch;Object eventId=error.get("eventId");
-            for(Object sound:(List<?>)snapshot.getOrDefault("played",List.of())){Map<String,Object> played=PracticeJson.object(sound);if(eventId!=null&&eventId.equals(played.get("id"))||eventId==null&&error.get("index")!=null&&error.get("index").equals(played.get("index"))){replay=PracticeWave.number(played.get("time"),0);if(replay>sessionEpoch&&sessionEpoch>0)replay-=sessionEpoch;break;}}
-            if(replay==0&&error.get("index") instanceof Number i&&i.intValue()<groups(prepared).size()){
-                int target=i.intValue();double bpm=PracticeWave.number(config.get("bpm"),100),base=PracticeWave.number(PracticeJson.object(groups(prepared).getFirst()).get("onset"),0);
-                double scoreTime=(PracticeWave.number(PracticeJson.object(groups(prepared).get(target)).get("onset"),0)-base)*60000/bpm;
+            double replay=PracticeWave.number(error.get("expectedTimeMs"),0);if(replay>=sessionEpoch&&sessionEpoch>0)replay-=sessionEpoch;Object eventId=error.get("eventId");
+            boolean estimated=List.of("missing","uncertain").contains(error.get("kind"));
+            boolean liveFree=eventId==null&&estimated&&"free".equals(snapshot.get("mode"))&&"live".equals(PracticeJson.object(snapshot.getOrDefault("alignment",Map.of())).get("kind"));
+            for(Object sound:(List<?>)snapshot.getOrDefault("played",List.of())){Map<String,Object> played=PracticeJson.object(sound);if(eventId!=null&&eventId.equals(played.get("id"))
+                    &&PracticeWave.number(error.get("index"),-1)==PracticeWave.number(played.get("index"),-2)&&PracticeWave.number(error.get("attempt"),0)==PracticeWave.number(played.get("attempt"),0)
+                    ||eventId==null&&!estimated&&error.get("index")!=null&&error.get("index").equals(played.get("index"))){replay=PracticeWave.number(played.get("time"),0);if(replay>=sessionEpoch&&sessionEpoch>0)replay-=sessionEpoch;break;}}
+            List<?> replayGroups=liveFree&&snapshot.get("groups") instanceof List<?> selected?selected:groups(prepared);
+            if((replay==0||liveFree)&&error.get("index") instanceof Number i&&i.intValue()>=0&&i.intValue()<replayGroups.size()){
+                int target=i.intValue();double bpm=PracticeWave.number(config.get("bpm"),100),scoreTime=replayScoreTime(replayGroups,target,bpm);
                 Map<String,Object> previous=null,next=null;
-                for(Map<String,Object> played:playedEvents){int index=(int)PracticeWave.number(played.get("index"),0);if(index<=target&&(previous==null||index>(int)PracticeWave.number(previous.get("index"),0)))previous=played;if(index>=target&&(next==null||index<(int)PracticeWave.number(next.get("index"),0)))next=played;}
-                if(previous!=null){int pi=(int)PracticeWave.number(previous.get("index"),0);double pscore=(PracticeWave.number(PracticeJson.object(groups(prepared).get(pi)).get("onset"),0)-base)*60000/bpm;replay=PracticeWave.number(previous.get("replayMs"),0)+scoreTime-pscore;
-                    if(next!=null){int ni=(int)PracticeWave.number(next.get("index"),0);double nscore=(PracticeWave.number(PracticeJson.object(groups(prepared).get(ni)).get("onset"),0)-base)*60000/bpm;if(nscore>pscore)replay=PracticeWave.number(previous.get("replayMs"),0)+(scoreTime-pscore)/(nscore-pscore)*(PracticeWave.number(next.get("replayMs"),0)-PracticeWave.number(previous.get("replayMs"),0));}}
-                else if(next!=null){int ni=(int)PracticeWave.number(next.get("index"),0);double nscore=(PracticeWave.number(PracticeJson.object(groups(prepared).get(ni)).get("onset"),0)-base)*60000/bpm;replay=PracticeWave.number(next.get("replayMs"),0)+scoreTime-nscore;}else replay=scoreTime;
+                for(Map<String,Object> played:liveFree?accepted:playedEvents){int index=(int)PracticeWave.number(played.get("index"),-1);if(index<0||index>=replayGroups.size())continue;if(index<=target&&(previous==null||index>(int)PracticeWave.number(previous.get("index"),0)))previous=played;if(index>=target&&(next==null||index<(int)PracticeWave.number(next.get("index"),0)))next=played;}
+                if(previous!=null){int pi=(int)PracticeWave.number(previous.get("index"),0);double pscore=replayScoreTime(replayGroups,pi,bpm);replay=PracticeWave.number(previous.get("replayMs"),0)+scoreTime-pscore;
+                    if(next!=null){int ni=(int)PracticeWave.number(next.get("index"),0);double nscore=replayScoreTime(replayGroups,ni,bpm);if(nscore>pscore)replay=PracticeWave.number(previous.get("replayMs"),0)+(scoreTime-pscore)/(nscore-pscore)*(PracticeWave.number(next.get("replayMs"),0)-PracticeWave.number(previous.get("replayMs"),0));}}
+                else if(next!=null){int ni=(int)PracticeWave.number(next.get("index"),0);double nscore=replayScoreTime(replayGroups,ni,bpm);replay=PracticeWave.number(next.get("replayMs"),0)+scoreTime-nscore;}else replay=scoreTime;
             }
             error.put("replayMs",Math.max(0,replay));errors.add(error);
         }
         result.put("errors",errors);return result;
     }
+    private static double replayScoreTime(List<?> groups,int index,double bpm){
+        Map<String,Object> group=PracticeJson.object(groups.get(index)),first=PracticeJson.object(groups.getFirst());
+        return PracticeWave.number(group.get("onsetMs"),PracticeWave.number(group.get("onset"),0)*60000/bpm)
+                -PracticeWave.number(first.get("onsetMs"),PracticeWave.number(first.get("onset"),0)*60000/bpm);
+    }
+    private static List<Object> replayAnchorKey(Map<?,?> sound){return List.of(String.valueOf(sound.get("id")),(int)PracticeWave.number(sound.get("index"),-1),PracticeWave.number(sound.get("time"),Double.NaN));}
     private void requireEngine() throws IOException {if(engine==null)throw new IOException("尚未启动练习。");}
     private static List<?> groups(Map<String,Object> normalized){return normalized.get("groups") instanceof List<?> list?list:List.of();}
     private static boolean polyphonic(List<?> groups){double previousEnd=-1;for(Object item:groups){Map<String,Object> group=PracticeJson.object(item);List<?> notes=(List<?>)group.getOrDefault("notes",List.of());double onset=PracticeWave.number(group.get("onset"),0);if(notes.stream().map(n->PracticeJson.object(n).get("midi")).distinct().count()>1||onset<previousEnd-.0001)return true;for(Object note:notes){Map<String,Object> n=PracticeJson.object(note);previousEnd=Math.max(previousEnd,PracticeWave.number(n.get("onset"),onset)+PracticeWave.number(n.get("duration"),0));}}return false;}

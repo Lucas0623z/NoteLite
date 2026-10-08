@@ -8,6 +8,8 @@ import java.util.Map;
 
 /** Recorded replay uses the same judge; strict mode removes one constant offset only. */
 public final class RecordedAlignment {
+    private record Anchor(int index,double scoreMs,double recordedMs) {}
+    private record TimeMapping(Map<Integer,Double> times,List<Map<String,Object>> locations) {}
     private RecordedAlignment() {}
     public static Map<String,Object> analyze(PracticeTimeline timeline,PracticeEngine.Config config,List<?> input){
         return analyze(timeline,config,input,Map.of(),List.of());
@@ -67,9 +69,77 @@ public final class RecordedAlignment {
             } else offset=events.stream().filter(e->e.get("type").equals("note-on")).mapToDouble(e->PracticeTimeline.number(e,"onsetMs",PracticeTimeline.number(e,"timeMs",0))).findFirst().orElse(0);
             if(config.mode().equals("strict")&&strong.size()>1)offset=contextOffset(timeline,config,strong,offset);
         }
-        PracticeEngine engine=new PracticeEngine(timeline,config);engine.begin(offset);engine.setAlignment(config.mode().equals("strict")?"constant-offset":"free-following");engine.recordingEvidence(range,strong.isEmpty());
+        Map<String,Object> result=judge(timeline,config,events,range,strong.isEmpty(),offset,Map.of());
+        if(config.mode().equals("free")){
+            // The first common-judge pass supplies only genuinely accepted pitch
+            // identities. Its timing estimates never alter the acoustic trace.
+            TimeMapping mapping=freeTimes(timeline,config,result);
+            if(!mapping.times.isEmpty())result=judge(timeline,config,events,range,strong.isEmpty(),offset,mapping.times);
+            @SuppressWarnings("unchecked") Map<String,Object> alignment=(Map<String,Object>)result.get("alignment");
+            alignment.put("expectedTimeBasis",mapping.times.isEmpty()?"no-accepted-anchors":"accepted-neighbor-anchors");
+            alignment.put("expectedTimeMapping",mapping.locations);
+        }
+        return result;
+    }
+    private static Map<String,Object> judge(PracticeTimeline timeline,PracticeEngine.Config config,List<Map<String,Object>> events,
+                                           Map<?,?> range,boolean noReliableNotes,double offset,Map<Integer,Double> expectedTimes){
+        PracticeEngine engine=new PracticeEngine(timeline,config);engine.begin(offset);engine.setAlignment(config.mode().equals("strict")?"constant-offset":"free-following");
+        engine.recordingEvidence(range,noReliableNotes);engine.recordedExpectedTimes(expectedTimes);
         for(Map<String,Object> event:events)engine.receive(event);
         engine.finish();engine.completeRecorded();return engine.snapshot();
+    }
+    /** Missing positions are estimates between actual accepted attacks, never played notes. */
+    private static TimeMapping freeTimes(PracticeTimeline timeline,PracticeEngine.Config config,Map<String,Object> report){
+        List<Anchor> anchors=new ArrayList<>();
+        for(Object row:(List<?>)report.get("results")){
+            Map<?,?> result=PracticeTimeline.map(row);int index=(int)PracticeTimeline.number(result,"index",-1);
+            if(index<0||index>=timeline.groups().size())continue;
+            List<Double> times=new ArrayList<>();java.util.Set<String> ids=new java.util.HashSet<>();
+            for(Object value:(List<?>)result.get("notes")){
+                Map<?,?> note=PracticeTimeline.map(value);
+                if(!Boolean.TRUE.equals(note.get("matched"))||!(note.get("actual") instanceof Map<?,?> actual)
+                        ||PracticeTimeline.number(actual,"confidence",0)<config.confidenceThreshold()
+                        ||PracticeTimeline.number(actual,"midi",-1)!=PracticeTimeline.number(note,"midi",-2)
+                        ||!(actual.get("sourceNoteIds") instanceof List<?> sources)||!sources.contains(note.get("sourceNoteId"))
+                        ||!(actual.get("occurrenceIds") instanceof List<?> occurrences)||!occurrences.contains(note.get("occurrenceId")))continue;
+                if(actual.get("recordedNote") instanceof Map<?,?> original&&(Boolean.TRUE.equals(original.get("reviewRequired"))||Boolean.FALSE.equals(original.get("onsetReliable"))))continue;
+                double time=PracticeTimeline.number(actual,"time",Double.NaN);
+                if(Double.isFinite(time)&&time>=0&&ids.add(String.valueOf(actual.get("id"))))times.add(time);
+            }
+            if(times.isEmpty())continue;
+            times.sort(Double::compare);double median=times.get(times.size()/2);
+            if(anchors.isEmpty()||median>=anchors.getLast().recordedMs)anchors.add(new Anchor(index,timeline.groups().get(index).onsetMs(),median));
+        }
+        Map<Integer,Double> times=new java.util.LinkedHashMap<>();List<Map<String,Object>> locations=new ArrayList<>();
+        if(anchors.isEmpty())return new TimeMapping(times,locations);
+        for(PracticeTimeline.Group group:timeline.groups()){
+            Anchor previous=null,next=null;
+            for(Anchor anchor:anchors){if(anchor.index<=group.index())previous=anchor;if(anchor.index>=group.index()){next=anchor;break;}}
+            double time;String basis;List<Integer> neighbors;
+            if(previous!=null&&previous.index==group.index()){
+                time=previous.recordedMs;basis="accepted-attack";neighbors=List.of(previous.index);
+            } else if(previous!=null&&next!=null&&next.scoreMs>previous.scoreMs){
+                time=previous.recordedMs+(group.onsetMs()-previous.scoreMs)/(next.scoreMs-previous.scoreMs)*(next.recordedMs-previous.recordedMs);
+                basis="interpolated-neighbors";neighbors=List.of(previous.index,next.index);
+            } else if(previous!=null&&next!=null){
+                time=previous.recordedMs;basis="coincident-score-neighbors";neighbors=List.of(previous.index,next.index);
+            } else {
+                Anchor edge=previous==null?anchors.getFirst():anchors.getLast();double ratio=1;
+                basis="single-anchor-default-tempo";neighbors=List.of(edge.index);
+                if(anchors.size()>1){
+                    Anchor first=previous==null?anchors.getFirst():anchors.get(anchors.size()-2),last=previous==null?anchors.get(1):anchors.getLast();
+                    if(last.scoreMs>first.scoreMs&&last.recordedMs>first.recordedMs){
+                        ratio=Math.max(config.bpm()/400,Math.min(config.bpm()/20,(last.recordedMs-first.recordedMs)/(last.scoreMs-first.scoreMs)));
+                        basis="extrapolated-local-tempo";neighbors=List.of(first.index,last.index);
+                    }
+                }
+                time=edge.recordedMs+(group.onsetMs()-edge.scoreMs)*ratio;
+            }
+            time=Math.max(0,time);times.put(group.index(),time);
+            Map<String,Object> location=new java.util.LinkedHashMap<>(group.location());
+            location.putAll(PracticeEngine.fields("expectedTimeMs",time,"basis",basis,"anchorIndices",neighbors,"estimated",true));locations.add(location);
+        }
+        return new TimeMapping(times,locations);
     }
     /** Choose one clock offset from a pitch/time context; never warp individual notes. */
     private static double contextOffset(PracticeTimeline timeline,PracticeEngine.Config config,List<Map<String,Object>> strong,double initial){
