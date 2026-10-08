@@ -45,7 +45,7 @@ final class MobileInterfaceUITests: XCTestCase {
         }
         app.buttons["practice-close"].firstMatch.tap()
         XCTAssertTrue(demo.waitForExistence(timeout: 15), "Closing practice must restore the redesigned library")
-        XCTAssertTrue(app.webViews.buttons["我的曲谱"].element.isHittable)
+        XCTAssertTrue(app.webViews.buttons.matching(identifier: "我的曲谱").element.isHittable)
         attachAfterRender(name: "Mobile-library-after-practice", marker: start)
     }
 
@@ -66,7 +66,7 @@ final class MobileInterfaceUITests: XCTestCase {
         app.launchEnvironment["NOTELITE_UI_PRACTICE_PARTS"] = String(data: try JSONSerialization.data(withJSONObject: payload), encoding: .utf8)
         configureEnvironment(app)
         app.launch()
-        let libraryTab = app.webViews.buttons["我的曲谱"].element
+        let libraryTab = app.webViews.buttons.matching(identifier: "我的曲谱").element
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 30))
         libraryTab.tap()
         let fixtureTitle = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "多部分练习样本", "多部分练习样本")).firstMatch
@@ -113,27 +113,27 @@ final class MobileInterfaceUITests: XCTestCase {
     }
     @MainActor private func pageMarker(_ tab: String, in app: XCUIApplication) -> XCUIElement {
         switch tab {
-        case "官方曲谱": return app.webViews.buttons["选择阶段和部分"].element
-        case "练习记录": return app.webViews.buttons["练琴日历"].element
-        case "黑白键AI": return app.webViews.buttons["分析我的练琴记录"].element
+        case "官方曲谱": return app.webViews.buttons.matching(identifier: "选择阶段和部分").element
+        case "练习记录": return app.webViews.buttons.matching(identifier: "练琴日历").element
+        case "黑白键AI": return app.webViews.buttons.matching(identifier: "分析我的练琴记录").element
         case "账号": return app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "本机档案", "本机档案")).element
-        default: return app.webViews.buttons["导入乐谱"].element
+        default: return app.webViews.buttons.matching(identifier: "导入乐谱").element
         }
     }
     @MainActor private func verifyImportMenu(_ app: XCUIApplication) {
-        app.webViews.buttons["导入乐谱"].element.tap()
-        let hero = app.webViews.buttons["上传文件、图片或拍照识谱，开启你的专属陪练"].element
+        app.webViews.buttons.matching(identifier: "导入乐谱").element.tap()
+        let hero = app.webViews.buttons.matching(identifier: "上传文件、图片或拍照识谱，开启你的专属陪练").element
         attachAfterRender(name: "Mobile-import-landing", marker: hero)
         hero.tap()
         for label in ["选择文件", "从相册选择", "拍照识谱", "载入示例曲谱", "取消"] {
-            waitUntilVisible(app.webViews.buttons[label].element, message: "Missing import option: \(label)")
+            waitUntilVisible(app.webViews.buttons.matching(identifier: label).element, message: "Missing import option: \(label)")
         }
-        let cancel = app.webViews.buttons["取消"].element
+        let cancel = app.webViews.buttons.matching(identifier: "取消").element
         attachAfterRender(name: "Mobile-import-menu", marker: cancel)
         cancel.tap()
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !cancel.exists }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed, "Import menu must dismiss")
-        let back = app.webViews.buttons["返回我的曲谱"].element
+        let back = app.webViews.buttons.matching(identifier: "返回我的曲谱").element
         waitUntilVisible(back, message: "Import landing must retain a way back to the library")
         back.tap()
         waitUntilVisible(pageMarker("我的曲谱", in: app), message: "Import landing must return to the library")
