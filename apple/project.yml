@@ -2,7 +2,7 @@ name: NoteLite
 options:
   minimumXcodeGenVersion: 2.42.0
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "16.4"
     macOS: "13.0"
 settings:
   base:

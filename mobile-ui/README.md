@@ -2,6 +2,8 @@
 
 来自用户提供的 Figma Make 项目，保留其原始图像、唱片路径、头像、字体和浅色／深色设计。
 
+Apple App 最低支持 iOS / iPadOS 16.4，与该设计使用的 [Tailwind CSS 4 浏览器要求](https://tailwindcss.com/docs/compatibility#browser-support)一致，避免在旧 WebKit 上出现颜色与布局兼容问题。
+
 ## 构建
 
 使用 Node.js 22.18 或更新版本：
