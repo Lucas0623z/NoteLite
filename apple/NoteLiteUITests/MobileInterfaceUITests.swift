@@ -12,34 +12,40 @@ final class MobileInterfaceUITests: XCTestCase {
         let app = launch(arguments: ["--uitesting-import-demo"])
         let mobile = app.webViews.matching(identifier: "yinban-mobile-interface").firstMatch
         XCTAssertTrue(mobile.waitForExistence(timeout: 30), "Bundled MobileUI must load without an external website")
+        let demo = app.webViews.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", "demo.musicxml", "demo.musicxml")).firstMatch
+        let start = app.webViews.buttons.matching(identifier: "开始练习 demo.musicxml").firstMatch
+        // The real launch import publishes asynchronously and returns to the library when it finishes.
+        // Finish that import before navigating so it cannot replace the first selected page.
+        XCTAssertTrue(demo.waitForExistence(timeout: 30), "Real MusicXML importer must feed the new library")
+        waitUntilVisible(start, message: "Imported MusicXML must be ready to practice before navigating")
+        XCTAssertTrue(start.isEnabled)
         for tab in ["官方曲谱", "练习记录", "黑白键AI", "账号", "我的曲谱"] {
             let button = app.webViews.buttons.matching(identifier: tab).firstMatch
             XCTAssertTrue(button.waitForExistence(timeout: 10), "Missing navigation: \(tab)")
             XCTAssertTrue(button.isHittable, "Navigation must stay reachable above the home indicator")
             button.tap()
-            attach(name: "Mobile-\(tab)")
+            attachAfterRender(name: "Mobile-\(tab)", marker: pageMarker(tab, in: app))
         }
-        let demo = app.webViews.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", "demo.musicxml", "demo.musicxml")).firstMatch
-        XCTAssertTrue(demo.waitForExistence(timeout: 20), "Real MusicXML importer must feed the new library")
-        let start = app.webViews.buttons.matching(identifier: "开始练习 demo.musicxml").firstMatch
+        verifyImportMenu(app)
+        XCTAssertTrue(demo.waitForExistence(timeout: 20))
         XCTAssertTrue(start.waitForExistence(timeout: 10))
         start.tap()
         let title = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "晨光练习曲", "晨光练习曲")).firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 40), "Imported MusicXML must reach the local renderer")
         assertPracticeControls(app)
-        attach(name: "Mobile-native-practice")
+        attachAfterRender(name: "Mobile-native-practice", marker: title)
         if UIDevice.current.userInterfaceIdiom == .pad {
             XCUIDevice.shared.orientation = .landscapeLeft
             let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: app)
             XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 15), .completed)
             assertPracticeControls(app)
-            attach(name: "Mobile-native-practice-iPad-landscape")
+            attachAfterRender(name: "Mobile-native-practice-iPad-landscape", marker: title)
             XCUIDevice.shared.orientation = .portrait
         }
         app.buttons["practice-close"].firstMatch.tap()
         XCTAssertTrue(demo.waitForExistence(timeout: 15), "Closing practice must restore the redesigned library")
         XCTAssertTrue(app.webViews.buttons["我的曲谱"].firstMatch.isHittable)
-        attach(name: "Mobile-library-after-practice")
+        attachAfterRender(name: "Mobile-library-after-practice", marker: start)
     }
 
     @MainActor
@@ -80,7 +86,7 @@ final class MobileInterfaceUITests: XCTestCase {
         let title = app.webViews.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", "37 - CHULA PAROARA", "37 - CHULA PAROARA")).firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 45))
         assertPracticeControls(app)
-        attach(name: "Mobile-saved-second-part")
+        attachAfterRender(name: "Mobile-saved-second-part", marker: title)
         app.buttons["practice-close"].firstMatch.tap()
         XCTAssertTrue(fixtureTitle.waitForExistence(timeout: 15))
     }
@@ -104,8 +110,59 @@ final class MobileInterfaceUITests: XCTestCase {
         XCTAssertTrue(start.isHittable, "Local practice controls must not be clipped")
         XCTAssertTrue(close.isHittable, "Native dismissal must remain reachable")
     }
-    @MainActor private func attach(name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    @MainActor private func pageMarker(_ tab: String, in app: XCUIApplication) -> XCUIElement {
+        switch tab {
+        case "官方曲谱": return app.webViews.buttons["选择阶段和部分"].firstMatch
+        case "练习记录": return app.webViews.buttons["练琴日历"].firstMatch
+        case "黑白键AI": return app.webViews.buttons["分析我的练琴记录"].firstMatch
+        case "账号": return app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "本机档案", "本机档案")).firstMatch
+        default: return app.webViews.buttons["导入乐谱"].firstMatch
+        }
+    }
+    @MainActor private func verifyImportMenu(_ app: XCUIApplication) {
+        app.webViews.buttons["导入乐谱"].firstMatch.tap()
+        let hero = app.webViews.buttons["上传文件、图片或拍照识谱，开启你的专属陪练"].firstMatch
+        attachAfterRender(name: "Mobile-import-landing", marker: hero)
+        hero.tap()
+        for label in ["选择文件", "从相册选择", "拍照识谱", "载入示例曲谱", "取消"] {
+            waitUntilVisible(app.webViews.buttons[label].firstMatch, message: "Missing import option: \(label)")
+        }
+        let cancel = app.webViews.buttons["取消"].firstMatch
+        attachAfterRender(name: "Mobile-import-menu", marker: cancel)
+        cancel.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !cancel.exists }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed, "Import menu must dismiss")
+        let back = app.webViews.buttons["返回我的曲谱"].firstMatch
+        waitUntilVisible(back, message: "Import landing must retain a way back to the library")
+        back.tap()
+        waitUntilVisible(pageMarker("我的曲谱", in: app), message: "Import landing must return to the library")
+    }
+    @MainActor private func waitUntilVisible(_ element: XCUIElement, message: String) {
+        XCTAssertTrue(element.waitForExistence(timeout: 20), message)
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in element.exists && element.isHittable }, object: element)
+        XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 20), .completed, message)
+    }
+    @MainActor private func attachAfterRender(name: String, marker: XCUIElement) {
+        waitUntilVisible(marker, message: "Selected screen must be visible before capturing \(name)")
+        var previousImage: Data?
+        var settledScreenshot: XCUIScreenshot?
+        // DOM accessibility can update before WebKit finishes painting local images and navigation.
+        // Capture only when the requested page is visible and two consecutive screen samples agree.
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard marker.exists && marker.isHittable else {
+                previousImage = nil
+                return false
+            }
+            let screenshot = XCUIScreen.main.screenshot()
+            let image = screenshot.pngRepresentation
+            let matchesPrevious = previousImage == image
+            previousImage = image
+            if matchesPrevious { settledScreenshot = screenshot }
+            return matchesPrevious
+        }, object: marker)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 20), .completed, "Screen must finish painting before capturing \(name)")
+        guard let screenshot = settledScreenshot else { return }
+        let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
