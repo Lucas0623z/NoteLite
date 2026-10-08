@@ -62,6 +62,7 @@ class Audit:
         self.repo = repo
         self.archive = archive
         self.cache = cache or repo / "local-analysis/cache"
+        self.legitimate_dependency_files = set()
         self.checks = []
         self.report = {
             "schemaVersion": 1, "generatedUtc": datetime.now(timezone.utc).isoformat(),
@@ -125,11 +126,11 @@ class Audit:
             dependency = "/site-packages/" in relative or relative.startswith("python/site-packages/")
             if not dependency and any(p in {"cache", "datasets", "training", "train"} for p in folded):
                 bad.append(name)
-            if not dependency and PurePosixPath(name).suffix.lower() in {".wav", ".mp3", ".flac", ".ogg", ".npy", ".npz"}:
+            if PurePosixPath(name).suffix.lower() in {".wav", ".mp3", ".flac", ".ogg", ".npy", ".npz", ".csv", ".parquet", ".h5", ".hdf5"} and (not dependency or name not in self.legitimate_dependency_files):
                 project_media.append(name)
         self.check(label, not bad and not project_media, {
             "forbiddenPaths": bad, "unexpectedProjectAudioOrArrays": project_media,
-            "policy": "Wheel regression fixtures and inference weights allowed; project work, user recordings and training corpora rejected.",
+            "policy": "Only independently pinned wheel/sdist data fixtures and inference weights allowed; project work, user recordings and training corpora rejected.",
         })
 
     def sources(self, z, runtime):
@@ -212,6 +213,7 @@ class Audit:
                         else:
                             continue
                         record_count += 1
+                        self.legitimate_dependency_files.add(path)
                         if path not in z.NameToInfo:
                             record_failures.append({"name": name, "path": path, "reason": "pinned sdist file missing"})
                             continue
@@ -249,6 +251,7 @@ class Audit:
                         continue
                 path = base + relative
                 record_count += 1
+                self.legitimate_dependency_files.add(path)
                 if path not in z.NameToInfo:
                     record_failures.append({"name": name, "path": path, "reason": "wheel file missing"})
                     continue
