@@ -24,6 +24,7 @@ final class PracticePartsUITests: XCTestCase {
             app.launchEnvironment["DYLD_FALLBACK_LIBRARY_PATH"] = swiftPath
         }
         app.launch()
+        try skipLegacySelectorsForRedesignedMobileUI(app)
         openFixture(app)
         app.terminate()
         app.launchArguments = []

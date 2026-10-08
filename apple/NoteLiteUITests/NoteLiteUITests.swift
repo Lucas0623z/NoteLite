@@ -5,7 +5,7 @@ import UIKit
 
 final class NoteLiteUITests: XCTestCase {
     @MainActor
-    func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() {
+    func testImportedMusicXMLOpensBundledPracticeAndCaptureScreens() throws {
         continueAfterFailure = false
         // Simulator launch, accessibility snapshots and both iPad rotations
         // exceeded 120 seconds in CI while every functional assertion passed.
@@ -21,6 +21,7 @@ final class NoteLiteUITests: XCTestCase {
             app.launchEnvironment["DYLD_FALLBACK_LIBRARY_PATH"] = swiftPath
         }
         app.launch()
+        try skipLegacySelectorsForRedesignedMobileUI(app)
         let score = app.descendants(matching: .any).matching(identifier: "score-row")
             .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "demo", "demo")).firstMatch
         XCTAssertTrue(score.waitForExistence(timeout: 15), "Bundled MusicXML must enter the real library importer")
