@@ -24,7 +24,11 @@ final class MobileInterfaceUITests: XCTestCase {
             XCTAssertTrue(button.waitForExistence(timeout: 10), "Missing navigation: \(tab)")
             XCTAssertTrue(button.isHittable, "Navigation must stay reachable above the home indicator")
             button.tap()
-            attachAfterRender(name: "Mobile-\(tab)", marker: pageMarker(tab, in: app))
+            let marker = pageMarker(tab, in: app)
+            // Confirm the official page's banner and navigation are painted without requiring
+            // its entire scrollable course path to produce identical screenshot bytes.
+            attachAfterRender(name: "Mobile-\(tab)", marker: marker,
+                stableRegions: tab == "官方曲谱" ? [marker, button] : [])
         }
         verifyImportMenu(app)
         XCTAssertTrue(demo.waitForExistence(timeout: 20))
@@ -142,21 +146,21 @@ final class MobileInterfaceUITests: XCTestCase {
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in element.exists && element.isHittable }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 20), .completed, message)
     }
-    @MainActor private func attachAfterRender(name: String, marker: XCUIElement) {
+    @MainActor private func attachAfterRender(name: String, marker: XCUIElement, stableRegions: [XCUIElement] = []) {
         waitUntilVisible(marker, message: "Selected screen must be visible before capturing \(name)")
-        var previousImage: Data?
+        var previousImages: [Data]?
         var settledScreenshot: XCUIScreenshot?
         // DOM accessibility can update before WebKit finishes painting local images and navigation.
         // Capture only when the requested page is visible and two consecutive screen samples agree.
         let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard marker.exists && marker.isHittable else {
-                previousImage = nil
+            guard marker.exists && marker.isHittable && stableRegions.allSatisfy({ $0.exists && $0.isHittable }) else {
+                previousImages = nil
                 return false
             }
             let screenshot = XCUIScreen.main.screenshot()
-            let image = screenshot.pngRepresentation
-            let matchesPrevious = previousImage == image
-            previousImage = image
+            let images = stableRegions.isEmpty ? [screenshot.pngRepresentation] : stableRegions.map { $0.screenshot().pngRepresentation }
+            let matchesPrevious = previousImages == images
+            previousImages = images
             if matchesPrevious { settledScreenshot = screenshot }
             return matchesPrevious
         }, object: marker)
