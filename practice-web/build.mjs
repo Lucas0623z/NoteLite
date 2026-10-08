@@ -21,4 +21,4 @@ for (const name of packages) {
   if (!license) throw new Error(`Missing license: ${name}`);
   notices += `\n--- ${name} ${pkg.version} (${pkg.license}) ---\n${license}\n`;
 }
-await writeFile(`${out}/THIRD-PARTY.txt`,notices);
+await writeFile(`${out}/THIRD-PARTY.txt`,notices+'\n\nWindows local audio\n'+await readFile('../native/audio/THIRD_PARTY_NOTICES.md','utf8')+'\n'+await readFile('../native/audio/vendor/miniaudio/LICENSE','utf8')+'\n\nSpotify Basic Pitch 0.4.0: Apache-2.0. Local ONNX weights and dependency notices ship in tools/local-analysis/THIRD-PARTY.txt and python/site-packages (package licenses and .dist-info directories). See local-analysis/windows-lock.json for exact versions and hashes.\n');

@@ -7,6 +7,9 @@ on:
     paths:
       - 'app/**'
       - 'practice-web/**'
+      - 'native/audio/**'
+      - 'local-analysis/**'
+      - 'tools/build-local-audio.ps1'
       - '*.gradle'
       - 'gradle.properties'
       - '.github/workflows/desktop-distributions.yml'
@@ -47,6 +50,17 @@ jobs:
           java-version: '21'
           architecture: x64
           cache: gradle
+      - name: Configure Windows C compiler
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Verify local native audio detector
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./tools/build-local-audio.ps1
+          python native/audio/test_audio.py --exe native/audio/build/NoteLiteAudio.exe
+          python native/audio/test_events.py --exe native/audio/build/NoteLiteAudio.exe
+          ./gradlew.bat --no-daemon -PtargetOS=windows-x86_64 :app:installLocalAnalysis
       - name: Test MIDI and practice, and build the platform distribution
         shell: bash
         run: |
@@ -89,6 +103,18 @@ jobs:
               Where-Object { $_.Length -gt 0 })
             if ($results.Count -eq 0) { throw "Recognition produced no nonempty $extension artifact" }
           }
+      - name: Validate installed Windows analysis model
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $PWD 'app/build/install/app/tools/local-analysis'
+          if (-not (Test-Path 'app/build/install/app/bin/NoteLiteAudio.exe')) {
+            throw 'The distribution is missing local native capture'
+          }
+          & "$runtime/python/python.exe" local-analysis/smoke_test.py --runtime $runtime
+          if ($LASTEXITCODE -ne 0) { throw 'The installed ONNX model failed its actual inference check' }
+          & "$runtime/python/python.exe" "$runtime/runtime_smoke.py" --runtime $runtime --require-native
+          if ($LASTEXITCODE -ne 0) { throw 'A packaged engine or matching baseline failed actual inference' }
       - name: Name the validated archive for its platform
         id: archive
         shell: pwsh

@@ -1133,3 +1133,104 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+
+
+Windows local audio
+# Vendored native audio dependency
+
+**miniaudio 0.11.25**, David Reid / mackron.
+
+- Upstream: https://github.com/mackron/miniaudio
+- Fixed release: https://github.com/mackron/miniaudio/releases/tag/0.11.25
+- Header source: https://raw.githubusercontent.com/mackron/miniaudio/0.11.25/miniaudio.h
+- Header SHA-256: `ac7af4de748b7e26b777f37e01cee313a308a7296a3eb080e2906b320cc55c89`
+- License source: https://raw.githubusercontent.com/mackron/miniaudio/0.11.25/LICENSE
+- License SHA-256: `457f1b500e0adf6bc059edddfa78a2f62012e7c3bb43476c20e0bd23b25ba0eb`
+- Chosen license: MIT No Attribution (alternative 2). The original complete
+  dual-license notice is preserved in `vendor/miniaudio/LICENSE`.
+
+The header is unmodified. Its embedded dr_wav decoder/encoder notices are
+preserved verbatim. Unneeded MP3/FLAC/resource-manager/engine features
+are disabled by preprocessor definitions in the NoteLite translation unit.
+Neither build nor runtime fetches miniaudio from the network.
+
+MPM and YIN pitch code in this directory was implemented for NoteLite from the
+published mathematical equations. No aubio, Essentia, TarsosDSP, Pitchy, libsndfile
+or other pitch-detector implementation is included in `NoteLiteAudio.exe`.
+
+## Optional recorded-analysis executables
+
+`AubioMono.exe` statically links actual **aubio 0.4.9**, Paul Brossier and
+contributors, GPL-3.0-or-later. Pinned source and original `COPYING` are at
+`local-analysis/vendor/aubio/`. Official archive SHA-256:
+`d48282ae4dab83b3dc94c16cf011bcb63835c1c02b515490e1883049c3d1f3da`.
+Upstream: https://aubio.org/ . The adapter `aubio_mono.c` is GPL-3.0-or-later
+when linked into this executable. Its WAV decoder preserves the miniaudio
+license notices above. This is a separate process from the MIT MPM/YIN helper.
+
+The nine **Nakamura alignment tools, MIT240109 release**, are compiled from
+unchanged source at `local-analysis/vendor/nakamura/Code/`, with the original
+`LICENCE.txt` retained. Official archive SHA-256:
+`cf75af54435c6ad83a7b578b691724866f6df5701e8529d86ae2a3db1e85bddd`.
+Upstream: https://midialignment.github.io/ . A command-line definition of `M_PI`
+supplies the mathematical constant on Windows; the upstream files are unchanged.
+The local-analysis distribution must include these corresponding sources,
+licenses, and attributions alongside the built executables.
+
+GCC/MinGW builds statically link GCC runtime support; the Nakamura builds also
+link libstdc++. The GCC Runtime Library Exception 3.1 and GPLv3 notices are
+retained under `vendor/gcc-runtime/`. This exception permits eligible compiled
+programs to be distributed under their own licenses. The verified MinGW C++
+build retains its compiler's matching CRT and bundles `libwinpthread-1.dll`
+beside the Nakamura executables. The original MinGW-w64/winpthreads license notices are
+also retained under `vendor/gcc-runtime/`.
+
+This software is available as a choice of the following licenses. Choose
+whichever you prefer.
+
+===============================================================================
+ALTERNATIVE 1 - Public Domain (www.unlicense.org)
+===============================================================================
+This is free and unencumbered software released into the public domain.
+
+Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+software, either in source code form or as a compiled binary, for any purpose,
+commercial or non-commercial, and by any means.
+
+In jurisdictions that recognize copyright laws, the author or authors of this
+software dedicate any and all copyright interest in the software to the public
+domain. We make this dedication for the benefit of the public at large and to
+the detriment of our heirs and successors. We intend this dedication to be an
+overt act of relinquishment in perpetuity of all present and future rights to
+this software under copyright law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For more information, please refer to <http://unlicense.org/>
+
+===============================================================================
+ALTERNATIVE 2 - MIT No Attribution
+===============================================================================
+Copyright 2025 David Reid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Spotify Basic Pitch 0.4.0: Apache-2.0. Local ONNX weights and dependency notices ship in tools/local-analysis/THIRD-PARTY.txt and python/site-packages (package licenses and .dist-info directories). See local-analysis/windows-lock.json for exact versions and hashes.
