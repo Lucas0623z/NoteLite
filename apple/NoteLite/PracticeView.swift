@@ -201,18 +201,24 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         forwardingAudio = false
     }
 
+    func readJavaScriptAudioClock() async throws -> Double {
+        // The async overload uses contentWorld:, whereas the callback overload uses a second in:.
+        let result: Any? = try await webView.callAsyncJavaScript("return performance.now()", arguments: [:], in: nil, contentWorld: .page)
+        guard let milliseconds = result as? Double, milliseconds.isFinite else {
+            throw NoteLiteError.server("无法准备声音处理时钟，请重新开始练习。")
+        }
+        return milliseconds
+    }
+
     private func synchronizeAudioClock() async throws {
         let generation = audioGeneration
         var best: (roundTrip: Double, offset: Double)?
         for _ in 0..<3 {
             let before = PracticeAudioClock.now
-            let result = try await webView.callAsyncJavaScript("return performance.now()", arguments: [:], in: nil, in: .page)
+            let milliseconds = try await readJavaScriptAudioClock()
             let after = PracticeAudioClock.now
             try Task.checkCancellation()
             guard generation == audioGeneration else { throw CancellationError() }
-            guard let milliseconds = result as? Double, milliseconds.isFinite else {
-                throw NoteLiteError.server("无法准备声音处理时钟，请重新开始练习。")
-            }
             let roundTrip = after - before
             if best == nil || roundTrip < best!.roundTrip {
                 best = (roundTrip, milliseconds - (before + after) * 500)

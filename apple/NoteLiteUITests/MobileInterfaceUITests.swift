@@ -183,15 +183,16 @@ final class MobileInterfaceUITests: XCTestCase {
     }
     @MainActor private func attachAfterRender(name: String, marker: XCUIElement, visibleControls: [XCUIElement] = []) {
         waitUntilVisible(marker, message: "Selected screen must be visible before capturing \(name)")
+        for control in visibleControls {
+            waitUntilVisible(control, message: "Selected navigation must be visible before capturing \(name)")
+        }
         var previousScreen: RenderedScreen?
         var settledScreenshot: XCUIScreenshot?
         // DOM accessibility can update before WebKit finishes painting local images and navigation.
         // Compare consecutive decoded sRGB screen samples, without relying on PNG encoding bytes.
+        // Resolve accessibility once above: repeated WebKit tree queries can consume the entire
+        // screenshot deadline even while the recording shows a fully painted, unchanged page.
         let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard marker.exists && marker.isHittable && visibleControls.allSatisfy({ $0.exists && $0.isHittable }) else {
-                previousScreen = nil
-                return false
-            }
             let screenshot = XCUIScreen.main.screenshot()
             guard let screen = self.renderedScreen(screenshot) else {
                 previousScreen = nil
@@ -201,7 +202,7 @@ final class MobileInterfaceUITests: XCTestCase {
             previousScreen = screen
             if matchesPrevious { settledScreenshot = screenshot }
             return matchesPrevious
-        }, object: marker)
+        }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 20), .completed, "Screen must finish painting before capturing \(name)")
         guard let screenshot = settledScreenshot else { return }
         let attachment = XCTAttachment(screenshot: screenshot)
