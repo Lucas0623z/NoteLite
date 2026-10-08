@@ -35,6 +35,9 @@ def native_class(owner, methods):
 
 class EmbeddedReleaseTests(unittest.TestCase):
     def setUp(self):
+        engine_patch = patch.dict(os.environ, {"RELEASE_ENGINE": "embedded"})
+        engine_patch.start()
+        self.addCleanup(engine_patch.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -486,6 +489,9 @@ class EmbeddedReleaseTests(unittest.TestCase):
 
 class CloudReleaseTests(unittest.TestCase):
     def setUp(self):
+        engine_patch = patch.dict(os.environ, {"RELEASE_ENGINE": "cloud"})
+        engine_patch.start()
+        self.addCleanup(engine_patch.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)

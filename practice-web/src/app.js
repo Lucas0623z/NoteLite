@@ -25,7 +25,7 @@ function guard(fn){return(...args)=>Promise.resolve().then(()=>fn(...args)).catc
 function openSettings(focus){$('settings-message').textContent='';if(!$('settings').open)$('settings').showModal();if(focus)$(focus)?.focus();}
 function view(name){document.body.dataset.view=name;$('review-view').hidden=name!=='review';$('practice-nav').classList.toggle('selected',name==='practice');$('review-nav').classList.toggle('selected',name==='review');if(name==='practice'&&score&&phase!=='loading')requestAnimationFrame(()=>{renderScore(true);if(session?.active)cursorAt(session.current);});}
 function setPhase(next){
-  phase=next;document.body.dataset.phase=phase;
+  phase=next;if(document.body.dataset.phase!==phase)document.body.dataset.phase=phase;
   const locked=['connecting','active','paused','loading'].includes(phase);
   for(const id of ['part','instrument-choice','input','mode','bpm','a4','from','to','verified','import','demo','listen','settings-listen'])$(id).disabled=locked;
   $('start').disabled=phase==='connecting'||phase==='loading'||!score;
@@ -190,7 +190,7 @@ function reportData(){
 function finish(showReview=true){
   stopDuration();releaseInput();
   if(!session){setPhase('idle');return null;}
-  if(lastReport){setPhase('finished');if(showReview){renderReport();view('review');}return lastReport;}
+  if(lastReport){if(phase!=='finished')setPhase('finished');if(showReview){renderReport();view('review');}return lastReport;}
   session.finish();lastReport=reportData();bridge.post({type:'report',report:lastReport});setPhase('finished');osmd.cursor.hide();
   $('position').textContent=lastReport.completed?'本段已完成':'练习已结束';message(lastReport.completed?'本段已完成。可以查看记录，重练难点。':'练习记录已保留。未演奏的部分不计为弹对。');renderReport();if(showReview)view('review');return lastReport;
 }
@@ -277,7 +277,7 @@ window.NoteLiteNative={
     }
   },
   inputResult:(requestId,error)=>bridge.inputResult(requestId,error),noteOn:midi=>receive(midi,performance.now()),audioFrame:processAudio,
-  inputError(error){pause();message(String(error),'warning');},suspend:pause,finish:()=>finish(false)
+  inputError(error){pause();message(String(error),'warning');},suspend:pause,finish:()=>finish(false),getReport:()=>lastReport||reportData()
 };
 setPhase('idle');
 if(bridge.available){$('import').hidden=true;$('demo').hidden=true;$('report').hidden=true;bridge.post({type:'ready'});}

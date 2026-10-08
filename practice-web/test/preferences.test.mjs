@@ -16,7 +16,7 @@ const note=(step,chord=false)=>`<note>${chord?'<chord/>':''}<pitch><step>${step}
 const xml=(chord=false)=>`<score-partwise><part-list><score-part id="P1"><part-name>Unknown</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>${note('C')}${note(chord?'E':'D',chord)}</measure></part></score-partwise>`;
 
 function harness(){
-  const nodes=new Map(),timeouts=[],intervals=[],oscillators=[];
+  const nodes=new Map(),timeouts=[],intervals=[],oscillators=[],phaseMutations=[];
   let time=1000,audioContexts=0;
   const labels={auto:'按谱面自动判断',piano:'钢琴 / 键盘',guitar:'吉他 / 弹拨乐',strings:'提琴',winds:'管乐',other:'其他有固定音高乐器'};
   function element(id){
@@ -32,6 +32,11 @@ function harness(){
     return nodes.get(id);
   }
   for(const [id,value] of Object.entries({input:'keyboard',mode:'wait',bpm:'60',a4:'440',from:'1',to:'1'}))element(id).value=value;
+  // Like a DOM attribute, even assigning the existing value queues a mutation.
+  // This deliberately catches observers re-entering finish() indefinitely.
+  element('body').dataset=new Proxy({}, {set(target,key,value){
+    if(key==='phase')phaseMutations.push({oldValue:target[key],value});target[key]=value;return true;
+  }});
   const cursor={reset(){},show(){},hide(){},Iterator:{EndReached:true,CurrentSourceTimestamp:{RealValue:0}}};
   class Renderer{constructor(){this.cursor=cursor;}async load(){}setOptions(){}render(){}}
   class Audio{
@@ -53,7 +58,7 @@ function harness(){
     setInterval:(callback,delay)=>{intervals.push({callback,delay});return intervals.length;},clearInterval(){},
     atob:(text)=>Buffer.from(text,'base64').toString('binary'),TextDecoder,Date,DOMParser
   });
-  return{api:window.NoteLiteNative,element,oscillators,timeouts,intervals,
+  return{api:window.NoteLiteNative,element,oscillators,timeouts,intervals,phaseMutations,
     get audioContexts(){return audioContexts;},setTime(value){time=value;},
     async load(chord=false){await window.NoteLiteNative.loadScore(Buffer.from(xml(chord)).toString('base64'),'Test','score-1');}};
 }
@@ -98,4 +103,29 @@ test('disabled encouragement shows the current position while keeping correction
 test('silent transport preference leaves deliberate score audition audible',async()=>{
   const app=harness();await app.load();app.api.applyPreferences({soundEnabled:false});
   await app.element('listen').onclick();assert.equal(app.audioContexts,1);assert.equal(app.oscillators.length,2);
+});
+
+test('a finished-phase observer can read or finish repeatedly without a mutation loop',async()=>{
+  const app=harness();await app.load();assert.equal(app.api.getReport(),null);
+  app.element('input').value='keyboard';app.element('verified').checked=true;await app.element('start').onclick();
+  app.api.noteOn(60);app.api.noteOn(65);app.setTime(2500);
+  app.phaseMutations.length=0;
+  app.element('stop').onclick();
+  const original=app.api.getReport();assert.equal(original.completed,false);assert.equal(original.errors.length,1);
+  assert.equal(app.phaseMutations.length,1,'Finishing first publishes exactly one finished transition');
+  const saved=new Set();let callbacks=0,saves=0;
+  while(app.phaseMutations.length&&callbacks<10){
+    app.phaseMutations.splice(0);callbacks++;
+    // Reproduce the older host's observer, including its deduplication AFTER
+    // finish(). It must now stop even before the host's new defenses are used.
+    if(app.element('body').dataset.phase==='finished'){
+      const report=app.api.finish();
+      if(!saved.has(report.createdAt)){saved.add(report.createdAt);saves++;}
+    }
+  }
+  assert.equal(callbacks,1);assert.equal(saves,1);assert.equal(app.phaseMutations.length,0);
+  for(let i=0;i<5;i++){
+    assert.equal(app.api.finish(),original);assert.equal(app.api.getReport(),original);
+  }
+  assert.equal(app.phaseMutations.length,0,'Repeated report access never requeues the phase observer');
 });

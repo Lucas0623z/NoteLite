@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { summarizeHistory, type HistoryRecord } from "./history";
 import { boundedDownload, checkedJob, CloudError, delay, request, validArtifact, validateScore, type CloudJob } from "./cloud";
 import Modal from "./Modal";
+import { watchPracticePhase } from "./practice-phase";
 
 export interface ScoreRecord {
   id: string; title: string; kind: string; phase: string; progress?: number;
@@ -57,10 +58,17 @@ export function YinbanProvider({ children }: { children: ReactNode }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const savedReports = useRef(new Set<string>());
   const savePracticeReport = useRef<() => void>(() => {});
+  const cleanupPractice = useRef<() => void>(() => {});
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; cleanupPractice.current(); };
+  }, []);
   const workers = useRef(new Map<string, AbortController>());
   const stateRef = useRef(state);
   stateRef.current = state;
   const [practicePart, setPracticePart] = useState<string | null>(null);
+  useLayoutEffect(() => () => cleanupPractice.current(), [practice?.id, practicePart]);
   useEffect(() => {
     if (native) return;
     let cancelled = false;
@@ -176,7 +184,8 @@ export function YinbanProvider({ children }: { children: ReactNode }) {
     setNotice("此功能需在 iPhone/iPad App 中使用。");
   }
   async function loadedPractice() {
-    const iframeWindow = frame.current?.contentWindow as (Window & { NoteLiteNative?: { loadScore: (bytes: string, title: string, id: string) => Promise<void>; finish: () => Record<string, unknown> | null; applyPreferences?: (preferences: Record<string, unknown>) => void } }) | null;
+    cleanupPractice.current();
+    const iframeWindow = frame.current?.contentWindow as (Window & { NoteLiteNative?: { loadScore: (bytes: string, title: string, id: string) => Promise<void>; finish: () => Record<string, unknown> | null; getReport: () => Record<string, unknown> | null; suspend?: () => void; applyPreferences?: (preferences: Record<string, unknown>) => void } }) | null;
     if (!iframeWindow || !practice || !practicePart) return;
     const api = iframeWindow.NoteLiteNative;
     if (!api) { setNotice("练习组件加载失败，请重试。"); return; }
@@ -185,13 +194,13 @@ export function YinbanProvider({ children }: { children: ReactNode }) {
       if (!bytes) throw new Error("未找到本机曲谱文件。");
       const partTitle = practice.parts?.find(part => part.id === practicePart)?.title;
       await api.loadScore(base64(bytes), partTitle ? `${practice.title} · ${partTitle}` : practice.title, practicePart);
-      if (frame.current?.contentWindow !== iframeWindow) return;
+      if (!mounted.current || frame.current?.contentWindow !== iframeWindow) return;
       try { const options = JSON.parse(localStorage.getItem("music-settings") || "{}"); api.applyPreferences?.({ instrument: instrumentForCourse(localStorage.getItem("music-selected-course")), soundEnabled: options["音效"] ?? true, encouragementEnabled: options["鼓励信息"] ?? true }); } catch {}
-      const saveReport = () => {
-        const report = api.finish(); if (!report) return;
+      let attached = true;
+      const saveReport = (report: Record<string, unknown> | null) => {
+        if (!attached || !mounted.current || !report) return;
         const key = `${practice.id}-${report.createdAt}`;
         if (savedReports.current.has(key)) return;
-        savedReports.current.add(key);
         const history: HistoryRecord = { id: crypto.randomUUID(), recordID: practice.id, title: partTitle ? `${practice.title} · ${partTitle}` : practice.title,
           startedAt: String(report.createdAt || new Date().toISOString()), durationSeconds: Number(report.durationSeconds) || 0,
           completed: Boolean(report.completed), firstTryCorrect: Number(report.firstTryCorrect) || 0,
@@ -199,16 +208,28 @@ export function YinbanProvider({ children }: { children: ReactNode }) {
           results: Array.isArray(report.results) ? report.results : undefined,
           input: typeof report.input === "string" ? report.input : undefined, mode: typeof report.mode === "string" ? report.mode : undefined,
           bpm: typeof report.bpm === "number" ? report.bpm : undefined, scope: report.scope };
-        if (history.durationSeconds > 0) setState(previous => ({ ...previous, history: [history, ...previous.history].slice(0, 500) }));
+        if (history.durationSeconds > 0) { savedReports.current.add(key); setState(previous => ({ ...previous, history: [history, ...previous.history].slice(0, 500) })); }
       };
-      savePracticeReport.current = saveReport;
-      const observer = new MutationObserver(() => { if (iframeWindow.document.body.dataset.phase === "finished") saveReport(); });
-      observer.observe(iframeWindow.document.body, { attributes: true, attributeFilter: ["data-phase"] });
-      iframeWindow.document.getElementById("back")?.addEventListener("click", () => { saveReport(); observer.disconnect(); setPractice(null); });
-    } catch (error) { setNotice(error instanceof Error ? error.message : "曲谱读取失败。"); }
+      const finishAndSave = () => { if (attached && mounted.current) saveReport(api.finish()); };
+      savePracticeReport.current = finishAndSave;
+      const stopObserving = watchPracticePhase(() => iframeWindow.document.body.dataset.phase, callback => {
+        const observer = new MutationObserver(callback);
+        observer.observe(iframeWindow.document.body, { attributes: true, attributeFilter: ["data-phase"] });
+        return () => observer.disconnect();
+      }, () => saveReport(api.getReport()));
+      const back = iframeWindow.document.getElementById("back");
+      const leave = () => { finishAndSave(); cleanup(); if (mounted.current) setPractice(null); };
+      const cleanup = () => {
+        attached = false; stopObserving(); back?.removeEventListener("click", leave); api.suspend?.();
+        if (savePracticeReport.current === finishAndSave) savePracticeReport.current = () => {};
+        if (cleanupPractice.current === cleanup) cleanupPractice.current = () => {};
+      };
+      cleanupPractice.current = cleanup;
+      back?.addEventListener("click", leave);
+    } catch (error) { if (mounted.current && frame.current?.contentWindow === iframeWindow) setNotice(error instanceof Error ? error.message : "曲谱读取失败。"); }
   }
   function closePractice() {
-    savePracticeReport.current(); savePracticeReport.current = () => {}; setPractice(null);
+    savePracticeReport.current(); cleanupPractice.current(); if (mounted.current) setPractice(null);
   }
   return <Context.Provider value={{ state, native, send, importPreview }}>
     {children}
