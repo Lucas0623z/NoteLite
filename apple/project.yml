@@ -23,6 +23,8 @@ targets:
       - path: NoteLite/MobileUI
         type: folder
         buildPhase: resources
+        # Embedded-engine acceptance uses LibraryView; cloud CI and archive validation require this bundle.
+        optional: true
       - path: ../app/res/practice
         type: folder
         buildPhase: resources

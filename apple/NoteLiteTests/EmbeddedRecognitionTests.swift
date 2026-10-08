@@ -78,8 +78,8 @@ final class EmbeddedRecognitionTests: XCTestCase {
         let library = LibraryStore(defaults: defaults, storageRoot: root.appendingPathComponent("library"),
                                    localRecognizer: engine)
         XCTAssertFalse(library.isConfigured)
-        #if os(iOS)
-        XCTAssertFalse(library.hasLocalEngine, "Mobile must use cloud OMR even when the legacy engine is linked")
+        #if os(iOS) && !EMBEDDED_OMR_RUNTIME
+        XCTAssertFalse(library.hasLocalEngine, "The default mobile client must use cloud OMR")
         XCTAssertFalse(library.canRecognize)
         let imported = await library.importFiles([source])
         let id = try XCTUnwrap(imported)
@@ -88,6 +88,7 @@ final class EmbeddedRecognitionTests: XCTestCase {
         let calls = await engine.calls
         XCTAssertEqual(calls, 0)
         #else
+        XCTAssertTrue(library.hasLocalEngine, "Explicit embedded builds and desktop clients can use their bundled engine")
         XCTAssertTrue(library.canRecognize)
         let imported = await library.importFiles([source])
         let id = try XCTUnwrap(imported)

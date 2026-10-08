@@ -52,8 +52,9 @@ final class LibraryStore: ObservableObject {
     var canImport: Bool { storage != nil && !isImporting }
     var isConfigured: Bool { (try? ServerConfiguration(serverAddress)) != nil }
     var hasLocalEngine: Bool {
-        #if os(iOS)
-        // Mobile recognition is deliberately cloud-only. Audio/MIDI analysis stays on-device.
+        #if os(iOS) && !EMBEDDED_OMR_RUNTIME
+        // The default mobile client uses cloud OMR. Explicit legacy runtime
+        // builds retain their offline acceptance route; audio remains local.
         return false
         #else
         return localRecognizer.isAvailable
