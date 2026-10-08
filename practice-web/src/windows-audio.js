@@ -19,9 +19,9 @@ export class NativePitchGate {
 
 export class WindowsAudioBridge {
   constructor({onFrame,onError}={}){this.onFrame=onFrame;this.onError=onError;this.events=null;this.pending=Promise.resolve();this.generation=0;this.origin=0;this.cancelStart=null;}
-  async start(profile,{record=false}={}){
+  async start(profile,{record=false,a4=440,device=-1}={}){
     const generation=++this.generation;
-    const params=new URLSearchParams({min:String(profile.minHz||20),max:String(profile.maxHz||5000),window:String(profile.windowSize||4096),record:String(record)});
+    const params=new URLSearchParams({min:String(profile.minHz||20),max:String(profile.maxHz||5000),window:String(profile.windowSize||4096),record:String(record),a4:String(a4),device:String(device)});
     // Queue only control requests. A stop must follow an in-flight start even
     // when that start's acknowledgement arrives after the user cancels it.
     const request=this.pending.catch(()=>{}).then(async()=>{

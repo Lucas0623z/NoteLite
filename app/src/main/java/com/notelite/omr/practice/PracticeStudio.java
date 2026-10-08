@@ -31,6 +31,7 @@ public final class PracticeStudio {
     private static ExecutorService executor;
     private static URI currentUri;
     private static volatile LocalAudioCapture localAudio;
+    private static volatile PracticeRuntime runtime;
     private PracticeStudio () {}
 
     /** Open an existing MusicXML/MXL from a score editor or independent OMR product. */
@@ -99,6 +100,8 @@ public final class PracticeStudio {
     private static synchronized URI start (byte[] musicXml, String metadata) throws IOException {
         byte[] scoreSnapshot = Objects.requireNonNull(musicXml, "musicXml").clone();
         stop();
+        runtime = new PracticeRuntime(scoreSnapshot,metadata);
+        instrumentInfo=metadata;
         HttpServer next = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         String prefix = "/" + UUID.randomUUID() + "/";
         Map<String, String> assets = Map.of("index.html", "text/html; charset=utf-8",
@@ -115,78 +118,7 @@ public final class PracticeStudio {
                 String file = exchange.getRequestURI().getPath().substring(prefix.length());
                 if (file.isEmpty()) file = "index.html";
                 String origin = "http://127.0.0.1:" + port;
-                if (file.equals("engines.json")) {
-                    if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-                    json(exchange, 200, "{\"windows\":" + System.getProperty("os.name").startsWith("Windows")
-                            + ",\"nativeAudio\":" + LocalAudioCapture.available() + ",\"basicPitch\":" + LocalAudioAnalysis.available() + "}"); return;
-                }
-                if (file.equals("score-info.json")) {
-                    if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-                    json(exchange, 200, metadata); return;
-                }
-                if (file.startsWith("audio/") || file.equals("analysis")) {
-                    String requestOrigin = exchange.getRequestHeaders().getFirst("Origin");
-                    if (requestOrigin != null && !origin.equals(requestOrigin)) { exchange.sendResponseHeaders(403, -1); return; }
-                    if (file.equals("audio/events")) {
-                        if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-                        LocalAudioCapture capture = localAudio;
-                        if (capture == null) { json(exchange, 409, "{\"error\":\"尚未启动听音。\"}"); return; }
-                        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
-                        exchange.getResponseHeaders().set("Cache-Control", "no-store");
-                        exchange.sendResponseHeaders(200, 0);
-                        try {
-                            while (!capture.ended()) {
-                                String frame = capture.nextFrame();
-                                exchange.getResponseBody().write((frame == null ? ": keepalive\n\n" : "data: " + frame + "\n\n").getBytes(StandardCharsets.UTF_8));
-                                exchange.getResponseBody().flush();
-                            }
-                        } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
-                        finally { capture.stop(); }
-                        return;
-                    }
-                    if (!"POST".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
-                    // State-changing routes require a same-origin browser request. File uploads use
-                    // a non-simple MIME type, so unrelated sites cannot submit a form to this port.
-                    if (!origin.equals(requestOrigin)) { exchange.sendResponseHeaders(403, -1); return; }
-                    try {
-                        if (file.equals("audio/start")) {
-                            Map<String, String> query = query(exchange.getRequestURI());
-                            double min = Double.parseDouble(query.getOrDefault("min", "27.5"));
-                            double max = Double.parseDouble(query.getOrDefault("max", "4200"));
-                            int window = Integer.parseInt(query.getOrDefault("window", "4096"));
-                            boolean recording = "true".equals(query.get("record"));
-                            synchronized (PracticeStudio.class) {
-                                if (localAudio != null) localAudio.close();
-                                LocalAudioCapture capture = new LocalAudioCapture();
-                                capture.start(min, max, window, recording); localAudio = capture;
-                            }
-                            json(exchange, 200, "{\"started\":true}"); return;
-                        }
-                        if (file.equals("audio/stop")) { synchronized (PracticeStudio.class) { LocalAudioCapture capture = localAudio; if (capture != null) { capture.stop(); capture.checkFailure(); } } json(exchange, 200, "{\"stopped\":true}"); return; }
-                        if (file.equals("audio/discard")) { synchronized (PracticeStudio.class) { LocalAudioCapture capture = localAudio; if (capture != null) capture.close(); } json(exchange, 200, "{\"discarded\":true}"); return; }
-                        if (file.equals("analysis")) {
-                            byte[] wav;
-                            LocalAudioCapture capture = localAudio;
-                            if ("true".equals(query(exchange.getRequestURI()).get("recorded"))) {
-                                if (capture == null) throw new IOException("没有本地录音。");
-                                Path recording = capture.recording();
-                                if (Files.size(recording) > LocalAudioAnalysis.MAX_INPUT_BYTES) throw new IOException("录音过长，请分段练习。");
-                                wav = Files.readAllBytes(recording);
-                            } else {
-                                if (!"application/octet-stream".equals(exchange.getRequestHeaders().getFirst("Content-Type"))) { exchange.sendResponseHeaders(415, -1); return; }
-                                wav = exchange.getRequestBody().readNBytes(LocalAudioAnalysis.MAX_INPUT_BYTES + 1);
-                                if (wav.length > LocalAudioAnalysis.MAX_INPUT_BYTES) throw new IOException("录音不能超过 64 MB。");
-                            }
-                            byte[] result = LocalAudioAnalysis.analyze(wav);
-                            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-                            exchange.getResponseHeaders().set("Cache-Control", "no-store");
-                            exchange.sendResponseHeaders(200, result.length); exchange.getResponseBody().write(result);
-                            if ("true".equals(query(exchange.getRequestURI()).get("recorded")) && capture != null) capture.deleteRecording();
-                            return;
-                        }
-                        exchange.sendResponseHeaders(404, -1); return;
-                    } catch (Exception ex) { json(exchange, 400, "{\"error\":" + quote(ex.getMessage()) + "}"); return; }
-                }
+                if (dynamic(exchange,file,origin)) return;
                 if (!"GET".equals(exchange.getRequestMethod())) { exchange.sendResponseHeaders(405, -1); return; }
                 byte[] bytes;
                 String type;
@@ -224,9 +156,94 @@ public final class PracticeStudio {
 
     /** Stop the active studio, useful for application shutdown and tests. */
     public static synchronized void stop () {
+        if(runtime!=null){runtime.stopPlayback();try{runtime.keepCapture(localAudio);runtime.finish();}catch(IOException ignored){/* Shutdown still closes all local devices. */}}
         if (localAudio != null) { localAudio.close(); localAudio = null; }
+        if (runtime != null) { runtime.close(); runtime=null; }
         if (server != null) {server.stop(0);server = null;currentUri = null;}
         if (executor != null) {executor.shutdownNow();executor = null;}
+    }
+
+    /** Local native services. Mutations require explicit same-origin browser requests. */
+    private static boolean dynamic(com.sun.net.httpserver.HttpExchange exchange,String file,String origin) throws IOException {
+        boolean known=file.equals("engines.json")||file.equals("score-info.json")||file.equals("analysis")
+                ||file.startsWith("audio/")||file.startsWith("practice/")||file.startsWith("takes")||file.startsWith("playback/")||file.equals("score/prepare");
+        if(!known)return false;
+        String requestOrigin=exchange.getRequestHeaders().getFirst("Origin");
+        if(requestOrigin!=null&&!origin.equals(requestOrigin)){exchange.sendResponseHeaders(403,-1);return true;}
+        boolean get="GET".equals(exchange.getRequestMethod());
+        boolean read=file.equals("engines.json")||file.equals("score-info.json")||file.equals("audio/events")||file.equals("audio/devices")||file.equals("practice/state")||file.equals("playback/state")||file.equals("takes")||file.startsWith("takes/")&&!List.of("takes/open","takes/recheck","takes/remove","takes/restore").contains(file);
+        if(get!=read||!get&&!"POST".equals(exchange.getRequestMethod())){exchange.sendResponseHeaders(405,-1);return true;}
+        if(!get&&!origin.equals(requestOrigin)){exchange.sendResponseHeaders(403,-1);return true;}
+        PracticeRuntime practice=runtime;Map<String,String> query=query(exchange.getRequestURI());
+        try{
+            if(file.equals("engines.json")){Map<String,Boolean> capabilities=LocalAudioAnalysis.capabilities();sendJson(exchange,Map.of("windows",System.getProperty("os.name").startsWith("Windows"),"nativeAudio",LocalAudioCapture.available(),"basicPitch",capabilities.getOrDefault("basic-pitch",false),"localPractice",true,"capabilities",capabilities,"recordedEngines",List.of("basic-pitch","pyin","crepe","aubio").stream().filter(name->capabilities.getOrDefault(name,false)).toList(),"baselines",List.of("parangonar","nakamura").stream().filter(name->capabilities.getOrDefault(name,false)).toList()));return true;}
+            if(file.equals("score-info.json")){json(exchange,200,instrumentInfo);return true;}
+            if(file.equals("practice/state")){sendJson(exchange,practice.liveSnapshot());return true;}
+            if(file.equals("playback/state")){sendJson(exchange,practice.playbackState());return true;}
+            if(file.equals("takes")){sendJson(exchange,practice.store().list());return true;}
+            if(file.equals("takes/trash")){sendJson(exchange,practice.store().trash());return true;}
+            if(file.equals("takes/report")){sendJson(exchange,practice.store().report(query.get("id")));return true;}
+            if(file.equals("takes/plan")){sendJson(exchange,practice.store().timeline(query.get("id")));return true;}
+            if(file.equals("takes/score")){binary(exchange,"application/xml",practice.store().score(query.get("id")),null);return true;}
+            if(file.equals("takes/recording")){binary(exchange,"audio/wav",Files.readAllBytes(practice.store().recording(query.get("id"))),"NoteLite-recording.wav");return true;}
+            if(file.equals("takes/package")){binary(exchange,"application/zip",practice.store().bundle(query.get("id")),"NoteLite-practice.zip");return true;}
+            if(file.equals("audio/devices")){
+                Path executable=LocalAudioCapture.executable();if(executable==null)throw new IOException("本地听音组件未安装。");
+                Process child=new ProcessBuilder(executable.toString(),"--list-devices").redirectError(ProcessBuilder.Redirect.DISCARD).start();
+                byte[] output=child.getInputStream().readNBytes(65537);if(!child.waitFor(8,java.util.concurrent.TimeUnit.SECONDS)){child.destroyForcibly();throw new IOException("设备查询超时。");}
+                if(child.exitValue()!=0||output.length>65536)throw new IOException("无法读取音频设备。");
+                Object devices=PracticeJson.parse(new String(output,StandardCharsets.UTF_8));sendJson(exchange,devices);return true;
+            }
+            if(file.equals("audio/events")){
+                LocalAudioCapture capture=localAudio;if(capture==null){json(exchange,409,"{\"error\":\"尚未启动听音。\"}");return true;}
+                exchange.getResponseHeaders().set("Content-Type","text/event-stream; charset=utf-8");exchange.getResponseHeaders().set("Cache-Control","no-store");exchange.sendResponseHeaders(200,0);
+                while(!capture.ended()){String frame=capture.nextFrame();exchange.getResponseBody().write((frame==null?": keepalive\n\n":"data: "+frame+"\n\n").getBytes(StandardCharsets.UTF_8));exchange.getResponseBody().flush();}
+                return true;
+            }
+            if(file.equals("audio/start")){
+                double min=Double.parseDouble(query.getOrDefault("min","27.5")),max=Double.parseDouble(query.getOrDefault("max","4200")),a4=Double.parseDouble(query.getOrDefault("a4","440"));
+                int window=Integer.parseInt(query.getOrDefault("window","4096")),device=Integer.parseInt(query.getOrDefault("device","-1"));
+                boolean record=!"false".equals(query.get("record"));
+                synchronized(PracticeStudio.class){if(localAudio!=null){LocalAudioCapture old=localAudio;localAudio=null;try{practice.keepCapture(old);}finally{old.close();}}LocalAudioCapture capture=new LocalAudioCapture();capture.listen(practice::nativeEvent);try{capture.start(min,max,window,record,a4,device);localAudio=capture;}catch(IOException ex){capture.close();throw ex;}}
+                if(practice.inputReady())practice.playCountIn(PracticeWave.number(practice.snapshot().get("bpm"),100),-1);
+                sendJson(exchange,Map.of("started",true));return true;
+            }
+            if(file.equals("audio/stop")){synchronized(PracticeStudio.class){practice.keepCapture(localAudio);}sendJson(exchange,Map.of("stopped",true));return true;}
+            if(file.equals("audio/discard")){synchronized(PracticeStudio.class){if(localAudio!=null)localAudio.close();}sendJson(exchange,Map.of("discarded",true));return true;}
+            if(file.equals("analysis")){
+                Map<String,Object> options=query.containsKey("options")?PracticeJson.object(PracticeJson.parse(query.get("options"))):Map.of();byte[] wav;
+                if("true".equals(query.get("recorded"))){synchronized(PracticeStudio.class){practice.keepCapture(localAudio);}wav=practice.capturedWav();}
+                else{if(!"application/octet-stream".equals(exchange.getRequestHeaders().getFirst("Content-Type"))){exchange.sendResponseHeaders(415,-1);return true;}synchronized(PracticeStudio.class){practice.keepCapture(localAudio);}wav=exchange.getRequestBody().readNBytes(LocalAudioAnalysis.MAX_INPUT_BYTES+1);}
+                sendJson(exchange,practice.analyze(wav,options));return true;
+            }
+            Map<String,Object> request=body(exchange);
+            if(file.equals("score/prepare")){sendJson(exchange,practice.prepare(request));return true;}
+            if(file.equals("practice/start")){practice.stopPlayback();Map<String,Object> snapshot=practice.start(request);if(!List.of("microphone","recording").contains(request.get("input"))&&String.valueOf(request.get("mode")).matches("tempo|strict"))practice.playCountIn(PracticeWave.number(request.get("bpm"),100),(int)PracticeWave.number(request.get("playbackDevice"),-1));sendJson(exchange,snapshot);return true;}
+            if(file.equals("practice/event")){sendJson(exchange,practice.event(request));return true;}
+            if(file.equals("practice/finish")){practice.stopPlayback();synchronized(PracticeStudio.class){practice.keepCapture(localAudio);}sendJson(exchange,practice.finish());return true;}
+            if(file.startsWith("practice/")&&List.of("pause","resume","restart","skip").contains(file.substring(9))){String action=file.substring(9);if(action.equals("pause"))practice.stopPlayback();Map<String,Object> snapshot=practice.command(action,request);if(action.equals("resume")&&"strict".equals(snapshot.get("mode")))practice.resumeMetronome();sendJson(exchange,snapshot);return true;}
+            if(file.equals("playback/reference")){sendJson(exchange,practice.playReference(request));return true;}
+            if(file.equals("playback/stop")){practice.stopPlayback();sendJson(exchange,Map.of("playing",false));return true;}
+            if(file.equals("playback/take")){sendJson(exchange,practice.replay(String.valueOf(request.get("id")),PracticeWave.number(request.get("startMs"),0),PracticeWave.number(request.get("endMs"),0),(int)PracticeWave.number(request.get("device"),-1)));return true;}
+            if(file.equals("takes/open")){sendJson(exchange,practice.openTake(String.valueOf(request.get("id"))));return true;}
+            if(file.equals("takes/recheck")){sendJson(exchange,practice.recheck(String.valueOf(request.get("id")),request));return true;}
+            if(file.equals("takes/remove")){practice.store().remove(String.valueOf(request.get("id")));sendJson(exchange,Map.of("removed",true));return true;}
+            if(file.equals("takes/restore")){practice.store().restore(String.valueOf(request.get("key")));sendJson(exchange,Map.of("restored",true));return true;}
+            exchange.sendResponseHeaders(404,-1);
+        }catch(InterruptedException ex){Thread.currentThread().interrupt();json(exchange,400,"{\"error\":\"本地操作已取消。\"}");}
+        catch(Exception ex){json(exchange,400,"{\"error\":"+quote(ex.getMessage())+"}");}
+        return true;
+    }
+    private static String instrumentInfo="{}";
+    private static Map<String,Object> body(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
+        byte[] bytes=exchange.getRequestBody().readNBytes(20*1024*1024+1);if(bytes.length>20*1024*1024)throw new IOException("请求过大。");
+        if(bytes.length==0)return Map.of();if(!String.valueOf(exchange.getRequestHeaders().getFirst("Content-Type")).startsWith("application/json"))throw new IOException("需要 JSON 请求。");
+        return PracticeJson.object(PracticeJson.parse(new String(bytes,StandardCharsets.UTF_8)));
+    }
+    private static void sendJson(com.sun.net.httpserver.HttpExchange exchange,Object value) throws IOException{json(exchange,200,PracticeJson.stringify(value));}
+    private static void binary(com.sun.net.httpserver.HttpExchange exchange,String type,byte[] bytes,String name) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type",type);exchange.getResponseHeaders().set("Cache-Control","no-store");exchange.getResponseHeaders().set("X-Content-Type-Options","nosniff");
+        if(name!=null)exchange.getResponseHeaders().set("Content-Disposition","attachment; filename=\""+name+"\"");exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);
     }
 
     private static Map<String, String> query (URI uri) {

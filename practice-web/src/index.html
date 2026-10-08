@@ -51,6 +51,7 @@
     <h1>本次练习</h1><h2 id="review-title">尚无练习记录</h2><p id="review-date"></p>
     <div class="review-stats"><div><strong id="review-measures">0</strong><span>已练小节</span></div><div><strong id="review-errors">0</strong><span>需要重练</span></div><div><strong id="review-correct">—</strong><span>首次弹对</span></div></div>
     <h2 id="review-heading">练习后再来看看</h2><div id="review-error-list"></div><p id="review-note" class="hint">只记录实际演奏，未完成的音符不会算作弹对。</p>
+    <div id="local-take-actions" class="menu-actions" hidden><button id="replay-take">回听本次录音</button><button id="save-take">导出录音与练习包</button><button id="recheck-take">录后复核</button><button id="history-open">本机练习记录</button></div>
     <button id="retry" class="primary review-retry" disabled><img src="icons/repeat-2.svg" alt=""><span>再次练习</span></button>
   </section>
 </main>
@@ -70,6 +71,13 @@
       <label class="setting-row"><span>演奏输入</span><select id="input"><option value="microphone">麦克风 · 单音旋律</option><option value="midi">MIDI 乐器 · 支持和弦</option><option value="keyboard">电脑键盘 · 演示</option></select></label>
       <select id="midi-device" aria-label="MIDI 输入设备" hidden></select><p id="input-hint" class="hint"></p>
       <button id="recorded-import" class="quiet" hidden>导入 WAV 录音比对</button><input id="recorded-file" type="file" accept=".wav,audio/wav" hidden>
+      <div id="local-engine-settings" hidden>
+        <label class="setting-row"><span>录后检测</span><select id="recorded-engine"><option value="basic-pitch">单音与和弦</option><option value="pyin">单音精细音准</option><option value="crepe">单音模型复核</option><option value="aubio">单音对照检测</option></select></label>
+        <label class="setting-row"><span>录后跟谱复核</span><select id="alignment-baseline"><option value="parangonar">弹性音符匹配</option><option value="nakamura">隐马尔可夫匹配</option></select></label>
+        <label class="setting-row"><span>麦克风设备</span><select id="capture-device"><option value="-1">Windows 默认</option></select></label>
+        <label class="setting-row"><span>播放设备</span><select id="playback-device"><option value="-1">Windows 默认</option></select></label>
+        <label class="check"><input type="checkbox" id="save-recording" checked><span>将练习录音保存在本机，供回听与复核</span></label>
+      </div>
     </section>
     <section class="settings-section"><h3>练习方式</h3>
       <label class="setting-row"><span>模式</span><select id="mode"><option value="wait">等我弹对</option><option value="tempo">跟随节拍</option></select></label>
@@ -79,7 +87,8 @@
     <section class="settings-section verification"><h3>开始前确认</h3><button id="settings-listen" class="quiet"><img src="icons/volume-2.svg" alt="">试听所选段落</button><label class="check"><input type="checkbox" id="verified"><span>我已试听或校对乐谱</span></label><p class="hint">确认音符和节奏无误后再开始，避免把识谱错误算作演奏错误。</p><p id="settings-message" class="hint" role="status"></p></section>
   </div>
 </dialog>
-<dialog id="more" class="more-sheet" aria-labelledby="more-title"><div class="dialog-heading"><h2 id="more-title">曲谱与帮助</h2><button id="more-close" class="quiet">完成</button></div><div class="menu-actions"><button id="import"><img src="icons/file-up.svg" alt="">导入 MusicXML 乐谱</button><button id="demo"><img src="icons/music.svg" alt="">载入演示曲谱</button></div><input id="file" type="file" accept=".xml,.musicxml,.mxl" hidden>
-  <details class="capabilities"><summary>识别范围与隐私</summary><p>麦克风适合独奏单音。和弦可用 MIDI 乐器，或 Windows 本地录后音频比对；无固定音高的打击乐暂不支持音高评分。</p><p>练习反馈包含音高、漏音和起音节奏，不评价触键、踏板、音色或时值。乐器根据谱面标注推断，可在设置中调整。</p><p>音频只在本机处理。谱面按书写顺序练习，暂不展开反复和跳转。</p><p id="windows-privacy" hidden>录后比对会临时保存本机 WAV，分析完成、开始新录音或关闭陪练后删除；录音不会上传云端。复音转录可能误判余音，请回听核对。</p><p>谱面与听音组件采用 OpenSheetMusicDisplay、Pitchy；Windows 增加 miniaudio、MPM/YIN 与 Basic Pitch。<a href="THIRD-PARTY.txt" target="_blank" rel="noreferrer">开源组件与许可证</a></p></details>
+<dialog id="more" class="more-sheet" aria-labelledby="more-title"><div class="dialog-heading"><h2 id="more-title">曲谱与帮助</h2><button id="more-close" class="quiet">完成</button></div><div class="menu-actions"><button id="import"><img src="icons/file-up.svg" alt="">导入乐谱 / 本机练习包</button><button id="demo"><img src="icons/music.svg" alt="">载入演示曲谱</button></div><input id="file" type="file" accept=".xml,.musicxml,.mxl,.zip" hidden>
+  <button id="history-menu" class="quiet" hidden>本机练习记录</button><div id="local-history" class="menu-actions" hidden></div>
+  <details class="capabilities"><summary>识别范围与隐私</summary><p>麦克风适合独奏单音。和弦可用 MIDI 乐器，或 Windows 本地录后音频比对；无固定音高的打击乐暂不支持音高评分。</p><p id="grading-capabilities">练习反馈包含音高、漏音和起音节奏，不评价触键、踏板或音色。乐器根据谱面标注推断，可在设置中调整。</p><p id="navigation-capabilities">音频只在本机处理。</p><p id="windows-privacy" hidden>练习录音和练习包保存在本机，可回听、导出与移入本机回收区；录音不会上传。关闭“保存录音”后仅保存演奏事件和报告。复音转录可能误判余音，疑似问题请回听复核。</p><p>谱面与听音组件采用 OpenSheetMusicDisplay、Pitchy；Windows 使用 miniaudio、MPM/YIN、Partitura、Basic Pitch、pYIN、CREPE、aubio 与录后匹配基线。<a href="THIRD-PARTY.txt" target="_blank" rel="noreferrer">开源组件与许可证</a></p></details>
 </dialog>
 </body></html>

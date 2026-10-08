@@ -13,6 +13,32 @@ https://github.com/microsoft/onnxruntime
 
 Pretty MIDI 0.2.11: MIT License
 https://github.com/craffel/pretty-midi
+License retained under python/site-packages/pretty_midi/LICENSE.txt; unused soundfont omitted.
+
+librosa 0.10.2.post1 (pYIN): ISC License
+https://github.com/librosa/librosa
+
+CREPE official tiny weights and architecture: MIT License, Copyright 2018 Jong Wook Kim.
+https://github.com/marl/crepe
+License retained under licenses/CREPE-MIT.txt; official weights pinned in windows-lock.json.
+NoteLite converts these exact HDF5 weights to ONNX without TensorFlow or torch.
+
+Partitura 1.9.0: Apache License 2.0
+https://github.com/CPJKU/partitura
+
+Parangonar 3.3.3: Apache License 2.0
+https://github.com/sildater/parangonar
+
+aubio 0.4.9: GNU General Public License version 3 or later.
+https://aubio.org
+Source/COPYING under vendor/aubio, installed license under licenses/aubio-GPL3.txt.
+
+Nakamura AlignmentTool_v240109: MIT License, Copyright 2019 Eita Nakamura.
+https://midialignment.github.io
+Source/LICENCE under vendor/nakamura, installed license under licenses/Nakamura-MIT.txt.
+The Windows build bundles the matching MinGW winpthread runtime beside these tools;
+GCC Runtime Library Exception, GPL3 and MinGW notices are retained in licenses/GCC-Runtime.
+Native adapters, build scripts and corresponding aubio/Nakamura sources are shipped in sources/.
 
 All dependencies are fixed to the exact artifacts and SHA-256 digests in
 windows-lock.json. Their license files remain in the extracted package

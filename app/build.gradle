@@ -373,12 +373,16 @@ distributions {
 
 if (app.ext.targetOS == 'windows-x86_64') {
     tasks.register('buildLocalAudio', Exec) {
-        inputs.files(rootProject.fileTree('native/audio') { include '*.c', '*.h', 'vendor/**' }, rootProject.file('tools/build-local-audio.ps1'))
+        inputs.files(rootProject.fileTree('native/audio') { include '*.c', '*.h', '*.ps1', 'vendor/**' }, rootProject.fileTree('local-analysis/vendor'), rootProject.file('tools/build-local-audio.ps1'))
         outputs.file(rootProject.file('native/audio/build/NoteLiteAudio.exe'))
-        commandLine 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', rootProject.file('tools/build-local-audio.ps1').absolutePath
+        outputs.dir(rootProject.file('native/audio/build/analysis-tools'))
+        commandLine 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', rootProject.file('tools/build-local-audio.ps1').absolutePath, '-AnalysisTools'
     }
     tasks.register('installLocalAnalysis', Exec) {
-        inputs.files(rootProject.fileTree('local-analysis') { include '*.py', '*.json', '*.ps1' })
+        dependsOn 'buildLocalAudio'
+        inputs.files(rootProject.fileTree('local-analysis') { include '*.py', '*.json', '*.ps1', '*.txt', '*.md', 'vendor/**' },
+                rootProject.fileTree('native/audio') { include '*.c', '*.h', '*.py', '*.ps1', '*.md', 'vendor/**' },
+                rootProject.fileTree('native/audio/build/analysis-tools') { include '**/*.exe', '**/*.dll' })
         outputs.dir(layout.buildDirectory.dir('local-analysis'))
         commandLine 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', rootProject.file('local-analysis/install-windows.ps1').absolutePath,
                 '-Destination', layout.buildDirectory.dir('local-analysis').get().asFile.absolutePath

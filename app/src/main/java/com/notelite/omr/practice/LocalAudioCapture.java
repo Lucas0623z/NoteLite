@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** Owns one explicitly requested microphone capture and its optional temporary WAV. */
 final class LocalAudioCapture implements AutoCloseable {
@@ -22,6 +23,9 @@ final class LocalAudioCapture implements AutoCloseable {
     private Path recording;
     private volatile String failure;
     private volatile boolean ended;
+    private Consumer<String> listener;
+    void listen(Consumer<String> listener) { this.listener=listener; }
+    boolean hasRecording() { return recording!=null; }
 
     static Path executable () {
         if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows")) return null;
@@ -40,13 +44,18 @@ final class LocalAudioCapture implements AutoCloseable {
     static boolean available () { Path path = executable(); return path != null && Files.isRegularFile(path); }
 
     synchronized void start (double min, double max, int window, boolean record) throws IOException {
+        start(min,max,window,record,440,-1);
+    }
+    synchronized void start (double min, double max, int window, boolean record,double a4,int device) throws IOException {
         if (!Double.isFinite(min) || !Double.isFinite(max) || min < 15 || max > 10000 || min >= max
-                || (window != 4096 && window != 8192)) throw new IOException("听音参数无效。");
+                || (window != 4096 && window != 8192) || !Double.isFinite(a4) || a4<415 || a4>466 || device< -1) throw new IOException("听音参数无效。");
         stop(); deleteRecording(); frames.clear(); failure = null; ended = false;
         Path binary = executable();
         if (binary == null || !Files.isRegularFile(binary)) throw new IOException("此安装包没有 Windows 本地听音组件。");
         List<String> command = new ArrayList<>(List.of(binary.toString(), "--min-frequency", Double.toString(min),
                 "--max-frequency", Double.toString(max), "--window", Integer.toString(window)));
+        command.add("--a4"); command.add(Double.toString(a4));
+        if(device>=0){command.add("--capture-device");command.add(Integer.toString(device));}
         if (record) { recording = Files.createTempFile("notelite-performance-", ".wav"); command.add("--record"); command.add(recording.toString()); }
         CountDownLatch ready = new CountDownLatch(1);
         try {
@@ -58,8 +67,12 @@ final class LocalAudioCapture implements AutoCloseable {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     if (line.length() > 16384) throw new IOException("听音组件输出过长。");
+                    if(listener!=null)listener.accept(line);
                     if (line.contains("\"type\":\"ready\"") || line.contains("\"type\": \"ready\"")) ready.countDown();
                     if (line.contains("\"type\":\"error\"") || line.contains("\"type\": \"error\"")) { failure = line; ready.countDown(); }
+                    // Raw analysis frames stay out of the UI when a native session consumes
+                    // complete note events. Musical judging never depends on a browser reader.
+                    if(listener!=null && !line.contains("\"type\":\"ready\"") && !line.contains("\"type\":\"error\"") && !line.contains("\"type\":\"stopped\""))continue;
                     if (!frames.offer(line)) {
                         failure = "听音数据处理不及时，请结束后重试。";
                         frames.clear(); frames.offer("{\"type\":\"error\",\"code\":\"consumer-overflow\"}");

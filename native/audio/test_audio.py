@@ -67,13 +67,13 @@ def tones(hz, harmonics, seconds=.35, cents=0, snr_db=None, rate=RATE):
 
 
 def pitches(frames, expected, minimum_clarity=.8):
-    audible = [f for f in frames if "frequency" in f and f["rms"] >= .005]
+    audible = [f for f in frames if not f.get('type') and f["rms"] >= .005]
     accepted = [f for f in audible if f["frequency"] > 0 and f["clarity"] >= minimum_clarity]
     cents = [1200 * math.log2(f["frequency"] / expected) for f in accepted]
     return {"audibleFrames": len(audible), "acceptedFrames": len(accepted),
             "medianCents": statistics.median(cents) if cents else None,
             "correctFrames": sum(abs(c) < 50 for c in cents),
-            "onsets": sum(f["onset"] for f in frames if "frequency" in f)}
+            "onsets": sum(f["onset"] for f in frames if not f.get('type'))}
 
 
 def synthetic(exe, folder):
@@ -103,7 +103,7 @@ def synthetic(exe, folder):
                    for _ in range(RATE // 2)]
         wav(path, samples)
         frames, _ = run(exe, path)
-        assert all(f["frequency"] == 0 and not f["onset"] for f in frames if "frequency" in f), kind
+        assert all(f["frequency"] == 0 and not f["onset"] for f in frames if not f.get('type')), kind
         results.append({"profile": kind, "falsePitchedFrames": 0})
     # No intervening silence: a quiet same-pitch decay is followed by a second pluck.
     samples = []
@@ -112,7 +112,7 @@ def synthetic(exe, folder):
         samples.append(level * math.sin(2 * math.pi * 440 * i / RATE))
     wav(path, samples)
     frames, _ = run(exe, path)
-    attacks = [f for f in frames if "frequency" in f and f["onset"]]
+    attacks = [f for f in frames if not f.get('type') and f["onset"]]
     assert len(attacks) == 2, attacks
     assert abs(attacks[0]['onsetTimeMs']) < 10
     assert abs(attacks[1]['onsetTimeMs'] - 550) <= 10, attacks
@@ -138,9 +138,9 @@ def synthetic(exe, folder):
         phase += 2 * math.pi * hz / RATE
     wav(path, legato)
     legato_frames, _ = run(exe, path, '--window', 8192)
-    before_change = [f for f in legato_frames if f.get('frequency', 0) > 0 and
+    before_change = [f for f in legato_frames if not f.get('type') and f.get('frequency', 0) > 0 and
                      f.get('onsetTimeMs') == 250 and abs(1200 * math.log2(f['frequency'] / 440)) < 30]
-    changed_pitch = [f for f in legato_frames if f.get('frequency', 0) > 0 and
+    changed_pitch = [f for f in legato_frames if not f.get('type') and f.get('frequency', 0) > 0 and
                      1200 * math.log2(f['frequency'] / 440) > 80 and f['clarity'] >= .9]
     assert before_change, 'The held A4 must establish its own acoustic attack first'
     assert changed_pitch, 'The production detector must resolve the legato pitch change'
@@ -150,7 +150,7 @@ def synthetic(exe, folder):
     results.append({'profile': 'legato_within_initial_attack_window', 'attackMs': 250,
                     'pitchChangeMs': 290, 'windowSamples': 8192})
     wav(path, samples)
-    trace = [f for f in frames if "frequency" in f]
+    trace = [f for f in frames if not f.get('type')]
     assert trace[0]["sampleCount"] == 0 and trace[0]["timeMs"] == 0
     for previous, current in zip(trace, trace[1:]):
         assert current["sampleCount"] - previous["sampleCount"] == 480
@@ -163,8 +163,8 @@ def synthetic(exe, folder):
     with wave.open(str(recording), 'rb') as captured:
         assert captured.getsampwidth() == 2 and captured.getnchannels() == 1
         assert captured.getframerate() == RATE and captured.getnframes() == len(samples)
-    before = [f for f in frames if "frequency" in f]
-    after = [f for f in reread if "frequency" in f]
+    before = [f for f in frames if not f.get('type')]
+    after = [f for f in reread if not f.get('type')]
     assert len(before) == len(after)
     for original, decoded in zip(before, after):
         assert original['sampleCount'] == decoded['sampleCount']
@@ -202,13 +202,19 @@ def recorded(exe, manifest_path, folder):
         trace_path.write_text(json.dumps(frames, separators=(',', ':')), encoding="utf-8")
         expected = 440 * 2 ** ((sample["expectedMidi"] - 69) / 12)
         metrics = pitches(frames, expected)
-        accepted = [f for f in frames if f.get("frequency", 0) > 0 and f.get("clarity", 0) >= .8 and f["rms"] >= .005]
+        accepted = [f for f in frames if not f.get('type') and f.get("frequency", 0) > 0 and f.get("clarity", 0) >= .8 and f["rms"] >= .005]
         first = accepted[0] if accepted else None
+        native_notes = [e for e in frames if e.get('type') == 'note-on']
         results.append({"instrument": sample["instrument"], "label": sample["label"],
                         "sourceUrl": sample["sourceUrl"], "sourceSha256": sample["sourceSha256"],
                         "firstPitchMatches": bool(first and abs(1200 * math.log2(first["frequency"] / expected)) < 50),
                         "firstTimeMs": first["timeMs"] if first else None,
-                        "expectedMidi": sample["expectedMidi"], "trace": str(trace_path.resolve()), **metrics})
+                        "expectedMidi": sample["expectedMidi"], "trace": str(trace_path.resolve()),
+                        "nativeFirstNoteMatches": bool(native_notes and native_notes[0]['midi'] == sample['expectedMidi']),
+                        "nativeNoteCount": len(native_notes),
+                        "nativeWrongPitchEvents": sum(e['midi'] != sample['expectedMidi'] for e in native_notes),
+                        "nativeExtraEvents": max(0,len(native_notes)-1),
+                        "nativeEvents": [e for e in frames if e.get('type') in ['note-on','note-off','uncertainty']], **metrics})
     return {"method": "Production native MPM/YIN on all checksum-verified upstream recorded-instrument PCM",
             "manifest": str(manifest_path), "attribution": manifest.get("attribution"),
             "limitation": manifest.get("limitation"), "samples": len(results),
@@ -239,7 +245,7 @@ def capture_smoke(exe, folder):
         assert samples == frames[-1]['sampleCount']
         offline_frames, _ = run(exe, recording)
         assert offline_frames[-1]['sampleCount'] == samples
-        trace = [f for f in frames if 'frequency' in f]
+        trace = [f for f in frames if not f.get('type')]
         assert not trace or (trace[0]['sampleCount'] == 0 and trace[0]['timeMs'] == 0)
         eof = subprocess.run([str(exe)], input='', text=True, capture_output=True, timeout=8)
         eof_frames = [json.loads(line) for line in eof.stdout.splitlines() if line.strip()]

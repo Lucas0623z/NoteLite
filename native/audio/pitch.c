@@ -65,6 +65,8 @@ int nl_pitch_init(nl_pitch *p, size_t window, size_t hop, double rate,
     p->nsdf = (double *)calloc(window, sizeof(double));
     p->cmnd = (double *)calloc(window, sizeof(double));
     p->last_onset = p->pending_onset = p->associated_onset = UINT64_MAX;
+    p->quiet_start = UINT64_MAX;
+    p->signal_start = UINT64_MAX;
     p->onset_armed = 1;
     if (!p->samples || !p->real || !p->imag || !p->energy || !p->nsdf || !p->cmnd) {
         nl_pitch_free(p); return 0;
@@ -82,6 +84,14 @@ void nl_pitch_free(nl_pitch *p)
 static void update_envelope(nl_pitch *p, double hop_rms, uint64_t hop_start)
 {
     double previous_fast = sqrt(p->fast_energy);
+    p->input_rms = hop_rms;
+    if (hop_rms < .0005) {
+        if (p->quiet_start == UINT64_MAX) p->quiet_start = hop_start;
+        p->signal_start = UINT64_MAX;
+    } else {
+        p->quiet_start = UINT64_MAX;
+        if (p->signal_start == UINT64_MAX) p->signal_start = hop_start;
+    }
     if (p->fast_energy == 0) p->fast_energy = hop_rms * hop_rms;
     p->fast_energy = 0.75 * p->fast_energy + 0.25 * hop_rms * hop_rms;
     double level = sqrt(p->fast_energy);
@@ -116,6 +126,11 @@ static void analyze(nl_pitch *p, nl_pitch_frame *frame)
     frame->time_ms = 1000 * (double)frame->sample_count / p->sample_rate;
     frame->pitch_time_ms = 1000 * ((double)frame->sample_count + (double)n / 2) / p->sample_rate;
     frame->onset_time_ms = NAN;
+    frame->input_rms = p->input_rms; frame->level_rms = sqrt(p->fast_energy);
+    frame->quiet_time_ms = p->quiet_start == UINT64_MAX ? NAN : 1000 * (double)p->quiet_start / p->sample_rate;
+    frame->signal_onset_ms = p->signal_start == UINT64_MAX ? NAN : 1000 * (double)p->signal_start / p->sample_rate;
+    frame->end_sample_count = p->total_samples;
+    frame->end_time_ms = 1000 * (double)p->total_samples / p->sample_rate;
     for (i = 0; i < n; ++i) {
         mean += p->samples[i]; sum += (double)p->samples[i] * p->samples[i];
     }
@@ -174,6 +189,11 @@ static void analyze(nl_pitch *p, nl_pitch_frame *frame)
             p->associated_onset = p->pending_onset; p->pending_onset = UINT64_MAX;
             p->onset_frequency = frame->frequency;
             p->onset_armed = 0; p->valley = 0;
+            /* Start a fresh envelope reference for this attack. A preceding
+             * louder note can leave the slow envelope high through a short
+             * rest; comparing a new, still-rising soft attack to that old
+             * level spuriously re-arms it without any actual amplitude fall. */
+            p->envelope = sqrt(p->fast_energy);
         }
         p->voiced = 1;
         if (p->associated_onset != UINT64_MAX && p->onset_frequency > 0) {

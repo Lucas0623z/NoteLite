@@ -6,6 +6,8 @@
 typedef struct {
     double frequency, clarity, rms, time_ms, onset_time_ms, pitch_time_ms;
     uint64_t sample_count;
+    double input_rms, level_rms, quiet_time_ms, signal_onset_ms, end_time_ms;
+    uint64_t end_sample_count;
     int onset;
 } nl_pitch_frame;
 
@@ -17,6 +19,8 @@ typedef struct {
     double envelope, valley, hop_energy, fast_energy, onset_frequency;
     size_t hop_samples;
     uint64_t total_samples, last_onset, pending_onset, associated_onset;
+    uint64_t quiet_start, signal_start;
+    double input_rms;
     int voiced, onset_armed;
 } nl_pitch;
 

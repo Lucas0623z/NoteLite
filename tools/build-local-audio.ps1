@@ -1,6 +1,7 @@
 param(
     [string]$Compiler,
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [switch]$AnalysisTools
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
@@ -52,16 +53,18 @@ if (-not $Compiler) { throw 'A Windows C compiler is required. Run from a Visual
 $executable = Join-Path $OutputDirectory 'NoteLiteAudio.exe'
 $main = Join-Path $sourceDirectory 'main.c'
 $pitch = Join-Path $sourceDirectory 'pitch.c'
+$events = Join-Path $sourceDirectory 'events.c'
 $compilerName = [IO.Path]::GetFileNameWithoutExtension($Compiler)
 Push-Location $OutputDirectory
 try {
     if ($compilerName -eq 'cl' -or $compilerName -eq 'clang-cl') {
-        & $Compiler /nologo /O2 /W4 /std:c11 $main $pitch "/Fe:$executable" /link /SUBSYSTEM:CONSOLE
+        & $Compiler /nologo /O2 /W4 /std:c11 $main $pitch $events "/Fe:$executable" /link /SUBSYSTEM:CONSOLE
     } else {
-        & $Compiler -std=c11 -O2 -Wall -Wextra -municode -static-libgcc $main $pitch -o $executable -lm
+        & $Compiler -std=c11 -O2 -Wall -Wextra -municode -static-libgcc $main $pitch $events -o $executable -lm
     }
     if ($LASTEXITCODE -ne 0) { throw "Native audio compilation failed with exit code $LASTEXITCODE" }
     & $executable --version
     if ($LASTEXITCODE -ne 0) { throw 'Native audio executable did not start.' }
     Write-Output "Built $executable"
 } finally { Pop-Location }
+if ($AnalysisTools) { & (Join-Path $sourceDirectory 'build-analysis-tools.ps1') -Compiler $Compiler -OutputDirectory $OutputDirectory }

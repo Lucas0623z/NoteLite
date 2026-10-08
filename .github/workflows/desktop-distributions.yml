@@ -59,6 +59,8 @@ jobs:
         run: |
           ./tools/build-local-audio.ps1
           python native/audio/test_audio.py --exe native/audio/build/NoteLiteAudio.exe
+          python native/audio/test_events.py --exe native/audio/build/NoteLiteAudio.exe
+          ./gradlew.bat --no-daemon -PtargetOS=windows-x86_64 :app:installLocalAnalysis
       - name: Test MIDI and practice, and build the platform distribution
         shell: bash
         run: |
@@ -111,6 +113,8 @@ jobs:
           }
           & "$runtime/python/python.exe" local-analysis/smoke_test.py --runtime $runtime
           if ($LASTEXITCODE -ne 0) { throw 'The installed ONNX model failed its actual inference check' }
+          & "$runtime/python/python.exe" "$runtime/runtime_smoke.py" --runtime $runtime --require-native
+          if ($LASTEXITCODE -ne 0) { throw 'A packaged engine or matching baseline failed actual inference' }
       - name: Name the validated archive for its platform
         id: archive
         shell: pwsh

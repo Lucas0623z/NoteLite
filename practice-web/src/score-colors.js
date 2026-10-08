@@ -1,16 +1,21 @@
 const options={applyToNoteheads:true,applyToStem:true,applyToBeams:false,applyToModifiers:false};
 
 /** Keep source notes: OSMD replaces graphical notes and SVG elements on reflow. */
-export function collectScoreNotes(osmd){
+export function collectScoreNotes(osmd,score=null){
   const entries=[],seen=new Set();
   for(const instrument of osmd.Sheet.Instruments)for(const voice of instrument.Voices)for(const entry of voice.VoiceEntries)for(const note of entry.Notes){
     if(seen.has(note)||note.isRest()||note.IsGraceNote)continue;
     seen.add(note);
-    entries.push({note,part:instrument.IdString,onset:note.getAbsoluteTimestamp().RealValue*4,
+    const onset=note.getAbsoluteTimestamp().RealValue*4,pitch=note.Pitch;
+    const writtenMidi=pitch?(pitch.Octave+pitch.constructor.OctaveXmlDifference+1)*12+pitch.FundamentalNote+pitch.AccidentalHalfTones:null;
+    const source=score?.parts.find(p=>p.id===instrument.IdString)?.notes.find(n=>n.writtenMidi===writtenMidi&&onset>=n.onset-1e-6&&onset<n.onset+n.duration-1e-6);
+    entries.push({note,part:instrument.IdString,onset,sourceNoteId:source?.id,
       originalHead:note.NoteheadColor,originalStem:note.ParentVoiceEntry.StemColor});
   }
   return entries;
 }
+
+export function colorScoreNotes(osmd,entries,sourceNoteIds,color){const ids=new Set(sourceNoteIds);for(const entry of entries)if(ids.has(entry.sourceNoteId))paint(osmd,entry,color);}
 
 function paint(osmd,entry,color,reset=false){
   const note=entry.note;

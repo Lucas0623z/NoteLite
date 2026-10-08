@@ -2,7 +2,9 @@
 param(
     [string]$Destination = '',
     [string]$Cache = '',
-    [switch]$Offline
+    [switch]$Offline,
+    [string]$NativeTools = '',
+    [switch]$SkipNative
 )
 $ErrorActionPreference = 'Stop'
 Import-Module -Name (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -Force
@@ -42,6 +44,8 @@ $Python = Join-Path $PythonDirectory 'python.exe'
 $Arguments = @((Join-Path $PSScriptRoot 'install_runtime.py'), '--destination', $Destination,
     '--cache', $Cache, '--lock', (Join-Path $PSScriptRoot 'windows-lock.json'))
 if ($Offline) { $Arguments += '--offline' }
+if (-not [string]::IsNullOrWhiteSpace($NativeTools)) { $Arguments += @('--native-tools', [IO.Path]::GetFullPath($NativeTools)) }
+if ($SkipNative) { $Arguments += '--skip-native' }
 & $Python @Arguments
 if ($LASTEXITCODE -ne 0) { throw 'Basic Pitch runtime installation failed.' }
 Write-Host "Installed local analysis in $Destination"

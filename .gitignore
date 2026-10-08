@@ -1,5 +1,9 @@
 syntax: glob
 
+# Diagnostic takes, downloaded validation recordings and intermediate evidence.
+/work/
+**/__pycache__/
+
 # Ignore .jpg and .pdf under the src directory since they are produced via umlet
 # Images handled by conf management should use other suffix (.png for example)
 src/**/*.jpg

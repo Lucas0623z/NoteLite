@@ -45,12 +45,12 @@ Practice offers a wait mode that advances when the expected notes are played, an
 | --- | --- |
 | MIDI | MIDI-capable instruments; matches single notes and chords, and checks pitch and note onset timing |
 | Microphone | One pitched voice at a time; no individual-note scoring for chords, strumming, or ensembles |
-| Windows recording analysis | Record or import a completed PCM WAV; local Basic Pitch estimates individual notes and chords for score comparison |
+| Windows recording analysis | Completed PCM WAV through Basic Pitch, pYIN, CREPE or aubio; shared grading, published alignment baselines, saved recording and original-score replay |
 | Computer keyboard | A demo input for trying score following and note feedback |
 
 Instrument suggestions use the score's instrument names, parts, and MIDI programs. You can select an instrument manually when that information is missing. Practice does not assess tone, pedal use, fingering, or touch. Continuous playing across real instruments still needs further validation.
 
-Windows now includes a local miniaudio capture helper with MPM/YIN single-voice detection and a bundled Basic Pitch ONNX runtime for completed recordings. The existing settings dialog offers piano, violin, viola, cello, contrabass, harp, flute, clarinet, bassoon, oboe, horn, trumpet, trombone, tuba, euphonium and voice, alongside the previous choices. A local OMR result with no actual instrument name requires a manual choice before microphone assessment; an automatically generated playback instrument is not treated as evidence. Clarinet, horn, trumpet, contrabass and euphonium also offer score transposition choices when MusicXML supplies none. Explicit MusicXML transposition always takes precedence.
+Windows includes native miniaudio capture/playback and MPM/YIN events, actual Partitura normalization, four recorded detectors and Parangonar/Nakamura matching baselines. A shared local judge supports wait, strict tempo and free following, with persistent reports, optional recordings, recheck and original-score replay. The existing settings dialog offers sixteen instrument profiles. Unnamed local OMR parts require manual selection; an exporter-generated playback instrument is not identification. Manual transposition variants apply only when MusicXML supplies none.
 
 These profiles configure listening ranges and written-to-sounding pitch interpretation. They do not establish acoustic accuracy for all sixteen instruments. Piano MIDI, the browser detector on other platforms, PianoBooster and the original editor remain available. See [Windows local practice](docs/windows-local-practice.md) for operation, privacy, limitations and validation.
 
@@ -131,6 +131,7 @@ Recognition, MIDI export, and practice input are tested separately. Results from
 - [Pitchy](https://github.com/ianprime0509/pitchy): single-voice pitch detection.
 - [miniaudio](https://github.com/mackron/miniaudio): Windows local microphone capture; MPM/YIN estimation is implemented in this repository.
 - [Spotify Basic Pitch](https://github.com/spotify/basic-pitch): local recorded multi-pitch transcription with its ONNX model.
+- [Partitura](https://github.com/CPJKU/partitura), [Parangonar](https://github.com/sildater/parangonar), [librosa](https://github.com/librosa/librosa), [CREPE](https://github.com/marl/crepe), [aubio](https://github.com/aubio/aubio) and [Nakamura's score/performance matcher](https://midialignment.github.io/demo.html): actual local normalization, recorded review and matching components. Package notices and corresponding source accompany the runtime.
 - [Lucide](https://lucide.dev/): practice interface icons.
 
 This repository contains code and resources under different licenses. The root [MIT notice](LICENSE), source-file headers, upstream licenses, and [practice third-party notices](app/res/practice/THIRD-PARTY.txt) apply to their respective portions. The complete Audiveris-derived application should not be treated as MIT-only.

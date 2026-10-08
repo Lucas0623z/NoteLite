@@ -17,11 +17,11 @@ import java.util.Optional;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
-/** Runs the bundled Basic Pitch ONNX transcription process on this computer only. */
+/** Runs bundled audio detectors, score normalization and offline baselines locally. */
 public final class LocalAudioAnalysis
 {
     public static final int MAX_INPUT_BYTES = 64 * 1024 * 1024;
-    public static final int MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+    public static final int MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
     public static final Duration TIMEOUT = Duration.ofMinutes(5);
     private static final Semaphore SLOT = new Semaphore(1);
 
@@ -36,10 +36,50 @@ public final class LocalAudioAnalysis
 
     /** Return validated UTF-8 schemaVersion 1 JSON, retaining all actual onset timestamps. */
     public static byte[] analyze (byte[] wav) throws IOException {
+        return analyze(wav, Map.of());
+    }
+
+    public static byte[] analyze (byte[] wav, Map<String, ?> options) throws IOException {
         validateWav(wav);
+        return run(wav, "analyze", options);
+    }
+
+    /** Partitura normalization retains source XML identity and distinct repeat occurrences. */
+    public static byte[] normalize (byte[] musicXml, Map<String, ?> options) throws IOException {
+        if (musicXml == null || musicXml.length == 0 || musicXml.length > 15 * 1024 * 1024)
+            throw new IOException("请选择不超过 15 MB 的 MusicXML 或 MXL 乐谱。");
+        return run(musicXml, "normalize", options);
+    }
+
+    /** Run an actual shipped offline baseline; no algorithm names are simulated. */
+    public static byte[] align (Map<String, ?> normalizedScore, List<?> performanceNotes, Map<String, ?> options) throws IOException {
+        byte[] payload = encode(Map.of("score", normalizedScore, "performance", performanceNotes, "options", options));
+        if (payload.length > MAX_OUTPUT_BYTES) throw new IOException("对齐数据过大，请选择较短的练习段落。");
+        return run(payload, "align", options);
+    }
+
+    public static Map<String, Boolean> capabilities () {
+        Optional<Runtime> installed = findRuntime();
+        if (installed.isEmpty()) return Map.of("basic-pitch", false, "pyin", false, "crepe", false, "aubio", false, "partitura", false, "parangonar", false, "nakamura", false);
+        Map<String, Boolean> result = new LinkedHashMap<>();
+        Path home = installed.get().helper().getParent();
+        for (String engine : List.of("basic-pitch", "pyin", "crepe", "aubio", "partitura", "parangonar", "nakamura"))
+            result.put(engine, smokePassed(installed.get().marker(), engine) && switch (engine) {
+                case "pyin" -> Files.isRegularFile(home.resolve("mono_analysis.py"));
+                case "crepe" -> Files.isRegularFile(home.resolve("models/crepe-tiny.onnx"));
+                case "aubio" -> Files.isRegularFile(home.resolve("native/AubioMono.exe"));
+                case "partitura", "parangonar" -> Files.isRegularFile(home.resolve("score_tools.py"));
+                case "nakamura" -> List.of("SprToFmt3x", "Fmt3xToHmm", "ScorePerfmMatcher", "ErrorDetection", "RealignmentMOHMM", "MatchToCorresp")
+                        .stream().allMatch(name -> Files.isRegularFile(home.resolve("native/nakamura/"+name+".exe")));
+                default -> true;
+            });
+        return result;
+    }
+
+    private static byte[] run (byte[] input, String operation, Map<String, ?> options) throws IOException {
         Runtime runtime = findRuntime().orElseThrow(() -> new IOException(availabilityMessage()));
         if (!SLOT.tryAcquire()) throw new IOException("正在分析另一段录音，请完成后重试。");
-        try { return analyze(wav, runtime, TIMEOUT); }
+        try { return execute(input, runtime, TIMEOUT, operation, options == null ? Map.of() : options); }
         finally { SLOT.release(); }
     }
 
@@ -76,18 +116,33 @@ public final class LocalAudioAnalysis
         Runtime runtime = new Runtime(home.resolve("python/python.exe"), home.resolve("analyze.py"),
                 home.resolve("models/basic-pitch.onnx"), home.resolve("runtime-ready.json"));
         return List.of(runtime.python, runtime.helper, runtime.model, runtime.marker).stream().allMatch(Files::isRegularFile)
+                && smokePassed(runtime.marker(), "basic-pitch")
                 ? Optional.of(runtime) : Optional.empty();
+    }
+
+    private static boolean smokePassed (Path marker, String engine) {
+        try {
+            if (Files.size(marker) > 65536) return false;
+            Object parsed = new Json(Files.readString(marker, StandardCharsets.UTF_8)).parse();
+            return parsed instanceof Map<?,?> metadata && metadata.get("smoke") instanceof Map<?,?> smoke
+                    && smoke.get(engine) instanceof Map<?,?> proof && Boolean.TRUE.equals(proof.get("passed"));
+        } catch (IOException | RuntimeException ex) { return false; }
     }
 
     static byte[] analyze (byte[] wav, Runtime runtime, Duration timeout) throws IOException {
         validateWav(wav);
+        return execute(wav, runtime, timeout, "analyze", Map.of());
+    }
+
+    private static byte[] execute (byte[] data, Runtime runtime, Duration timeout, String operation, Map<String, ?> options) throws IOException {
         Path directory = Files.createTempDirectory("notelite-audio-");
         Process process = null;
         try {
-            Path input = directory.resolve("recording.wav"), output = directory.resolve("notes.json"), log = directory.resolve("analysis.log");
-            Files.write(input, wav);
+            Path input = directory.resolve(operation.equals("analyze") ? "recording.wav" : operation.equals("normalize") ? "score.musicxml" : "alignment.json");
+            Path output = directory.resolve("result.json"), log = directory.resolve("analysis.log"), configuration = directory.resolve("options.json");
+            Files.write(input, data); Files.write(configuration, encode(options));
             ProcessBuilder builder = new ProcessBuilder(runtime.python.toString(), runtime.helper.toString(),
-                    "--input", input.toString(), "--output", output.toString());
+                    "--input", input.toString(), "--output", output.toString(), "--operation", operation, "--options", configuration.toString());
             builder.directory(directory.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
             // Numba caches compilation beside the disposable take rather than
             // requiring write access to the installed application directory.
@@ -96,25 +151,44 @@ public final class LocalAudioAnalysis
             builder.environment().put("NUMBA_NUM_THREADS", "2");
             process = builder.start();
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                stop(process);
+                try { stop(process); }
+                catch (RuntimeException ignored) { /* Preserve the timeout. */ }
                 throw new IOException("本地录音分析超时，请缩短录音后重试。");
             }
-            if (process.exitValue() != 0) throw new IOException("Basic Pitch 本地分析失败：" + diagnostic(log));
+            if (process.exitValue() != 0) throw new IOException("本地听音分析失败：" + diagnostic(log));
             if (!Files.isRegularFile(output) || Files.size(output) > MAX_OUTPUT_BYTES)
                 throw new IOException("本地听音引擎没有返回有效结果。");
             byte[] result = Files.readAllBytes(output);
-            validateResult(result);
+            if (operation.equals("analyze")) validateResult(result);
+            else validateOperationResult(result, operation);
             return result;
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new IOException("本地录音分析已取消。", ex);
         } finally {
-            if (process != null && process.isAlive()) stop(process);
-            // All paths originate under our own newly created directory. Never
-            // remove a user path or follow symlinks during cleanup.
-            try (var paths = Files.walk(directory)) {
-                for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+            try { if (process != null && process.isAlive()) stop(process); }
+            catch (RuntimeException ignored) { /* Keep the primary result/error. */ }
+            cleanup(directory);
+        }
+    }
+
+    /** A Windows process can retain a log handle briefly after termination. */
+    static void cleanup (Path directory) {
+        // This method only receives our newly created analysis directory. Walk
+        // without FOLLOW_LINKS, and never replace a result/timeout with cleanup.
+        List<Path> deferred = new ArrayList<>();
+        try (var paths = Files.walk(directory)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                try { Files.deleteIfExists(path); }
+                catch (IOException | RuntimeException ignored) { deferred.add(path); }
             }
+        } catch (IOException | RuntimeException ignored) { deferred.add(directory); }
+        // deleteOnExit runs registrations in reverse order. Register parents
+        // first so any unlocked children are removed before their directories.
+        deferred.sort(Comparator.comparingInt(Path::getNameCount));
+        for (Path path : deferred) {
+            try { path.toFile().deleteOnExit(); }
+            catch (RuntimeException ignored) { /* Safely retain an owned temp. */ }
         }
     }
 
@@ -173,7 +247,7 @@ public final class LocalAudioAnalysis
         try {
             Object parsed = new Json(new String(result, StandardCharsets.UTF_8)).parse();
             if (!(parsed instanceof Map<?, ?> root) || !Integer.valueOf(1).equals(integer(root.get("schemaVersion")))
-                    || !"basic-pitch".equals(root.get("engine")) || !(root.get("notes") instanceof List<?> notes) || notes.size() > 20000)
+                    || !List.of("basic-pitch", "pyin", "crepe", "aubio").contains(root.get("engine")) || !(root.get("notes") instanceof List<?> notes) || notes.size() > 20000)
                 throw new IllegalArgumentException("Unsupported schema");
             double seconds = number(root.get("seconds"));
             if (seconds <= 0 || seconds > 600) throw new IllegalArgumentException("Duration");
@@ -185,8 +259,58 @@ public final class LocalAudioAnalysis
                 if (midi < 0 || midi > 127 || onset < last || onset < 0 || duration <= 0 || onset + duration > seconds + .001
                         || confidence < 0 || confidence > 1) throw new IllegalArgumentException("Invalid note event");
                 last = onset;
+                if (note.containsKey("cents") && Math.abs(number(note.get("cents"))) > 100) throw new IllegalArgumentException("Cents");
             }
         } catch (IllegalArgumentException ex) { throw new IOException("本地听音引擎返回了无效的音符结果。", ex); }
+    }
+
+    private static void validateOperationResult (byte[] result, String operation) throws IOException {
+        try {
+            Object parsed = new Json(new String(result, StandardCharsets.UTF_8)).parse();
+            if (!(parsed instanceof Map<?, ?> root) || integer(root.get("schemaVersion")) != 1) throw new IllegalArgumentException("Schema");
+            if (operation.equals("normalize")) {
+                if (!"partitura".equals(root.get("engine")) || !(root.get("groups") instanceof List<?>) || !(root.get("notes") instanceof List<?> notes)) throw new IllegalArgumentException("Score");
+                for (Object value : notes) {
+                    if (!(value instanceof Map<?, ?> note) || !(note.get("sourceNoteId") instanceof String) || !(note.get("occurrenceId") instanceof String)
+                            || number(note.get("onset")) < 0 || number(note.get("duration")) <= 0 || integer(note.get("midi")) < 0 || integer(note.get("midi")) > 127)
+                        throw new IllegalArgumentException("Score note identity");
+                }
+            } else if (!List.of("parangonar", "nakamura").contains(root.get("engine")) || !(root.get("pairs") instanceof List<?>)
+                    || !(root.get("missing") instanceof List<?>) || !(root.get("extra") instanceof List<?>)) throw new IllegalArgumentException("Baseline");
+        } catch (IllegalArgumentException ex) { throw new IOException("本地规范化或对齐结果无效。", ex); }
+    }
+
+    private static byte[] encode (Object value) throws IOException {
+        StringBuilder output = new StringBuilder();
+        encode(value, output, 0);
+        return output.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static void encode (Object value, StringBuilder out, int depth) throws IOException {
+        if (depth > 16) throw new IOException("分析参数嵌套过深。");
+        if (value == null) out.append("null");
+        else if (value instanceof Number n) { if (!Double.isFinite(n.doubleValue())) throw new IOException("无效的数字参数。"); out.append(n); }
+        else if (value instanceof Boolean b) out.append(b);
+        else if (value instanceof String string) {
+            out.append('"');
+            for (char c : string.toCharArray()) switch (c) {
+                case '"' -> out.append("\\\""); case '\\' -> out.append("\\\\");
+                case '\n' -> out.append("\\n"); case '\r' -> out.append("\\r"); case '\t' -> out.append("\\t");
+                default -> { if (c < 32) out.append(String.format("\\u%04x", (int) c)); else out.append(c); }
+            }
+            out.append('"');
+        } else if (value instanceof Map<?, ?> map) {
+            out.append('{'); boolean first = true;
+            for (var entry : map.entrySet()) {
+                if (!(entry.getKey() instanceof String)) throw new IOException("分析参数须使用文本键。");
+                if (!first) out.append(','); first = false; encode(entry.getKey(), out, depth+1); out.append(':'); encode(entry.getValue(), out, depth+1);
+            }
+            out.append('}');
+        } else if (value instanceof List<?> list) {
+            out.append('['); boolean first = true;
+            for (Object item : list) { if (!first) out.append(','); first = false; encode(item, out, depth+1); }
+            out.append(']');
+        } else throw new IOException("不支持的分析参数类型。");
     }
 
     private static int integer (Object value) {
@@ -222,7 +346,7 @@ public final class LocalAudioAnalysis
             }
             if (take('[')) {
                 List<Object> values = new ArrayList<>(); if (take(']')) return values;
-                do { values.add(value(depth + 1)); if (values.size() > 20000) fail(); } while (take(','));
+                do { values.add(value(depth + 1)); if (values.size() > 100000) fail(); } while (take(','));
                 need(']'); return values;
             }
             for (String literal : List.of("null", "true", "false")) {
