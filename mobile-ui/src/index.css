@@ -1,0 +1,48 @@
+@import './styles/fonts.css';
+@import 'tailwindcss';
+@import './styles/theme.css';
+
+@font-face { font-family: "Noto Sans SC"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("./fonts/NotoSansSC.ttf") format("truetype"); }
+html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; }
+:root { --yinban-top-inset: max(59px, env(safe-area-inset-top)); }
+:root[data-native="true"] { --yinban-top-inset: max(8px, env(safe-area-inset-top)); }
+button, input, select { font: inherit; }
+button { touch-action: manipulation; }
+button:disabled { cursor: default; opacity: .55; }
+
+/* Keep upload motion in the CSS entry so Vite invalidates it directly. */
+.upload-menu-panel {
+  animation: upload-menu-panel 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.upload-menu-overlay {
+  animation: upload-menu-overlay 280ms ease-out;
+}
+
+.upload-menu-overlay::backdrop {
+  animation: upload-menu-backdrop 280ms ease-out;
+}
+
+@keyframes upload-menu-panel {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes upload-menu-overlay {
+  from { background-color: transparent; }
+  to { background-color: rgb(0 0 0 / 0.45); }
+}
+
+@keyframes upload-menu-backdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-menu-panel,
+  .upload-menu-overlay,
+  .upload-menu-overlay::backdrop {
+    animation: none;
+  }
+
+}

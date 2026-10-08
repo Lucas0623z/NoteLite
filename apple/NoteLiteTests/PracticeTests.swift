@@ -2,6 +2,39 @@ import XCTest
 @testable import NoteLite
 
 final class PracticeTests: XCTestCase {
+    func testMicrophoneWindowsOverlapAndKeepCaptureEndTimes() {
+        let frames = MicrophoneFrames()
+        let rate = 48000.0
+        let input = (0..<8192).map { Float($0) }
+        let windows = frames.append(input, sampleRate: rate, startTime: 100)
+        XCTAssertEqual(windows.count, 5)
+        for (index, frame) in windows.enumerated() {
+            XCTAssertEqual(frame.samples.count, 4096)
+            XCTAssertEqual(frame.samples.first, Float(index * 1024))
+            XCTAssertEqual(frame.samples.last, Float(index * 1024 + 4095))
+            XCTAssertEqual(frame.endTime, 100 + Double(index * 1024 + 4096) / rate, accuracy: 1e-9)
+        }
+        let next = frames.append((8192..<9216).map { Float($0) }, sampleRate: rate,
+                                 startTime: 100 + 8192 / rate)
+        XCTAssertEqual(next.count, 1)
+        XCTAssertEqual(next.first?.samples.first, 5120)
+        XCTAssertEqual(next.first?.endTime ?? 0, 100 + 9216 / rate, accuracy: 1e-9)
+    }
+
+    func testMicrophoneDoesNotJoinDifferentRatesOrMissingAudio() {
+        let frames = MicrophoneFrames()
+        XCTAssertTrue(frames.append(Array(repeating: 1, count: 2048), sampleRate: 48000,
+                                    startTime: 10).isEmpty)
+        // A missing interval must not contribute the preceding half-window.
+        XCTAssertTrue(frames.append(Array(repeating: 2, count: 2048), sampleRate: 48000,
+                                    startTime: 11).isEmpty)
+        let changed = frames.append(Array(repeating: 3, count: 4096), sampleRate: 44100,
+                                    startTime: 12)
+        XCTAssertEqual(changed.count, 1)
+        XCTAssertEqual(Set(changed[0].samples), [3])
+        XCTAssertEqual(changed[0].endTime, 12 + 4096 / 44100.0, accuracy: 1e-9)
+    }
+
     func testMIDIRunningStatusSurvivesSplitPacketsAndRealtimeBytes() {
         var parser = MIDINoteParser()
         XCTAssertEqual(parser.consume([0x92, 60]), [])
@@ -88,6 +121,99 @@ final class PracticeTests: XCTestCase {
         XCTAssertEqual(restored.records.count, 1)
         XCTAssertEqual(restored.records.first?.id, saved.id)
         XCTAssertEqual(restored.latest(for: score.id)?.errors.map(\.measure), ["2", "2a", "—"])
+    }
+
+    @MainActor
+    func testHistoryRoundTripRetainsMetricsAndNumericResultMeasures() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let score = ScoreRecord(id: UUID(), filename: "Flute.musicxml", sourceName: "source.musicxml", importedAt: Date())
+        let report = try XCTUnwrap(JSONSerialization.jsonObject(with: Data("""
+        {"title":"Minuet","durationSeconds":18.5,"completed":true,"measureCount":2,
+         "firstTryCorrect":1,"total":2,"input":"microphone","mode":"tempo","bpm":96,
+         "scope":{"part":"P1","from":2,"to":3},"errors":[],"results":[
+          {"index":0,"measure":2,"beat":1,"correct":1,"expected":1,"status":"correct"},
+          {"index":1,"measure":"2a","beat":1.5,"correct":1,"expected":1,"status":"corrected"}]}
+        """.utf8)) as? [String: Any])
+        let history = PracticeHistoryStore(root: root)
+        history.save(report: report, for: score)
+        XCTAssertNil(history.errorMessage)
+        let saved = try XCTUnwrap(PracticeHistoryStore(root: root).records.first)
+        XCTAssertEqual(saved.firstTryCorrect, 1)
+        XCTAssertEqual(saved.total, 2)
+        XCTAssertEqual(saved.results?.map(\.measure), ["2", "2a"])
+        XCTAssertEqual(saved.results?.map(\.status), ["correct", "corrected"])
+        XCTAssertEqual(saved.input, "microphone")
+        XCTAssertEqual(saved.mode, "tempo")
+        XCTAssertEqual(saved.bpm, 96)
+        XCTAssertEqual(saved.scope, PracticeScope(part: "P1", from: 2, to: 3))
+    }
+
+    @MainActor
+    func testLegacyHistoryLoadsWithUnknownMetricsInsteadOfInventedAccuracy() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let scoreID = UUID(), recordID = UUID()
+        let legacy: [[String: Any]] = [["id": recordID.uuidString, "scoreID": scoreID.uuidString,
+            "title": "Old practice", "date": 100, "durationSeconds": 12,
+            "completed": true, "measureCount": 3, "errors": []]]
+        try JSONSerialization.data(withJSONObject: legacy).write(to: root.appendingPathComponent("practice-history.json"))
+        let store = PracticeHistoryStore(root: root)
+        XCTAssertNil(store.errorMessage)
+        let record = try XCTUnwrap(store.records.first)
+        XCTAssertEqual(record.id, recordID)
+        XCTAssertEqual(record.scoreID, scoreID)
+        XCTAssertNil(record.firstTryCorrect)
+        XCTAssertNil(record.total)
+        XCTAssertNil(record.results)
+        XCTAssertNil(record.input)
+        XCTAssertNil(record.scope)
+    }
+
+    @MainActor
+    func testInvalidMetricsCannotReplaceSavedHistory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let score = ScoreRecord(id: UUID(), filename: "score.xml", sourceName: "source.xml", importedAt: Date())
+        let store = PracticeHistoryStore(root: root)
+        store.save(report: ["errors": [], "firstTryCorrect": 1, "total": 2], for: score)
+        let file = root.appendingPathComponent("practice-history.json")
+        let original = try Data(contentsOf: file)
+        store.save(report: ["errors": [], "firstTryCorrect": 3, "total": 2], for: score)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertEqual(store.records.count, 1)
+        XCTAssertEqual(try Data(contentsOf: file), original)
+    }
+
+    @MainActor
+    func testHistoryDeleteAndClearPersistAndKeepMemoryOnWriteFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let score = ScoreRecord(id: UUID(), filename: "score.xml", sourceName: "source.xml", importedAt: Date())
+        let store = PracticeHistoryStore(root: root)
+        store.save(report: ["errors": []], for: score)
+        store.save(report: ["errors": []], for: score)
+        let removed = try XCTUnwrap(store.records.first?.id)
+        store.delete(id: removed)
+        XCTAssertNil(store.errorMessage)
+        XCTAssertEqual(PracticeHistoryStore(root: root).records.count, 1)
+        let retained = try XCTUnwrap(store.records.first?.id)
+        // Deterministically make the parent path a file; no permission assumptions.
+        try FileManager.default.removeItem(at: root)
+        try Data("not a directory".utf8).write(to: root)
+        store.delete(id: retained)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertEqual(store.records.map(\.id), [retained])
+        store.clear()
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertEqual(store.records.map(\.id), [retained])
+        try FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        store.clear()
+        XCTAssertNil(store.errorMessage)
+        XCTAssertTrue(store.records.isEmpty)
+        XCTAssertTrue(PracticeHistoryStore(root: root).records.isEmpty)
     }
 
     @MainActor

@@ -19,7 +19,10 @@ targets:
     platform: iOS
     sources:
       - path: NoteLite
-        excludes: ["**/*.plist", "**/*.entitlements"]
+        excludes: ["**/*.plist", "**/*.entitlements", "MobileUI/**"]
+      - path: NoteLite/MobileUI
+        type: folder
+        buildPhase: resources
       - path: ../app/res/practice
         type: folder
         buildPhase: resources
@@ -34,6 +37,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: NoteLite/Info.plist
         SUPPORTS_MACCATALYST: NO
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CLOUD_OMR_MOBILE"
     dependencies:
       - package: AudiverisCore
       - sdk: SwiftUI.framework
@@ -45,13 +49,14 @@ targets:
       - sdk: CoreMIDI.framework
       - sdk: AVFoundation.framework
       - sdk: ImageIO.framework
+      - sdk: libz.tbd
   NoteLiteMac:
     type: application
     platform: macOS
     productName: 音伴-你的音乐搭子
     sources:
       - path: NoteLite
-        excludes: ["**/*.plist", "**/*.entitlements"]
+        excludes: ["**/*.plist", "**/*.entitlements", "MobileUI/**"]
       - path: ../app/res/practice
         type: folder
         buildPhase: resources
@@ -80,6 +85,7 @@ targets:
       - sdk: CoreMIDI.framework
       - sdk: AVFoundation.framework
       - sdk: ImageIO.framework
+      - sdk: libz.tbd
   NoteLiteTests:
     type: bundle.unit-test
     platform: iOS

@@ -70,23 +70,32 @@ export class PracticeSession {
 
 /** Gate stable monophonic estimates; held notes do not count as repeated attacks. */
 export class PitchGate {
-  constructor(){this.reset();}
-  reset(){this.candidate=null;this.frames=0;this.last=null;this.silentFrames=0;}
-  push(frequency,clarity,rms) {
+  constructor({stableMs=30,releaseMs=20,maximumGapMs=150}={}){
+    this.stableMs=stableMs;this.releaseMs=releaseMs;this.maximumGapMs=maximumGapMs;this.reset();
+  }
+  reset(){this.candidate=null;this.candidateSince=null;this.last=null;this.silentSince=null;this.lastTime=null;}
+  push(frequency,clarity,rms,timeMs) {
+    // Legacy callers supplied estimates at animation-frame cadence. Native audio
+    // supplies capture timestamps, so three slow buffers no longer mean 256 ms.
+    const time=timeMs===undefined?(this.lastTime===null?0:this.lastTime+1000/60):timeMs;
+    if(!Number.isFinite(time)||(this.lastTime!==null&&time<this.lastTime))return null;
+    if(this.lastTime!==null&&time-this.lastTime>this.maximumGapMs){this.candidate=null;this.candidateSince=null;this.silentSince=null;}
+    this.lastTime=time;
     // A momentary loss of periodicity during a sustained bow/blown note is not
     // a new attack. Release only on genuinely quiet audio, not on low clarity.
     if(!Number.isFinite(rms)||rms<0.008){
-      this.candidate=null;this.frames=0;
-      if(++this.silentFrames>=3)this.last=null;
+      this.candidate=null;this.candidateSince=null;
+      this.silentSince??=time;
+      if(time-this.silentSince+1e-8>=this.releaseMs)this.last=null;
       return null;
     }
-    this.silentFrames=0;
+    this.silentSince=null;
     if(!(frequency>=27.5&&frequency<=4200)||!Number.isFinite(clarity)||clarity<0.9){
-      this.candidate=null;this.frames=0;return null;
+      this.candidate=null;this.candidateSince=null;return null;
     }
     const raw=69+12*Math.log2(frequency/440),midi=Math.round(raw),cents=(raw-midi)*100;
-    if(this.candidate!==midi){this.candidate=midi;this.frames=1;return null;}
-    if(++this.frames<3||this.last===midi)return null;
-    this.last=midi;return {midi,cents};
+    if(this.candidate!==midi){this.candidate=midi;this.candidateSince=time;return null;}
+    if(time-this.candidateSince+1e-8<this.stableMs||this.last===midi)return null;
+    this.last=midi;return {midi,cents,time:this.candidateSince};
   }
 }

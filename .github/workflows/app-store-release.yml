@@ -6,12 +6,18 @@ on:
   pull_request:
     paths:
       - "apple/**"
+      - "mobile-ui/**"
       - "practice-web/**"
       - "app/res/practice/**"
       - "tools/audiveris-port/**"
       - ".github/workflows/app-store-release.yml"
   workflow_dispatch:
     inputs:
+      engine:
+        description: "Cloud OMR mobile client; embedded keeps the legacy full-engine archive route"
+        type: choice
+        options: [cloud, embedded]
+        default: cloud
       mode:
         description: "verify = unsigned device archive; export = signed App Store IPA"
         type: choice
@@ -36,7 +42,7 @@ on:
         description: "New build number; empty uses the workflow run number"
         type: string
       acceptance_run_id:
-        description: "Successful full embedded iPhone/iPad acceptance run for this exact commit (required for export)"
+        description: "Successful Apple clients run for cloud, or full embedded acceptance run for legacy engine; exact commit required"
         type: string
 
 permissions:
@@ -59,6 +65,8 @@ jobs:
       RELEASE_VERSION: ${{ inputs.version || '1.0.0' }}
       RELEASE_BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
       RELEASE_ACCEPTANCE_RUN: ${{ inputs.acceptance_run_id }}
+      RELEASE_ENGINE: ${{ inputs.engine || 'cloud' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Test native build provenance gates
@@ -66,6 +74,7 @@ jobs:
           python3 tools/audiveris-port/test_download_native_artifacts.py
           python3 -B apple/release/test_release.py
       - uses: actions/setup-java@v4
+        if: env.RELEASE_ENGINE == 'embedded'
         with:
           distribution: temurin
           java-version: '21'
@@ -83,7 +92,17 @@ jobs:
           npm ci
           npm test
           npm run build
+      - name: Build bundled mobile interface
+        working-directory: mobile-ui
+        run: |
+          npm ci
+          npm run typecheck
+          npm test --if-present
+          npm run build
+          mkdir -p ../apple/NoteLite/MobileUI
+          cp -R dist/. ../apple/NoteLite/MobileUI/
       - name: Prepare complete native artifacts and validate accepted source before export
+        if: env.RELEASE_ENGINE == 'embedded'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -98,12 +117,19 @@ jobs:
           fi
           python3 tools/audiveris-port/download-native-artifacts.py "${arguments[@]}"
       - name: Compose the complete offline release application
+        if: env.RELEASE_ENGINE == 'embedded'
         run: |
           bash tools/audiveris-port/build-embedded-probe.sh iphoneos \
             "$EMBEDDED_RUNTIME" "$EMBEDDED_OCR" build/release-embedded-probe
           bash tools/audiveris-port/build-embedded-app.sh iphoneos \
             build/release-embedded-probe/embedding build/release-embedded-app
           printf 'RELEASE_EMBEDDED_BUILD=%s\n' "$GITHUB_WORKSPACE/build/release-embedded-app" >> "$GITHUB_ENV"
+      - name: Generate cloud client without embedded JVM
+        if: env.RELEASE_ENGINE == 'cloud'
+        working-directory: apple
+        run: |
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate --spec project.yml
       - name: Verify unsigned iOS device archive
         if: env.RELEASE_MODE == 'verify'
         run: python3 apple/release/release.py archive
@@ -140,6 +166,8 @@ jobs:
             ${{ runner.temp }}/yinban-release-output/export/*.ipa
             ${{ runner.temp }}/yinban-release-output/embedded-archive-inventory.json
             ${{ runner.temp }}/yinban-release-output/embedded-ipa-inventory.json
+            ${{ runner.temp }}/yinban-release-output/cloud-archive-inventory.json
+            ${{ runner.temp }}/yinban-release-output/cloud-ipa-inventory.json
           if-no-files-found: error
           retention-days: 7
       - name: Preserve embedded build evidence

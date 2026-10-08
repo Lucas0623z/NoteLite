@@ -69,5 +69,7 @@
     </array>
     <key>NSMicrophoneUsageDescription</key>
     <string>在你开始麦克风练习后聆听演奏，对照乐谱提示音高与节奏。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>在你选择拍照导入时拍摄乐谱，确认开始识谱后上传到所配置的识谱服务。</string>
 </dict>
 </plist>

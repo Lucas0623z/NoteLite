@@ -168,3 +168,54 @@ test('legitimate stable octave jumps are still accepted without requiring silenc
   gate.push(440,1,.1);gate.push(440,1,.1);
   assert.equal(gate.push(440,1,.1).midi,69);
 });
+
+test('capture-time gate recognizes fast native hops at both microphone sample rates',()=>{
+  for(const rate of [44100,48000]){
+    const hop=1024/rate*1000,gate=new PitchGate(),detected=[];
+    // Four distinct 128 ms notes were shorter than the previous 256 ms minimum.
+    for(let i=0;i<4;i++)for(let frame=0;frame<5;frame++){
+      const midi=[60,62,64,65][i],time=(i*5+frame)*hop;
+      const event=gate.push(440*2**((midi-69)/12),1,.1,time);
+      if(event)detected.push(event);
+    }
+    assert.deepEqual(detected.map(e=>e.midi),[60,62,64,65]);
+    assert.deepEqual(detected.map(e=>e.time),[0,5*hop,10*hop,15*hop]);
+  }
+});
+
+test('time-based silence rearms repeated same pitches without requiring 256 ms',()=>{
+  const gate=new PitchGate(),events=[];
+  const feed=(hz,rms,from,to)=>{for(let t=from;t<=to;t+=20){const event=gate.push(hz,1,rms,t);if(event)events.push(event);}};
+  feed(440,.1,0,100);feed(0,0,120,160);feed(440,.1,180,280);
+  assert.deepEqual(events.map(e=>e.midi),[69,69]);
+  assert.deepEqual(events.map(e=>e.time),[0,180]);
+});
+
+test('duplicate timestamps and brief dropped frames cannot manufacture pitch stability',()=>{
+  const gate=new PitchGate();
+  for(let i=0;i<10;i++)assert.equal(gate.push(440,1,.1,100),null);
+  assert.equal(gate.push(440,1,.1,120),null);
+  assert.equal(gate.push(440,1,.1,110),null);
+  assert.equal(gate.push(440,1,.1,140).midi,69);
+  gate.reset();gate.push(440,1,.1,0);
+  assert.equal(gate.push(440,1,.1,1000),null);
+  assert.equal(gate.push(440,1,.1,1020),null);
+  assert.equal(gate.push(440,1,.1,1040).midi,69);
+});
+
+test('tempo scoring uses capture onset while queued confirmation arrives later',()=>{
+  const session=new PracticeSession([group(0,[69]),group(.5,[71])],{mode:'tempo',bpm:120});
+  const gate=new PitchGate();session.begin(1000);
+  for(const [midi,onset] of [[69,1000],[71,1250]]){
+    let event;
+    // Stable estimates are confirmed later and transport is delayed by 90 ms.
+    // The timer waits for the microphone pipeline; receive still uses capture time.
+    for(const delay of [0,20,40]){
+      event=gate.push(440*2**((midi-69)/12),1,.1,onset+delay);
+      session.tick(onset+delay+90-180);
+      if(event)session.noteOn(event.midi,event.time,event.cents);
+    }
+  }
+  assert.equal(session.report().firstTryCorrect,2);
+  assert.deepEqual(session.errors,[]);
+});

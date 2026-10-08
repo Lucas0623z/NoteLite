@@ -51,7 +51,14 @@ final class LibraryStore: ObservableObject {
 
     var canImport: Bool { storage != nil && !isImporting }
     var isConfigured: Bool { (try? ServerConfiguration(serverAddress)) != nil }
-    var hasLocalEngine: Bool { localRecognizer.isAvailable }
+    var hasLocalEngine: Bool {
+        #if os(iOS)
+        // Mobile recognition is deliberately cloud-only. Audio/MIDI analysis stays on-device.
+        return false
+        #else
+        return localRecognizer.isAvailable
+        #endif
+    }
     var canRecognize: Bool { hasLocalEngine || isConfigured }
 
     func record(_ id: UUID) -> ScoreRecord? { records.first { $0.id == id } }
@@ -360,17 +367,17 @@ final class LibraryStore: ObservableObject {
                     try update(id) { $0.job = job }
                     throw NoteLiteError.server(job.error ?? "识谱失败，请检查乐谱是否清晰后重试。")
                 case .succeeded:
-                    guard !job.artifacts.isEmpty else {
-                        throw NoteLiteError.server("任务完成，但服务器没有提供结果文件。")
-                    }
+                    try CloudResultValidation.validateManifest(job.artifacts)
                     try update(id) { $0.job = job; $0.phase = .downloading }
+                    var totalBytes = 0
                     for artifact in job.artifacts {
                         try ensureCurrent(id, generation: generation)
                         guard let current = record(id) else { return }
                         let destination = try storage.artifactURL(name: artifact.name, for: current)
                         if !current.downloadedArtifacts.contains(artifact.name) ||
                             !FileManager.default.fileExists(atPath: destination.path) {
-                            try await api.download(artifact, jobID: job.id, to: destination)
+                            try await api.download(artifact, jobID: job.id, to: destination,
+                                                   maximumBytes: CloudResultValidation.maximumJobBytes - totalBytes)
                             try ensureCurrent(id, generation: generation)
                             try update(id) {
                                 if !$0.downloadedArtifacts.contains(artifact.name) {
@@ -378,8 +385,29 @@ final class LibraryStore: ObservableObject {
                                 }
                             }
                         }
+                        let size = try CloudResultValidation.validateArtifact(at: destination)
+                        totalBytes += size
+                        guard totalBytes <= CloudResultValidation.maximumJobBytes else {
+                            throw NoteLiteError.server("识谱结果总大小超过 32 MiB，请减少页数后重试。")
+                        }
                     }
+                    guard let completed = record(id), !practiceParts(completed).isEmpty else {
+                        throw NoteLiteError.server("服务器没有提供可练习的 MusicXML 乐谱。")
+                    }
+                    // Persist a usable local copy before requesting remote deletion.
                     try update(id) { $0.phase = .ready; $0.lastError = nil; $0.paused = false }
+                    #if os(iOS)
+                    do {
+                        try await api.deleteJob(job.id)
+                        try ensureCurrent(id, generation: generation)
+                        try update(id) { $0.job = nil; $0.serverURL = nil }
+                    } catch {
+                        try ensureCurrent(id, generation: generation)
+                        try update(id) {
+                            $0.lastError = "结果已保存，可离线练习；云端任务清理失败，请稍后重试清理：\(error.localizedDescription)"
+                        }
+                    }
+                    #endif
                     return
                 }
             }
@@ -411,7 +439,9 @@ final class LibraryStore: ObservableObject {
 
     private func update(_ id: UUID, change: (inout ScoreRecord) -> Void) throws {
         guard let index = records.firstIndex(where: { $0.id == id }), let storage else { return }
-        change(&records[index])
-        try storage.save(records)
+        var updated = records
+        change(&updated[index])
+        try storage.save(updated)
+        records = updated
     }
 }

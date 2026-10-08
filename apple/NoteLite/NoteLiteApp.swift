@@ -8,7 +8,7 @@ struct NoteLiteApp: App {
 
     var body: some Scene {
         WindowGroup("音伴-你的音乐搭子") {
-            LibraryView()
+            appRoot
                 .environmentObject(library)
                 .environmentObject(history)
                 .tint(NoteLiteTheme.accent)
@@ -39,6 +39,14 @@ struct NoteLiteApp: App {
         }
         #if os(macOS)
         .defaultSize(width: 1440, height: 900)
+        #endif
+    }
+
+    @ViewBuilder private var appRoot: some View {
+        #if os(iOS)
+        MobileRootView()
+        #else
+        LibraryView()
         #endif
     }
 }

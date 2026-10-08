@@ -61,6 +61,7 @@ final class DocumentStorage: @unchecked Sendable {
             }
             if let error = coordinationError { throw error }
             if let error = copyError { throw error }
+            if record.isMusicXML { try CloudResultValidation.validateMusicXML(at: sourceURL(for: record)) }
             return record
         } catch {
             try? fileManager.removeItem(at: folder)

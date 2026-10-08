@@ -78,6 +78,16 @@ final class EmbeddedRecognitionTests: XCTestCase {
         let library = LibraryStore(defaults: defaults, storageRoot: root.appendingPathComponent("library"),
                                    localRecognizer: engine)
         XCTAssertFalse(library.isConfigured)
+        #if os(iOS)
+        XCTAssertFalse(library.hasLocalEngine, "Mobile must use cloud OMR even when the legacy engine is linked")
+        XCTAssertFalse(library.canRecognize)
+        let imported = await library.importFiles([source])
+        let id = try XCTUnwrap(imported)
+        library.start(id)
+        XCTAssertNotNil(library.errorMessage)
+        let calls = await engine.calls
+        XCTAssertEqual(calls, 0)
+        #else
         XCTAssertTrue(library.canRecognize)
         let imported = await library.importFiles([source])
         let id = try XCTUnwrap(imported)
@@ -97,6 +107,7 @@ final class EmbeddedRecognitionTests: XCTestCase {
         let restored = LibraryStore(defaults: defaults, storageRoot: root.appendingPathComponent("library"),
                                    localRecognizer: engine)
         XCTAssertEqual(restored.record(id)?.phase, .ready)
+        #endif
     }
 
     func testInterruptedLocalRecognitionRetainsOldResultMetadata() {
