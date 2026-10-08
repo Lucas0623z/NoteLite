@@ -25,10 +25,7 @@ final class MobileInterfaceUITests: XCTestCase {
             XCTAssertTrue(button.isHittable, "Navigation must stay reachable above the home indicator")
             button.tap()
             let marker = pageMarker(tab, in: app)
-            // Confirm the official page's banner and navigation are painted without requiring
-            // its entire scrollable course path to produce identical screenshot bytes.
-            attachAfterRender(name: "Mobile-\(tab)", marker: marker,
-                stableRegions: tab == "官方曲谱" ? [marker, button] : [])
+            attachAfterRender(name: "Mobile-\(tab)", marker: marker, visibleControls: [button])
         }
         verifyImportMenu(app)
         XCTAssertTrue(demo.waitForExistence(timeout: 20))
@@ -146,21 +143,62 @@ final class MobileInterfaceUITests: XCTestCase {
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in element.exists && element.isHittable }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 20), .completed, message)
     }
-    @MainActor private func attachAfterRender(name: String, marker: XCUIElement, stableRegions: [XCUIElement] = []) {
+    private struct RenderedScreen {
+        let width: Int
+        let height: Int
+        let pixels: [UInt8]
+    }
+    @MainActor private func renderedScreen(_ screenshot: XCUIScreenshot) -> RenderedScreen? {
+        guard let image = screenshot.image.cgImage, let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        let scale = min(1, 768 / Double(max(image.width, image.height)))
+        let width = max(1, Int((Double(image.width) * scale).rounded()))
+        let height = max(1, Int((Double(image.height) * scale).rounded()))
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let rendered = pixels.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: colorSpace,
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.interpolationQuality = .high
+            let bounds = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
+            context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            context.fill(bounds)
+            context.draw(image, in: bounds)
+            return true
+        }
+        return rendered ? RenderedScreen(width: width, height: height, pixels: pixels) : nil
+    }
+    private func sameRendering(_ previous: RenderedScreen, _ current: RenderedScreen) -> Bool {
+        guard previous.width == current.width, previous.height == current.height else { return false }
+        // Ignore at most 8/255 of channel noise, and at most 0.01% of visibly changed pixels.
+        // A navigation transition or a missing image changes far more than this small allowance.
+        let allowedChangedPixels = max(1, Int(Double(current.width * current.height) * 0.0001))
+        var changedPixels = 0
+        for offset in stride(from: 0, to: current.pixels.count, by: 4) {
+            if (0..<3).contains(where: { abs(Int(previous.pixels[offset + $0]) - Int(current.pixels[offset + $0])) > 8 }) {
+                changedPixels += 1
+                if changedPixels > allowedChangedPixels { return false }
+            }
+        }
+        return true
+    }
+    @MainActor private func attachAfterRender(name: String, marker: XCUIElement, visibleControls: [XCUIElement] = []) {
         waitUntilVisible(marker, message: "Selected screen must be visible before capturing \(name)")
-        var previousImages: [Data]?
+        var previousScreen: RenderedScreen?
         var settledScreenshot: XCUIScreenshot?
         // DOM accessibility can update before WebKit finishes painting local images and navigation.
-        // Capture only when the requested page is visible and two consecutive screen samples agree.
+        // Compare consecutive decoded sRGB screen samples, without relying on PNG encoding bytes.
         let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard marker.exists && marker.isHittable && stableRegions.allSatisfy({ $0.exists && $0.isHittable }) else {
-                previousImages = nil
+            guard marker.exists && marker.isHittable && visibleControls.allSatisfy({ $0.exists && $0.isHittable }) else {
+                previousScreen = nil
                 return false
             }
             let screenshot = XCUIScreen.main.screenshot()
-            let images = stableRegions.isEmpty ? [screenshot.pngRepresentation] : stableRegions.map { $0.screenshot().pngRepresentation }
-            let matchesPrevious = previousImages == images
-            previousImages = images
+            guard let screen = self.renderedScreen(screenshot) else {
+                previousScreen = nil
+                return false
+            }
+            let matchesPrevious = previousScreen.map { self.sameRendering($0, screen) } ?? false
+            previousScreen = screen
             if matchesPrevious { settledScreenshot = screenshot }
             return matchesPrevious
         }, object: marker)
