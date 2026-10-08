@@ -65,9 +65,11 @@
   <div class="settings-content">
     <section class="settings-section"><h3>乐器与输入</h3><div id="instrument" class="instrument"></div><p id="instrument-source" class="hint"></p>
       <label class="setting-row"><span>乐器</span><select id="instrument-choice"><option value="auto">按谱面自动判断</option><option value="piano">钢琴 / 键盘</option><option value="guitar">吉他 / 弹拨乐</option><option value="strings">提琴</option><option value="winds">管乐</option><option value="voice">人声</option><option value="other">其他有固定音高乐器</option></select></label>
+      <label id="variant-row" class="setting-row" hidden><span>记谱 / 乐器调性</span><select id="instrument-variant"><option value="concert">实音 / C 调</option></select></label>
       <label class="setting-row"><span>练习声部</span><select id="part"></select></label>
       <label class="setting-row"><span>演奏输入</span><select id="input"><option value="microphone">麦克风 · 单音旋律</option><option value="midi">MIDI 乐器 · 支持和弦</option><option value="keyboard">电脑键盘 · 演示</option></select></label>
       <select id="midi-device" aria-label="MIDI 输入设备" hidden></select><p id="input-hint" class="hint"></p>
+      <button id="recorded-import" class="quiet" hidden>导入 WAV 录音比对</button><input id="recorded-file" type="file" accept=".wav,audio/wav" hidden>
     </section>
     <section class="settings-section"><h3>练习方式</h3>
       <label class="setting-row"><span>模式</span><select id="mode"><option value="wait">等我弹对</option><option value="tempo">跟随节拍</option></select></label>
@@ -78,6 +80,6 @@
   </div>
 </dialog>
 <dialog id="more" class="more-sheet" aria-labelledby="more-title"><div class="dialog-heading"><h2 id="more-title">曲谱与帮助</h2><button id="more-close" class="quiet">完成</button></div><div class="menu-actions"><button id="import"><img src="icons/file-up.svg" alt="">导入 MusicXML 乐谱</button><button id="demo"><img src="icons/music.svg" alt="">载入演示曲谱</button></div><input id="file" type="file" accept=".xml,.musicxml,.mxl" hidden>
-  <details class="capabilities"><summary>识别范围与隐私</summary><p>麦克风适合独奏单音。和弦请使用 MIDI 乐器；无固定音高的打击乐暂不支持音高评分。持续同音需要短暂断开后重新起音。</p><p>练习反馈包含音高、漏音和起音节奏，不评价触键、踏板、音色或时值。乐器根据谱面标注推断，可在设置中调整。</p><p>音频只在本机处理，不保存原始录音。谱面按书写顺序练习，暂不展开反复和跳转。</p><p>渲染与单音检测采用 OpenSheetMusicDisplay、Pitchy。<a href="THIRD-PARTY.txt" target="_blank" rel="noreferrer">开源组件与许可证</a></p></details>
+  <details class="capabilities"><summary>识别范围与隐私</summary><p>麦克风适合独奏单音。和弦可用 MIDI 乐器，或 Windows 本地录后音频比对；无固定音高的打击乐暂不支持音高评分。</p><p>练习反馈包含音高、漏音和起音节奏，不评价触键、踏板、音色或时值。乐器根据谱面标注推断，可在设置中调整。</p><p>音频只在本机处理。谱面按书写顺序练习，暂不展开反复和跳转。</p><p id="windows-privacy" hidden>录后比对会临时保存本机 WAV，分析完成、开始新录音或关闭陪练后删除；录音不会上传云端。复音转录可能误判余音，请回听核对。</p><p>谱面与听音组件采用 OpenSheetMusicDisplay、Pitchy；Windows 增加 miniaudio、MPM/YIN 与 Basic Pitch。<a href="THIRD-PARTY.txt" target="_blank" rel="noreferrer">开源组件与许可证</a></p></details>
 </dialog>
 </body></html>

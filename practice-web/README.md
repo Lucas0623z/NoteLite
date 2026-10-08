@@ -1,6 +1,6 @@
 # 音伴-你的音乐搭子 · Local practice studio
 
-The 音伴 Book menu opens the currently recognized score or imports an existing MusicXML/MXL from another notation/OMR product. Java serves a random loopback-only URL with bundled assets. Microphone samples are processed inside the browser; there are no telemetry, upload, CDN or cloud API calls.
+The 音伴 Book menu opens the currently recognized score or imports an existing MusicXML/MXL from another notation/OMR product. Java serves a random loopback-only URL with bundled assets. Microphone processing stays on the computer: Windows uses the packaged native helper; other platforms retain the browser detector. There are no telemetry, cloud uploads or runtime CDN/model downloads.
 
 Use Node 20+ to rebuild the checked-in runtime assets:
 
@@ -15,9 +15,10 @@ Then run `gradlew :app:test :app:installDist` with JDK 21. Node is only a build 
 ## Inputs and measured scope
 
 - MIDI: note-on pitch matching, chords, wrong/missing notes and onset timing. Not pedal, dynamics, release duration, articulation or fingering assessment.
-- Microphone: Pitchy 4.1.0 plus confidence/stability gating for one pitched voice only. Rejects polyphonic score selections. A4 is configurable; MusicXML transposition is applied to sounding pitches.
+- Microphone: Windows miniaudio capture with MPM/YIN and confidence/stability gating; Pitchy 4.1.0 remains the browser fallback. Both score one pitched voice at a time and reject polyphonic score selections. A4 is configurable; MusicXML transposition is applied to sounding pitches.
+- Windows recording: optional native PCM16 recording or imported WAV, analyzed after completion by local Basic Pitch 0.4.0 ONNX. Exact pitches, chords, repeated attacks and timing are compared with the selected score at its chosen tempo. Weak model detections are retained for review and do not become hard wrong/extra judgments.
 - Computer keyboard: an explicitly labelled functional demo, not a microphone or hardware accuracy measurement.
-- Metadata: explicit instrument names first, General MIDI programs second. Unnamed instruments remain unknown. A classifier label is not evidence that that instrument has passed acoustic validation.
+- Metadata: explicit instrument names first, General MIDI programs second. Local OMR sends actual part-name provenance separately from exported playback defaults. Unnamed instruments require a manual choice for microphone/recording assessment. Selected transposition variants apply only where MusicXML has no explicit transpose element. A classifier label is not evidence that that instrument has passed acoustic validation.
 - Wait mode advances only after all pitches in the current group were played. Tempo mode uses a four-beat count-in and bounds matching windows by the next onset to prevent a missing fast note from shifting every following note.
 - Practice reads repeats in written order and discloses that limit. MIDI export has separate repeat expansion. Notes under unsupported jump/ornament constructs are not promised as full performance interpretation.
 - OMR bar lengths exceeding the time signature are flagged and cannot be used for assessment until corrected or excluded from the selected range. A user must review the reference score before starting.
@@ -27,6 +28,8 @@ OpenSheetMusicDisplay is a mature notation component and Pitchy is a pitch detec
 External OMR integration currently uses MusicXML/MXL interchange. ScanScore exports can be imported directly; this does not imply ScanScore is installed, embedded or benchmarked. No commercial licence is purchased automatically.
 
 See `app/res/practice/THIRD-PARTY.txt` for included runtime notices. Regression tests include actual Pitchy processing of synthesized waveforms; those numbers must not be described as real-room/instrument accuracy.
+
+The existing page layout and `PracticeSession` live matching implementation are preserved. Windows controls are added within the existing settings dialog. See [Windows operation and validation](../docs/windows-local-practice.md), [native capture](../native/audio/README.md) and [recorded analysis](../local-analysis/README.md). The recorded-sample benchmark below documents the previous browser Pitchy path; native detector results are reported separately in its own guide.
 
 ## Recorded instrument sample benchmark
 

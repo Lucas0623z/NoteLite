@@ -1,3 +1,5 @@
+import {inferInstrumentMetadata, resolveInstrument, soundingMidi} from './instruments.js';
+
 const children = (node, name) => Array.from(node?.childNodes || []).filter(n => n.nodeType === 1 && (!name || n.localName === name || n.nodeName === name));
 const child = (node,name) => children(node,name)[0];
 const text = (node,name,fallback='') => child(node,name)?.textContent?.trim() || fallback;
@@ -16,8 +18,12 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
   if (doc.getElementsByTagName('repeat').length || doc.getElementsByTagName('ending').length || doc.getElementsByTagName('segno').length || doc.getElementsByTagName('coda').length) warnings.add('含反复或跳转：此练习按谱面顺序进行，暂不展开反复。');
   const parts = children(root,'part').map((part,pi)=>{
     const id=part.getAttribute('id'), meta=catalog.get(id), notes=[], lengths=[], meters=[];
-    const name=text(meta,'part-name',`声部 ${pi+1}`), program=num(child(meta,'midi-instrument'),'midi-program',0);
-    let divisions=1, beats=4, beatType=4, transpose=0, ties=new Map(), noteIndex=0,knownTime=false;
+    const name=text(meta,'part-name',`声部 ${pi+1}`), abbreviation=text(meta,'part-abbreviation');
+    const instrumentNames=children(meta,'score-instrument').map(i=>text(i,'instrument-name')).filter(Boolean);
+    const instrumentAbbreviations=children(meta,'score-instrument').map(i=>text(i,'instrument-abbreviation')).filter(Boolean);
+    const midiInstrument=children(meta,'midi-instrument').find(i=>child(i,'midi-program'));
+    const program=num(midiInstrument,'midi-program',0), programExplicit=!!child(midiInstrument,'midi-program');
+    let divisions=1, beats=4, beatType=4, transpose=0, transposeExplicit=false, ties=new Map(), noteIndex=0,knownTime=false;
     const staffTransposes=new Map();
     for (const [mi,measure] of children(part,'measure').entries()) {
       let cursor=0,maxEnd=0,chordStart=0;
@@ -29,7 +35,7 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
           if(time){beats=text(time,'beats',String(beats)).split('+').reduce((sum,n)=>sum+Number(n),0);beatType=num(time,'beat-type',beatType);knownTime=true;}
           for(const trans of children(item,'transpose')) {
             const value=num(trans,'chromatic')+12*num(trans,'octave-change'),staff=trans.getAttribute('number');
-            if(staff)staffTransposes.set(staff,value);else{transpose=value;staffTransposes.clear();}
+            if(staff)staffTransposes.set(staff,value);else{transpose=value;transposeExplicit=true;staffTransposes.clear();}
           }
         } else if(item.nodeName==='backup') cursor-=num(item,'duration')/divisions;
         else if(item.nodeName==='forward'){cursor+=num(item,'duration')/divisions;maxEnd=Math.max(maxEnd,cursor);}
@@ -41,11 +47,13 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
           if(child(item,'grace')) warnings.add('装饰音暂不计入练习评分。');
           else if(pitch && duration>0) {
             const voice=text(item,'voice','1'),staff=text(item,'staff','1');
-            const midi=12*(num(pitch,'octave')+1)+(pitches[text(pitch,'step')]??NaN)+num(pitch,'alter')+(staffTransposes.get(staff)??transpose);
+            const writtenMidi=12*(num(pitch,'octave')+1)+(pitches[text(pitch,'step')]??NaN)+num(pitch,'alter');
+            const transposeSemitones=staffTransposes.get(staff)??transpose, noteTransposeExplicit=staffTransposes.has(staff)||transposeExplicit;
+            const midi=writtenMidi+transposeSemitones;
             if(!Number.isInteger(midi)||midi<0||midi>127)throw new Error('暂不支持微分音或超出 MIDI 范围的乐谱。');
             const key=`${voice}/${staff}/${midi}`, types=children(item,'tie').map(t=>t.getAttribute('type'));
             if(types.includes('stop') && ties.has(key)) {ties.get(key).duration+=duration;if(!types.includes('start'))ties.delete(key);}
-            else {const n={id:`${id}:${ni}`,part:id,mi,measure:measure.getAttribute('number')||String(mi+1),beat:onset*beatType/4+1,onset,duration,midi,voice,staff,xmlIndex:ni};notes.push(n);if(types.includes('start'))ties.set(key,n);}
+            else {const n={id:`${id}:${ni}`,part:id,mi,measure:measure.getAttribute('number')||String(mi+1),beat:onset*beatType/4+1,onset,duration,midi,writtenMidi,transposeSemitones,transposeExplicit:noteTransposeExplicit,voice,staff,xmlIndex:ni};notes.push(n);if(types.includes('start'))ties.set(key,n);}
           } else if(child(item,'unpitched')) warnings.add('检测到无固定音高的打击乐：暂不支持音高评分。');
           if(!chord)cursor+=duration;
           maxEnd=Math.max(maxEnd,onset+duration,cursor);
@@ -61,7 +69,7 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
       lengths.push((implicit||pickup)&&maxEnd>0?maxEnd:knownTime?nominal:Math.max(maxEnd,nominal));
       meters.push({beats,beatType,number:measure.getAttribute('number')||String(mi+1)});
     }
-    return {id,name,program,notes,lengths,meters,transpose};
+    return {id,name,abbreviation,instrumentName:instrumentNames[0]||'',instrumentNames,instrumentAbbreviations,program,programExplicit,notes,lengths,meters,transpose};
   });
   const lengths=Array.from({length:Math.max(0,...parts.map(p=>p.lengths.length))},(_,i)=>Math.max(...parts.map(p=>p.lengths[i]||0)));
   let offset=0;const starts=lengths.map(l=>{const start=offset;offset+=l;return start;});
@@ -79,32 +87,20 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
 }
 
 export function inferInstrument(part) {
-  const n=part.name.toLowerCase();
-  // Named instruments take precedence over the default GM piano program.
-  const moreNames=[[/harpsichord|羽管键琴|大键琴/,'羽管键琴','midi'],[/english horn|cor anglais|英国管/,'英国管','microphone'],[/oboe|双簧管/,'双簧管','microphone'],[/bassoon|巴松|大管/,'巴松','microphone'],[/contrabass|double bass|低音提琴/,'低音提琴','microphone'],[/\b(?:electric bass|acoustic bass|bass guitar)\b|^bass$|贝斯/,'贝斯','microphone'],[/\bharp\b|竖琴/,'竖琴','microphone'],[/organ|管风琴/,'管风琴','midi'],[/accordion|手风琴/,'手风琴','midi'],[/harmonica|口琴/,'口琴','microphone'],[/piccolo|短笛/,'短笛','microphone'],[/recorder|竖笛/,'竖笛','microphone'],[/二胡|erhu/,'二胡','microphone'],[/古筝|guzheng/,'古筝','microphone'],[/琵琶|pipa/,'琵琶','microphone'],[/古琴|guqin/,'古琴','microphone'],[/唢呐|suona/,'唢呐','microphone']];
-  for(const [pattern,name,input] of moreNames)if(pattern.test(n))return {name,source:'谱面乐器名称',input};
-  const names=[[/piano|keyboard|钢琴|电子琴|键盘/,'钢琴 / 键盘','midi'],[/guitar|吉他/,'吉他','microphone'],[/violin|小提琴/,'小提琴','microphone'],[/viola|中提琴/,'中提琴','microphone'],[/cello|大提琴/,'大提琴','microphone'],[/flute|长笛|笛子/,'长笛 / 笛类','microphone'],[/clarinet|单簧管/,'单簧管','microphone'],[/sax|萨克斯/,'萨克斯','microphone'],[/trumpet|horn|trombone|小号|圆号|长号/,'铜管','microphone'],[/voice|vocal|soprano|tenor|声乐|人声/,'人声','microphone']];
-  for(const [pattern,name,input] of names)if(pattern.test(n))return {name,source:'谱面乐器名称',input};
-  const p=part.program;
-  const morePrograms={69:'双簧管',70:'英国管',71:'巴松',44:'低音提琴',47:'竖琴',73:'短笛',75:'竖笛',23:'口琴'};
-  if(morePrograms[p])return {name:morePrograms[p],source:'谱面 MIDI 音色',input:'microphone'};
-  if(p>=33&&p<=40)return {name:'贝斯',source:'谱面 MIDI 音色',input:'microphone'};
-  if(p>=17&&p<=24)return {name:'管风琴 / 手风琴',source:'谱面 MIDI 音色',input:'midi'};
-  if(/piano|keyboard|钢琴|电子琴|键盘/.test(n)||(p>=1&&p<=8))return {name:'钢琴 / 键盘',source:'谱面乐器信息',input:'midi'};
-  if(/guitar|吉他/.test(n)||(p>=25&&p<=32))return {name:'吉他',source:'谱面乐器信息',input:'microphone'};
-  if(/violin|小提琴/.test(n)||p===41)return {name:'小提琴',source:'谱面乐器信息',input:'microphone'};
-  if(/viola|中提琴/.test(n)||p===42)return {name:'中提琴',source:'谱面乐器信息',input:'microphone'};
-  if(/cello|大提琴/.test(n)||p===43)return {name:'大提琴',source:'谱面乐器信息',input:'microphone'};
-  if(/flute|长笛|笛子/.test(n)||(p>=73&&p<=80))return {name:'长笛 / 笛类',source:'谱面乐器信息',input:'microphone'};
-  if(/clarinet|单簧管/.test(n)||p===72)return {name:'单簧管',source:'谱面乐器信息',input:'microphone'};
-  if(/sax|萨克斯/.test(n)||(p>=65&&p<=68))return {name:'萨克斯',source:'谱面乐器信息',input:'microphone'};
-  if(/trumpet|horn|trombone|小号|圆号|长号/.test(n)||(p>=57&&p<=64))return {name:'铜管',source:'谱面乐器信息',input:'microphone'};
-  if(/voice|vocal|soprano|tenor|声乐|人声/.test(n)||(p>=53&&p<=55))return {name:'人声',source:'谱面乐器信息',input:'microphone'};
-  return {name:'乐器未标明',source:'请手动确认；谱号和音域不足以确定乐器',input:'microphone'};
+  return inferInstrumentMetadata(part);
 }
 
-export function selectGroups(score, partId, from=1, to=score.lengths.length) {
-  const notes=score.parts.filter(p=>partId==='all'||p.id===partId).flatMap(p=>p.notes).filter(n=>n.mi>=from-1&&n.mi<to).sort((a,b)=>a.onset-b.onset||a.midi-b.midi);
+export function selectGroups(score, partId, from=1, to=score.lengths.length, options={}) {
+  const notes=score.parts.filter(p=>partId==='all'||p.id===partId).flatMap(p=>{
+    const settings=options.byPart?.[p.id]||options;
+    if(!settings.instrument&&!settings.profileId&&!settings.id&&settings.transpose===undefined)return p.notes;
+    const instrument=resolveInstrument(p,settings.instrument||settings.profileId||settings.id||'auto',settings);
+    return p.notes.map(n=>{
+      const midi=soundingMidi(n,instrument);
+      if(!Number.isInteger(midi)||midi<0||midi>127)throw new Error('选择的乐器移调后，音符超出 MIDI 范围。');
+      return midi===n.midi?n:{...n,midi,manualTranspose:instrument.transpose};
+    });
+  }).filter(n=>n.mi>=from-1&&n.mi<to).sort((a,b)=>a.onset-b.onset||a.midi-b.midi);
   const groups=[];
   for(const n of notes) {let g=groups.at(-1);if(!g||Math.abs(g.onset-n.onset)>1e-6){g={onset:n.onset,notes:[],measure:n.measure,mi:n.mi,beat:n.beat};groups.push(g);}g.notes.push(n);}
   return groups;
