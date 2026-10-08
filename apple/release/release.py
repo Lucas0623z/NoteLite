@@ -193,6 +193,87 @@ REQUIRED_ENGINE_CLASSES = {
     "org/bytedeco/leptonica/global/leptonica.class",
 }
 PRACTICE_SOURCE = Path(__file__).resolve().parents[2] / "app/res/practice"
+MOBILE_SOURCE = Path(__file__).resolve().parents[1] / "NoteLite/MobileUI"
+CLOUD_PROJECT = Path(__file__).resolve().parents[1] / "NoteLite.xcodeproj"
+
+
+def engine_mode():
+    # Older embedded jobs retain their explicit provenance gates.
+    value = os.environ.get("RELEASE_ENGINE", "embedded")
+    require(value in ("cloud", "embedded"), "Release engine must be cloud or embedded.")
+    return value
+
+
+def cloud_build():
+    project = CLOUD_PROJECT
+    require(project.is_dir(), "Generate the cloud client's Xcode project first.")
+    settings_output = json.loads(run([
+        "xcodebuild", "-project", str(project), "-scheme", "NoteLite", "-configuration", "Release",
+        "-destination", "generic/platform=iOS", "-showBuildSettings", "-json",
+    ], capture=True))
+    values = [item["buildSettings"] for item in settings_output if item.get("target") == "NoteLite"]
+    require(len(values) == 1, "Cannot resolve cloud client build settings.")
+    effective = values[0]
+    conditions = shlex.split(effective.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", ""))
+    require("CLOUD_OMR_MOBILE" in conditions and "EMBEDDED_OMR_RUNTIME" not in conditions
+            and effective.get("PLATFORM_NAME") == "iphoneos"
+            and shlex.split(effective.get("ARCHS", "")) == ["arm64"],
+            "Cloud client must use the mobile cloud policy and iOS device arm64 target.")
+    acceptance = None
+    if settings()[0] == "export":
+        identifier = os.environ.get("RELEASE_ACCEPTANCE_RUN", "")
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        source = os.environ.get("GITHUB_SHA", "")
+        require(re.fullmatch(r"[1-9][0-9]*", identifier)
+                and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                and re.fullmatch(r"[a-f0-9]{40}", source),
+                "Cloud export requires an Apple clients acceptance run for this exact source commit.")
+        acceptance = json.loads(run(["gh", "api", f"repos/{repository}/actions/runs/{identifier}"], capture=True))
+        require(acceptance.get("head_sha") == source and acceptance.get("conclusion") == "success"
+                and acceptance.get("path") == ".github/workflows/apple-client.yml",
+                "Cloud acceptance must be a successful Apple clients run for this exact source.")
+        jobs = json.loads(run(["gh", "api", f"repos/{repository}/actions/runs/{identifier}/jobs?per_page=100"], capture=True))
+        require({"iPhone interface", "iPad interface", "native-clients"} <= {
+            job.get("name") for job in jobs.get("jobs", []) if job.get("conclusion") == "success"
+        }, "Cloud export requires passing iPhone, iPad and native build verification.")
+        acceptance = {key: acceptance.get(key) for key in ("id", "head_sha", "conclusion", "html_url")}
+    return {"kind": "cloud", "project": project, "acceptance": acceptance}
+
+
+def verify_cloud_archive(app, composition, output, *, report_name="cloud-archive-inventory.json"):
+    require(not (app / "OMRResources").exists(), "Cloud client must not contain an embedded JVM/OMR resource bundle.")
+    resources = []
+    for original_root, installed_name in ((PRACTICE_SOURCE, "practice"), (MOBILE_SOURCE, "MobileUI")):
+        files = sorted(path for path in original_root.rglob("*") if path.is_file())
+        require(files and (original_root / "index.html").is_file(), f"Build {installed_name} before archiving.")
+        for original in files:
+            relative = original.relative_to(original_root).as_posix()
+            installed = contained_file(app / installed_name, relative)
+            require(digest(installed) == digest(original), f"Archived {installed_name} resource differs: {relative}.")
+            resources.append({"path": f"{installed_name}/{relative}", "bytes": installed.stat().st_size,
+                              "sha256": digest(installed)})
+    info = plistlib.loads(contained_file(app, "Info.plist").read_bytes())
+    require(set(info.get("UIDeviceFamily", [])) == {1, 2}, "Cloud archive must support iPhone and iPad.")
+    require(contained_file(app, "Assets.car").stat().st_size > 0, "Archived asset catalog is empty.")
+    binary = contained_file(app, info["CFBundleExecutable"])
+    run(["xcrun", "lipo", str(binary), "-verify_arch", "arm64"])
+    commands = run(["xcrun", "vtool", "-show-build", str(binary)], capture=True)
+    require(re.search(r"\bplatform\s+IOS\b", commands) and "IOSSIMULATOR" not in commands,
+            "Cloud archive executable is not an iOS device binary.")
+    symbols = run(["xcrun", "nm", "-gU", str(binary)], capture=True)
+    require(not any(re.search(r"\b_" + re.escape(name) + r"$", symbols, re.M) for name in NATIVE_ENGINE_ENTRIES),
+            "Cloud client unexpectedly links the embedded OMR engine.")
+    (output / report_name).write_text(json.dumps({"kind": "cloud", "sdk": "iphoneos", "architecture": "arm64",
+        "recognitionLocation": "cloud", "audioLocation": "device", "acceptance": composition.get("acceptance"),
+        "resources": resources}, indent=2) + "\n", encoding="utf-8")
+
+
+def verify_archive(app, composition, output, *, exported=False):
+    if composition.get("kind") == "cloud":
+        verify_cloud_archive(app, composition, output, report_name="cloud-ipa-inventory.json" if exported else "cloud-archive-inventory.json")
+    else:
+        verify_embedded_archive(app, composition, output,
+                                report_name="embedded-ipa-inventory.json" if exported else "embedded-archive-inventory.json")
 
 
 def digest(path):
@@ -427,7 +508,7 @@ def verify_exported_ipa(ipa, composition, private, output, archived_info):
     info = plistlib.loads(contained_file(apps[0], "Info.plist").read_bytes())
     for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion"):
         require(info.get(key) == archived_info.get(key), "Exported IPA identity/version differs from its archive.")
-    verify_embedded_archive(apps[0], composition, output, report_name="embedded-ipa-inventory.json")
+    verify_archive(apps[0], composition, output, exported=True)
 
 
 def archive():
@@ -442,7 +523,7 @@ def archive():
     credentials = {name: os.environ.pop(name, "") for name in secret_names}
     archive_path = output / "Yinban.xcarchive"
     try:
-        composition = embedded_build()
+        composition = cloud_build() if engine_mode() == "cloud" else embedded_build()
         command = ["xcodebuild", "archive", "-project", str(composition["project"]), "-scheme", "NoteLite", "-configuration", "Release",
                    "-destination", "generic/platform=iOS", "-archivePath", str(archive_path),
                    "-derivedDataPath", str(private / "DerivedData"), f"PRODUCT_BUNDLE_IDENTIFIER={bundle}",
@@ -468,7 +549,7 @@ def archive():
         require("iPhoneOS" in info.get("CFBundleSupportedPlatforms", []), "Archive is not an iOS device build.")
         sdk_match = re.fullmatch(r"iphoneos(\d+)(?:\.\d+)*", info.get("DTSDKName", ""))
         require(sdk_match and int(sdk_match[1]) >= 26, "Archive was not built with the iOS 26 SDK or later.")
-        verify_embedded_archive(apps[0], composition, output)
+        verify_archive(apps[0], composition, output)
         if mode == "export":
             run(["codesign", "--verify", "--deep", "--strict", str(apps[0])])
             options = {"method": "app-store-connect", "destination": "export", "teamID": team,

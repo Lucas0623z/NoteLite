@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreMIDI
+import Darwin
 
 /// MIDI 1.0 stream decoding, including running status, real-time bytes, and split packets.
 struct MIDINoteParser {
@@ -47,15 +48,49 @@ private final class MIDIStreamDecoder: @unchecked Sendable {
     }
 }
 
-private final class MicrophoneFrames: @unchecked Sendable {
+struct MicrophoneFrame: Sendable {
+    let samples: [Float]
+    let sampleRate: Double
+    /// End of the sampled window on the host's monotonic audio clock, in seconds.
+    let endTime: Double
+}
+
+enum PracticeAudioClock {
+    static var now: Double { AVAudioTime.seconds(forHostTime: mach_absolute_time()) }
+}
+
+/// A full pitch-analysis window advances by 1024 samples, rather than discarding
+/// all 4096 samples after each estimate. Only the audio tap accesses this buffer.
+final class MicrophoneFrames: @unchecked Sendable {
     private var samples: [Float] = []
-    func append(_ buffer: AVAudioPCMBuffer) -> [[Float]] {
+    private var sampleRate: Double = 0
+    private var firstSampleTime: Double = 0
+
+    func append(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) -> [MicrophoneFrame] {
         guard let channel = buffer.floatChannelData?[0] else { return [] }
-        samples.append(contentsOf: UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
-        var frames: [[Float]] = []
+        let rate = buffer.format.sampleRate
+        let start = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime)
+            : PracticeAudioClock.now - Double(buffer.frameLength) / rate
+        return append(Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength))),
+                      sampleRate: rate, startTime: start)
+    }
+
+    func append(_ incoming: [Float], sampleRate rate: Double, startTime: Double) -> [MicrophoneFrame] {
+        guard rate.isFinite, rate > 0, startTime.isFinite, !incoming.isEmpty else { return [] }
+        let expected = firstSampleTime + Double(samples.count) / max(1, sampleRate)
+        if samples.isEmpty || sampleRate != rate || abs(startTime - expected) > 0.010 {
+            // Never join audio across a device change or a missing capture interval.
+            samples.removeAll(keepingCapacity: true)
+            firstSampleTime = startTime
+            sampleRate = rate
+        }
+        samples.append(contentsOf: incoming)
+        var frames: [MicrophoneFrame] = []
         while samples.count >= 4096 {
-            frames.append(Array(samples.prefix(4096)))
-            samples.removeFirst(4096)
+            frames.append(MicrophoneFrame(samples: Array(samples.prefix(4096)), sampleRate: rate,
+                                          endTime: firstSampleTime + 4096 / rate))
+            samples.removeFirst(1024)
+            firstSampleTime += 1024 / rate
         }
         return frames
     }
@@ -64,7 +99,7 @@ private final class MicrophoneFrames: @unchecked Sendable {
 @MainActor
 final class NativePracticeInput {
     var onNotes: (([Int]) -> Void)?
-    var onAudio: (([Float], Double) -> Void)?
+    var onAudio: (([MicrophoneFrame]) -> Void)?
     var onError: ((String) -> Void)?
     private var engine: AVAudioEngine?
     private var midiClient = MIDIClientRef()
@@ -102,12 +137,12 @@ final class NativePracticeInput {
                 throw NoteLiteError.server("未找到可用麦克风，请检查系统声音输入设置。")
             }
             let frames = MicrophoneFrames()
-            input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-                let batches = frames.append(buffer)
-                let rate = buffer.format.sampleRate
+            input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, time in
+                let batches = frames.append(buffer, time: time)
+                guard !batches.isEmpty else { return }
                 Task { @MainActor [weak self] in
                     guard let self, self.generation == current else { return }
-                    for batch in batches { self.onAudio?(batch, rate) }
+                    self.onAudio?(batches)
                 }
             }
             tapInstalled = true

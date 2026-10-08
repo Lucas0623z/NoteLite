@@ -38,6 +38,31 @@ struct PracticeIssue: Codable, Identifiable {
     }
 }
 
+struct PracticePositionResult: Codable, Equatable {
+    let index: Int
+    let measure: String
+    let beat: Double
+    let correct: Int
+    let expected: Int
+    let status: String
+}
+
+struct PracticeScope: Codable, Equatable {
+    let part: String
+    let from: Int
+    let to: Int
+}
+
+private struct PracticeMetrics: Decodable {
+    let firstTryCorrect: Int?
+    let total: Int?
+    let results: [PracticePositionResult]?
+    let input: String?
+    let mode: String?
+    let bpm: Double?
+    let scope: PracticeScope?
+}
+
 struct PracticeHistoryRecord: Codable, Identifiable {
     let id: UUID
     let scoreID: UUID
@@ -49,6 +74,14 @@ struct PracticeHistoryRecord: Codable, Identifiable {
     let errors: [PracticeIssue]
     var artifactName: String? = nil
     var partTitle: String? = nil
+    // Optional for records saved before detailed practice metrics were retained.
+    var firstTryCorrect: Int? = nil
+    var total: Int? = nil
+    var results: [PracticePositionResult]? = nil
+    var input: String? = nil
+    var mode: String? = nil
+    var bpm: Double? = nil
+    var scope: PracticeScope? = nil
     var errorCount: Int { errors.count }
 }
 
@@ -81,30 +114,75 @@ final class PracticeHistoryStore: ObservableObject {
         guard let fileURL else { return }
         do {
             // The renderer may represent a measure label as a number or as a string (e.g. pickups).
-            let normalized = (report["errors"] as? [[String: Any]] ?? []).map { issue -> [String: Any] in
-                var value = issue
-                if let label = issue["measure"] as? String {
-                    value["measure"] = label
-                } else if let number = issue["measure"] as? NSNumber {
-                    value["measure"] = number.stringValue
-                } else {
-                    value["measure"] = "—"
-                }
-                return value
-            }
+            let normalized = (report["errors"] as? [[String: Any]] ?? []).map(Self.normalizeMeasure)
             let issues = try JSONDecoder().decode([PracticeIssue].self,
                 from: JSONSerialization.data(withJSONObject: normalized))
+            var metricPayload: [String: Any] = [:]
+            for key in ["firstTryCorrect", "total", "results", "input", "mode", "bpm", "scope"] {
+                if let value = report[key], !(value is NSNull) { metricPayload[key] = value }
+            }
+            if let results = report["results"] as? [[String: Any]] {
+                metricPayload["results"] = results.map(Self.normalizeMeasure)
+            }
+            let metrics = try JSONDecoder().decode(PracticeMetrics.self,
+                from: JSONSerialization.data(withJSONObject: metricPayload))
+            try Self.validate(metrics)
             let record = PracticeHistoryRecord(id: UUID(), scoreID: score.id,
                 title: report["title"] as? String ?? score.filename, date: Date(),
                 durationSeconds: max(0, report["durationSeconds"] as? Double ?? 0),
                 completed: report["completed"] as? Bool ?? false,
                 measureCount: max(0, report["measureCount"] as? Int ?? 0), errors: issues,
-                artifactName: part?.artifactName, partTitle: part?.title)
+                artifactName: part?.artifactName, partTitle: part?.title,
+                firstTryCorrect: metrics.firstTryCorrect, total: metrics.total, results: metrics.results,
+                input: metrics.input, mode: metrics.mode, bpm: metrics.bpm, scope: metrics.scope)
             let updated = Array(([record] + records).prefix(500))
             try JSONEncoder().encode(updated).write(to: fileURL, options: .atomic)
             records = updated
             errorMessage = nil
         } catch { errorMessage = "无法保存练习记录：\(error.localizedDescription)" }
+    }
+
+    func delete(id: UUID) {
+        guard records.contains(where: { $0.id == id }) else { return }
+        replaceRecords(records.filter { $0.id != id })
+    }
+
+    func clear() { replaceRecords([]) }
+
+    private func replaceRecords(_ updated: [PracticeHistoryRecord]) {
+        guard let fileURL else {
+            errorMessage = errorMessage ?? "无法保存练习记录，请先解决本地存储错误。"
+            return
+        }
+        do {
+            try JSONEncoder().encode(updated).write(to: fileURL, options: .atomic)
+            records = updated
+            errorMessage = nil
+        } catch { errorMessage = "无法保存练习记录：\(error.localizedDescription)" }
+    }
+
+    private static func normalizeMeasure(_ item: [String: Any]) -> [String: Any] {
+        var value = item
+        if let label = item["measure"] as? String { value["measure"] = label }
+        else if let number = item["measure"] as? NSNumber { value["measure"] = number.stringValue }
+        else { value["measure"] = "—" }
+        return value
+    }
+
+    private static func validate(_ metrics: PracticeMetrics) throws {
+        if let total = metrics.total, total < 0 { throw NoteLiteError.invalidResponse }
+        if let correct = metrics.firstTryCorrect,
+           correct < 0 || metrics.total.map({ correct > $0 }) == true { throw NoteLiteError.invalidResponse }
+        if let results = metrics.results {
+            guard results.allSatisfy({ $0.index >= 0 && $0.beat.isFinite && $0.correct >= 0 &&
+                $0.expected >= $0.correct && ["correct", "corrected", "missing"].contains($0.status) }),
+                metrics.total.map({ results.count <= $0 }) ?? true,
+                metrics.firstTryCorrect.map({ $0 <= results.count }) ?? true else { throw NoteLiteError.invalidResponse }
+        }
+        if let bpm = metrics.bpm, !bpm.isFinite || bpm <= 0 { throw NoteLiteError.invalidResponse }
+        if let scope = metrics.scope, scope.part.isEmpty || scope.from < 1 || scope.to < scope.from {
+            throw NoteLiteError.invalidResponse
+        }
     }
 }
 

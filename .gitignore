@@ -76,6 +76,10 @@ flatpak/build/*
 
 # Ignore system files
 .DS_Store
+/mobile-ui/node_modules/
+/mobile-ui/dist/
+/apple/NoteLite/MobileUI/
+/bridge/.mobile-preview-jobs/
 Thumb.db
 /bin/
 /build/

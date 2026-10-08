@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">黑白键 · 小猫账号图标</title>
+  <desc id="desc">黑白小猫头像，尖耳、三枚琴键刘海和眨眼表情，下方肩部轮廓表示账号。</desc>
+  <g stroke="#202024" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Account shoulders, behind the head. -->
+    <path d="M28 115C28 99 43 89 64 89S100 99 100 115C100 119 97 121 93 121H35C31 121 28 119 28 115Z" fill="#202024" stroke-width="5"/>
+    <path d="M49 100C53 97 58 96 64 96S75 97 79 100L84 118H44L49 100Z" fill="#FFFFFF" stroke="none"/>
+
+    <!-- One continuous cat silhouette; the ear tips are filled below. -->
+    <path d="M25 49L21 17C20.5 13 23 11 26 13L46 29C57 25 71 25 82 29L102 13C105 11 107.5 13 107 17L103 49C109 56 112 64 110 73C107 87 89 96 64 96S21 87 18 73C16 64 19 56 25 49Z" fill="#FFFFFF" stroke-width="5.5"/>
+    <path d="M25 49L21 17C20.5 13 23 11 26 13L46 29C37 34 30 40 25 49Z" fill="#202024" stroke="none"/>
+    <path d="M103 49L107 17C107.5 13 105 11 102 13L82 29C91 34 98 40 103 49Z" fill="#202024" stroke="none"/>
+    <path d="M29 25L32 37L37 32L29 25Z" fill="#FFFFFF" stroke="none"/>
+    <path d="M99 25L96 37L91 32L99 25Z" fill="#FFFFFF" stroke="none"/>
+
+    <!-- Piano-key fringe: three simple, legible black keys. -->
+    <path d="M41 30L46 49Q46.5 52 49.5 51.5L55 50.5Q57.5 50 57 47.5L54 27C50 27.5 45 28.5 41 30Z" fill="#202024" stroke="none"/>
+    <path d="M60 28.5L62 45Q62.4 48 65.4 47.5L71 46.5Q73.5 46 73 43.5L71 28.7C67.5 28.3 63.7 28.2 60 28.5Z" fill="#202024" stroke="none"/>
+    <path d="M78 27L79.5 40.5Q80 43 82.5 42.5L87 41.5Q89.5 41 89 38.5L90 30C86 28.5 82 27.5 78 27Z" fill="#202024" stroke="none"/>
+
+    <!-- Friendly expression with generous negative space. -->
+    <path d="M35 65C40 59 47 59 52 64" stroke-width="5.5"/>
+    <ellipse cx="84" cy="63" rx="8" ry="10" fill="#202024" stroke="none"/>
+    <circle cx="81.5" cy="59.5" r="2.5" fill="#FFFFFF" stroke="none"/>
+    <path d="M60 72Q64 69 68 72L64 76Z" fill="#202024" stroke="none"/>
+    <path d="M64 75V78M54 79C57 84 62 84 64 79C66 84 71 84 74 79" stroke-width="3.5"/>
+  </g>
+</svg>

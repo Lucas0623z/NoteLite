@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if CLOUD_OMR_MOBILE && EMBEDDED_OMR_RUNTIME
+#error("Cloud and embedded OMR policies must use separate builds.")
+#endif
+
 @main
 @MainActor
 struct NoteLiteApp: App {
@@ -8,7 +12,7 @@ struct NoteLiteApp: App {
 
     var body: some Scene {
         WindowGroup("音伴-你的音乐搭子") {
-            LibraryView()
+            appRoot
                 .environmentObject(library)
                 .environmentObject(history)
                 .tint(NoteLiteTheme.accent)
@@ -39,6 +43,15 @@ struct NoteLiteApp: App {
         }
         #if os(macOS)
         .defaultSize(width: 1440, height: 900)
+        #endif
+    }
+
+    @ViewBuilder private var appRoot: some View {
+        #if os(iOS) && !EMBEDDED_OMR_RUNTIME
+        MobileRootView()
+        #else
+        // Only the explicitly composed legacy runtime build keeps its offline UI.
+        LibraryView()
         #endif
     }
 }

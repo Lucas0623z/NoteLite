@@ -1,6 +1,6 @@
 # 音伴-你的音乐搭子 · 识谱桥接服务
 
-为音伴的基础 Apple 客户端和其他 HTTP 客户端提供 Orpheus AI 识谱接口。服务把上传的 PDF / PNG / JPEG / TIFF 交给本仓库的 Java 批处理引擎，返回 MusicXML、MIDI 和引擎生成的 `.omr` 文件。使用桥接服务时，识谱在运行本服务的电脑或服务器上完成。音伴的完整 iPhone / iPad 构建使用设备内引擎识别新任务，无需此服务；已有远端任务仍可继续连接。
+为音伴的 Apple 客户端和其他 HTTP 客户端提供 Orpheus AI 识谱接口。服务把上传的 PDF / PNG / JPEG / TIFF 交给本仓库的 Java 批处理引擎，返回 MusicXML、MIDI 和引擎生成的 `.omr` 文件。当前 iPhone / iPad 版本通过此接口在服务器上识别图片和 PDF，声音识别与练习评分在设备本地完成。MusicXML / MXL 可以直接导入练习，无需识谱服务。macOS 客户端保留设备内识谱。
 
 仅使用 Python 标准库，无需 `pip install`。需要 **Python 3.10+、JDK 21、本机平台的音伴分发包**，以及与桌面版相同的 OCR 语言数据。Java 21 的预览功能已启用，因此不要将 Java 21 构建的包直接换用其他主版本运行。服务不会自动下载 JDK、语言数据或启动模拟识谱引擎。
 
@@ -44,6 +44,20 @@ python3 bridge/notelite_bridge.py --distribution app/build/install/app --storage
 ## Apple 客户端连接与 HTTPS
 
 让 iPhone / iPad 使用能够访问到的 **HTTPS 地址**，例如 `https://omr.example.com`，并填入相同的令牌。`localhost` 在手机上指手机自身，不能指向你的电脑。
+
+## 手机界面本机联调
+
+先构建上述 Java 分发包，并在 `mobile-ui` 目录执行 `npm ci`。再从仓库根目录运行：
+
+```powershell
+python bridge/start_mobile_preview.py --port 5173
+```
+
+打开 `http://127.0.0.1:5173/`，即可查看手机界面、导入示例或自己的乐谱，并通过本机真实引擎验证云端接口。启动器只监听回环地址，临时令牌保存在进程环境中，网页通过同源代理访问服务。关闭启动器会同时关闭本次启动的界面和服务。本机预览保存在浏览器中的文件、档案和练习记录与 Apple App 的数据独立。
+
+这用于开发联调。正式手机端仍需部署能访问的 HTTPS 服务；本机预览不能替代 Apple 模拟器、签名安装或手机麦克风实测。
+
+## 正式服务部署
 
 可让 Caddy、nginx 或已有的 HTTPS 网关代理到 `127.0.0.1:8765`。例如部署在有域名、DNS 和 TLS 条件的服务器上，Caddy 配置为：
 

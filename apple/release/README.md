@@ -8,15 +8,17 @@
 
 | 设置 | 用途 |
 | --- | --- |
+| `engine: cloud`（默认） | 新手机 UI；OMR 通过 HTTPS 云端服务处理，音频/MIDI 在本机分析。设备 archive 不打包 JVM 和完整 OMR 资源。 |
+| `engine: embedded` | 保留旧完整引擎归档和原生资源校验路线，用于旧嵌入版维护；新手机客户端使用云端策略。 |
 | `mode: verify`（默认） | 构建真正的 iOS 设备 archive，检查版本、Bundle ID 和 SDK；无需 Apple 密钥。产物未签名，不能安装或上传。 |
 | `mode: export` | 使用下面的签名密钥生成 App Store IPA 和 archive。 |
 | `upload: false`（默认） | 只导出产物。 |
 | `upload: true` | 必须选择 `export`；先调用 Apple 验证，再上传 App Store Connect。上传后仍需等待处理和 App Review。 |
 | `bundle_id` / `team_id` | 必须与 Apple Developer 注册的 App ID、描述文件及 App Store Connect 记录一致。导出时必填 Team ID。 |
 | `version` / `build_number` | 默认版本 `1.0.0`；空构建号使用工作流 run number。已上传的版本/构建号组合不能重复；重跑旧任务时请改用新的构建号。 |
-| `acceptance_run_id` | `export` 必填：同一源码提交的 **Audiveris embedded iPhone and iPad acceptance** 成功运行编号。其运行时和 OCR 构建来源也必须与本次一致。 |
+| `acceptance_run_id` | `export` 必填：云端客户端要求同一源码提交的 **Apple clients** 成功运行编号，iPhone、iPad 和 native-clients 三项必须通过；旧嵌入路线仍要求同一源码及原生资源来源的完整引擎验收。 |
 
-工作流使用 GitHub 的 `macos-26` runner，选择已安装的最高稳定 Xcode，并在构建前后验证 Xcode 26 / iOS SDK 26 最低要求。产物在 Actions 中保留 7 天，正式版本请下载保存。`verify` 包含网页练习模块测试及完整离线引擎的无签名设备构建；真机交互、麦克风和 MIDI 仍须验收。完整嵌入式工作流负责 iPhone / iPad 模拟器整谱识别和练习页面测试，Apple clients 工作流继续负责基础客户端测试。
+工作流使用 GitHub 的 `macos-26` runner，选择已安装的最高稳定 Xcode，并在构建前后验证 Xcode 26 / iOS SDK 26 最低要求。产物在 Actions 中保留 7 天，正式版本请下载保存。云端 `verify` 会测试并打包新 MobileUI 和本地练习模块，校验实际 archive/IPA 与网页资源哈希、设备架构、iPhone/iPad 支持，并拒绝意外混入完整 OMR 资源。Apple clients 运行新导航、真实 MusicXML 导入和保存后多部分练习的模拟器测试并导出截图。真机交互、麦克风和 MIDI 仍须验收；OMR 云服务地址和用户独立凭据需要另行配置。
 
 ## 防止发布包遗漏识谱引擎
 

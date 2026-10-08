@@ -64,6 +64,9 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
     private var inputTask: Task<Void, Never>?
     private var documentID: String?
     private var forwardingAudio = false
+    private var pendingAudio: [MicrophoneFrame] = []
+    private var audioClockOffset: Double?
+    private var audioGeneration = UUID()
     private var pageURL: URL?
     private var isClosing = false
     private var closeFinished = false
@@ -87,15 +90,9 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         input.onNotes = { [weak self] notes in
             self?.call("for (const note of notes) window.NoteLiteNative?.noteOn(note)", arguments: ["notes": notes])
         }
-        input.onAudio = { [weak self] samples, sampleRate in
-            guard let self, !self.forwardingAudio else { return }
-            self.forwardingAudio = true
-            self.webView.callAsyncJavaScript("window.NoteLiteNative?.audioFrame(samples, sampleRate)",
-                arguments: ["samples": samples, "sampleRate": sampleRate], in: nil, in: .page) { [weak self] _ in
-                    self?.forwardingAudio = false
-                }
-        }
+        input.onAudio = { [weak self] frames in self?.enqueueAudio(frames) }
         input.onError = { [weak self] error in
+            self?.resetAudioPipeline()
             self?.call("window.NoteLiteNative?.inputError(error)", arguments: ["error": error])
         }
     }
@@ -105,7 +102,7 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         guard documentID != identity || errorMessage != nil else { return }
         inputTask?.cancel()
         input.stop()
-        forwardingAudio = false
+        resetAudioPipeline()
         isClosing = false
         closeFinished = false
         closeCompletions.removeAll()
@@ -134,17 +131,20 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         switch type {
         case "ready":
             if let source {
-                call("await window.NoteLiteNative.loadScore(data, title, id)",
-                    arguments: ["data": source.data, "title": source.title, "id": source.id], reportErrors: true)
+                call("await window.NoteLiteNative.loadScore(data, title, id); window.NoteLiteNative.applyPreferences(preferences)",
+                    arguments: ["data": source.data, "title": source.title, "id": source.id,
+                        "preferences": UserDefaults.standard.dictionary(forKey: "Yinban.practicePreferences") ?? [:]], reportErrors: true)
             }
         case "startInput":
             guard !isClosing else { return }
             guard let mode = body["input"] as? String, let requestID = body["requestId"] else { return }
             inputTask?.cancel()
+            resetAudioPipeline()
             inputTask = Task { [weak self] in
                 guard let self else { return }
                 do {
                     try Task.checkCancellation()
+                    if mode == "microphone" { try await synchronizeAudioClock() }
                     try await input.start(mode)
                     try Task.checkCancellation()
                     call("window.NoteLiteNative.inputResult(requestId, null)", arguments: ["requestId": requestID])
@@ -155,7 +155,7 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
                     }
                 }
             }
-        case "stopInput": inputTask?.cancel(); input.stop()
+        case "stopInput": inputTask?.cancel(); input.stop(); resetAudioPipeline()
         case "report":
             if let report = body["report"] as? [String: Any] { onReport?(report) }
         case "close": close { [weak self] in self?.onClose?() }
@@ -166,12 +166,14 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
     func suspend() {
         inputTask?.cancel()
         input.stop()
+        resetAudioPipeline()
         call("window.NoteLiteNative?.suspend?.()")
     }
 
     func close(completion: (() -> Void)? = nil) {
         inputTask?.cancel()
         input.stop()
+        resetAudioPipeline()
         if closeFinished { completion?(); return }
         if let completion { closeCompletions.append(completion) }
         guard !isClosing else { return }
@@ -190,6 +192,84 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         webView.callAsyncJavaScript(code, arguments: arguments, in: nil, in: .page) { [weak self] result in
             if reportErrors, case .failure(let error) = result { self?.errorMessage = error.localizedDescription }
         }
+    }
+
+    private func resetAudioPipeline() {
+        audioGeneration = UUID()
+        pendingAudio.removeAll(keepingCapacity: true)
+        audioClockOffset = nil
+        forwardingAudio = false
+    }
+
+    func readJavaScriptAudioClock() async throws -> Double {
+        // The async overload uses contentWorld:, whereas the callback overload uses a second in:.
+        let result: Any? = try await webView.callAsyncJavaScript("return performance.now()", arguments: [:], in: nil, contentWorld: .page)
+        guard let milliseconds = result as? Double, milliseconds.isFinite else {
+            throw NoteLiteError.server("无法准备声音处理时钟，请重新开始练习。")
+        }
+        return milliseconds
+    }
+
+    private func synchronizeAudioClock() async throws {
+        let generation = audioGeneration
+        var best: (roundTrip: Double, offset: Double)?
+        for _ in 0..<3 {
+            let before = PracticeAudioClock.now
+            let milliseconds = try await readJavaScriptAudioClock()
+            let after = PracticeAudioClock.now
+            try Task.checkCancellation()
+            guard generation == audioGeneration else { throw CancellationError() }
+            let roundTrip = after - before
+            if best == nil || roundTrip < best!.roundTrip {
+                best = (roundTrip, milliseconds - (before + after) * 500)
+            }
+        }
+        // Audio timestamps and performance.now() are both monotonic but have
+        // different origins. Prefer the shortest round trip to reduce scheduling
+        // error, and reject a stalled page rather than publish an inaccurate clock.
+        guard let best, best.roundTrip <= 0.100 else {
+            throw NoteLiteError.server("声音处理准备超时，请稍后重新开始练习。")
+        }
+        audioClockOffset = best.offset
+    }
+
+    private func enqueueAudio(_ frames: [MicrophoneFrame]) {
+        guard !isClosing, audioClockOffset != nil else { return }
+        pendingAudio.append(contentsOf: frames)
+        guard pendingAudio.count <= 16 else { audioBackpressureFailed(); return }
+        forwardPendingAudio()
+    }
+
+    private func forwardPendingAudio() {
+        guard !forwardingAudio, !pendingAudio.isEmpty, let offset = audioClockOffset else { return }
+        guard PracticeAudioClock.now - pendingAudio[0].endTime <= 0.150 else {
+            audioBackpressureFailed(); return
+        }
+        // One JS call carries overlap windows in order, so a busy call cannot
+        // silently discard the remaining windows from the same audio tap.
+        let frames = Array(pendingAudio.prefix(4))
+        pendingAudio.removeFirst(frames.count)
+        let payload = frames.map { frame -> [String: Any] in
+            ["samples": frame.samples, "sampleRate": frame.sampleRate,
+             "endTime": frame.endTime * 1000 + offset]
+        }
+        let generation = audioGeneration
+        forwardingAudio = true
+        webView.callAsyncJavaScript("for (const frame of frames) window.NoteLiteNative?.audioFrame(frame.samples, frame.sampleRate, frame.endTime)",
+            arguments: ["frames": payload], in: nil, in: .page) { [weak self] result in
+                guard let self, self.audioGeneration == generation else { return }
+                self.forwardingAudio = false
+                if case .failure = result { self.audioBackpressureFailed(); return }
+                self.forwardPendingAudio()
+            }
+    }
+
+    private func audioBackpressureFailed() {
+        inputTask?.cancel()
+        input.stop()
+        resetAudioPipeline()
+        call("window.NoteLiteNative?.inputError(error)",
+             arguments: ["error": "声音处理暂时跟不上，练习已暂停。准备好后请继续练习。"])
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -211,14 +291,14 @@ final class PracticeWebController: NSObject, ObservableObject, WKScriptMessageHa
         guard (error as NSError).code != NSURLErrorCancelled else { return }
         inputTask?.cancel()
         input.stop()
-        forwardingAudio = false
+        resetAudioPipeline()
         errorMessage = error.localizedDescription
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         inputTask?.cancel()
         input.stop()
-        forwardingAudio = false
+        resetAudioPipeline()
         errorMessage = "练习页面已停止，请重新打开；此前保存的记录仍在本机。"
     }
 }

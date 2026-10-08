@@ -8,6 +8,7 @@ final class LocalOMRUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launch()
+        try skipLegacySelectorsForRedesignedMobileUI(app)
         let entry = app.descendants(matching: .any).matching(identifier: "local-omr-open").firstMatch
         if !entry.exists {
             // The library toolbar exposes debug actions in its menu.

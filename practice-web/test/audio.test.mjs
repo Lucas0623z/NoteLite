@@ -82,6 +82,26 @@ test('actual digital silence and white noise yield no false note attacks',()=>{
   measured.push({profile:'silence_and_white_noise',frames:120,falseAttacks});
 });
 
+test('actual PCM at native 1024-sample hops detects short notes and repeated attacks',()=>{
+  const sequences=[{name:'150ms_pitch_changes',segments:[[60,150],[62,150],[64,150],[65,150]],expected:[60,62,64,65]},
+    {name:'same_pitch_with_80ms_silence',segments:[[69,150],[null,80],[69,150]],expected:[69,69]}];
+  for(const sampleRate of rates)for(const sequence of sequences){
+    const pcm=[];
+    for(const [midi,milliseconds] of sequence.segments)for(let i=0;i<Math.round(sampleRate*milliseconds/1000);i++){
+      pcm.push(midi===null?0:.2*Math.sin(2*Math.PI*frequency(midi)*i/sampleRate));
+    }
+    const gate=new PitchGate(),events=[];
+    for(let end=bufferSize;end<=pcm.length;end+=1024){
+      const data=Float32Array.from(pcm.slice(end-bufferSize,end)),tail=data.subarray(bufferSize-1024);
+      const [hz,clarity]=detector.findPitch(data,sampleRate),event=gate.push(hz,clarity,rms(tail),end/sampleRate*1000);
+      if(event)events.push(event);
+    }
+    assert.deepEqual(events.map(event=>event.midi),sequence.expected,`${sequence.name} at ${sampleRate} Hz`);
+    measured.push({profile:sequence.name,sampleRate,hopSamples:1024,intendedAttacks:sequence.expected.length,
+      detectedAttacks:events.length,detectedMidi:events.map(event=>event.midi)});
+  }
+});
+
 test('record realistic limits: loud noise and no-silence repeated same-pitch attacks',()=>{
   const stress=[];
   for(const [name,harmonics] of Object.entries(profiles))for(const midi of [40,60,79]) {
@@ -96,7 +116,7 @@ test('record realistic limits: loud noise and no-silence repeated same-pitch att
   assert.equal(events.length,1);
   measured.push({profile:'stress_5dB',cases:stress,detectedCorrect:stress.filter(c=>c.correct).length,total:stress.length},
     {profile:'same_pitch_without_silence',intendedAttacks:2,detectedAttacks:events.length,
-      limitation:'No amplitude-onset detector; repeated pitch needs at least three unvoiced frames.'});
+      limitation:'No amplitude-onset detector; repeated pitch needs sustained quiet audio (20 ms between quiet estimates).'});
 });
 
 test.after(()=>{

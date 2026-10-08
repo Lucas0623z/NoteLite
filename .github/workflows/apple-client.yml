@@ -5,6 +5,7 @@ on:
     branches: [main, master, codex/audiveris-apple-builds]
     paths:
       - "apple/**"
+      - "mobile-ui/**"
       - "practice-web/**"
       - "app/res/practice/**"
       - "tools/audiveris-port/manage-embedded-simulators.py"
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - "apple/**"
+      - "mobile-ui/**"
       - "practice-web/**"
       - "app/res/practice/**"
       - "tools/audiveris-port/manage-embedded-simulators.py"
@@ -74,6 +76,15 @@ jobs:
           npm ci
           npm test
           npm run build
+      - name: Build bundled mobile interface
+        working-directory: mobile-ui
+        run: |
+          npm ci
+          npm run typecheck
+          npm test --if-present
+          npm run build
+          mkdir -p ../apple/NoteLite/MobileUI
+          cp -R dist/. ../apple/NoteLite/MobileUI/
       - name: Generate Xcode project
         id: generate
         working-directory: apple
@@ -123,6 +134,7 @@ jobs:
               diff -r ../app/res/practice/icons "$resources/practice/icons"
             fi
           done
+          test -s Build/Build/Products/Release-iphonesimulator/NoteLite.app/MobileUI/index.html
       - name: Package unsigned native builds
         working-directory: apple
         run: |
@@ -187,6 +199,15 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Build bundled mobile interface
+        working-directory: mobile-ui
+        run: |
+          npm ci
+          npm run typecheck
+          npm test --if-present
+          npm run build
+          mkdir -p ../apple/NoteLite/MobileUI
+          cp -R dist/. ../apple/NoteLite/MobileUI/
       - name: Generate Xcode project
         working-directory: apple
         run: |
@@ -217,6 +238,7 @@ jobs:
         run: |
           xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -only-testing:NoteLiteTests -only-testing:NoteLiteUITests/MobileInterfaceUITests \
             -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 360 \

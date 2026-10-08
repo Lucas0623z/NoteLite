@@ -35,6 +35,9 @@ def native_class(owner, methods):
 
 class EmbeddedReleaseTests(unittest.TestCase):
     def setUp(self):
+        engine_patch = patch.dict(os.environ, {"RELEASE_ENGINE": "embedded"})
+        engine_patch.start()
+        self.addCleanup(engine_patch.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -482,6 +485,100 @@ class EmbeddedReleaseTests(unittest.TestCase):
                              for call in self.mock_run.call_args_list))
         archive_call = next(call.args[0] for call in self.mock_run.call_args_list if "archive" in call.args[0])
         self.assertEqual(archive_call[archive_call.index("-project") + 1], str((self.project / "NoteLite.xcodeproj").resolve()))
+
+
+class CloudReleaseTests(unittest.TestCase):
+    def setUp(self):
+        engine_patch = patch.dict(os.environ, {"RELEASE_ENGINE": "cloud"})
+        engine_patch.start()
+        self.addCleanup(engine_patch.stop)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.app = self.root / "Yinban.app"
+        self.app.mkdir()
+        self.practice = self.root / "practice-source"
+        self.mobile = self.root / "mobile-source"
+        for source, installed in ((self.practice, "practice"), (self.mobile, "MobileUI")):
+            source.mkdir()
+            for name in ("index.html", "assets/app.js"):
+                original = source / name
+                original.parent.mkdir(parents=True, exist_ok=True)
+                original.write_text(f"{installed}/{name}")
+            shutil.copytree(source, self.app / installed)
+        for name, value in (("Assets.car", b"catalog"), ("NoteLite", b"binary")):
+            (self.app / name).write_bytes(value)
+        self.info = {"CFBundleExecutable": "NoteLite", "UIDeviceFamily": [1, 2],
+                     "CFBundleIdentifier": "com.example.yinban", "CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "1"}
+        (self.app / "Info.plist").write_bytes(plistlib.dumps(self.info))
+        self.project = self.root / "NoteLite.xcodeproj"
+        self.project.mkdir()
+        self.conditions = "CLOUD_OMR_MOBILE"
+        self.platform = "IOS"
+        self.run_metadata = {"id": 123, "head_sha": "a" * 40, "conclusion": "success",
+                             "path": ".github/workflows/apple-client.yml", "html_url": "https://github.com/example/repo/actions/runs/123"}
+        self.jobs = [{"name": name, "conclusion": "success"} for name in ("iPhone interface", "iPad interface", "native-clients")]
+        for name, value in (("PRACTICE_SOURCE", self.practice), ("MOBILE_SOURCE", self.mobile), ("CLOUD_PROJECT", self.project)):
+            patcher = patch.object(release, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(release, "run", side_effect=self.command)
+        self.mock_run = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def command(self, args, **kwargs):
+        if "-showBuildSettings" in args:
+            return json.dumps([{"target": "NoteLite", "buildSettings": {
+                "SWIFT_ACTIVE_COMPILATION_CONDITIONS": self.conditions, "PLATFORM_NAME": "iphoneos", "ARCHS": "arm64"}}])
+        if "vtool" in args:
+            return f"platform {self.platform}"
+        if args[0] == "gh":
+            return json.dumps({"jobs": self.jobs} if "/jobs?" in args[-1] else self.run_metadata)
+        return ""
+
+    def test_cloud_archive_verifies_mobile_and_local_practice_without_engine(self):
+        release.verify_cloud_archive(self.app, {"kind": "cloud"}, self.root)
+        report = json.loads((self.root / "cloud-archive-inventory.json").read_text())
+        self.assertEqual(report["recognitionLocation"], "cloud")
+        self.assertEqual(report["audioLocation"], "device")
+        self.assertEqual(len(report["resources"]), 4)
+
+    def test_cloud_archive_rejects_changed_mobile_bundle_or_missing_practice(self):
+        (self.app / "MobileUI/assets/app.js").write_text("tampered")
+        with self.assertRaisesRegex(release.ReleaseError, "MobileUI resource differs"):
+            release.verify_cloud_archive(self.app, {"kind": "cloud"}, self.root)
+        shutil.copyfile(self.mobile / "assets/app.js", self.app / "MobileUI/assets/app.js")
+        (self.app / "practice/index.html").unlink()
+        with self.assertRaisesRegex(release.ReleaseError, "Missing or escaped"):
+            release.verify_cloud_archive(self.app, {"kind": "cloud"}, self.root)
+
+    def test_cloud_archive_rejects_embedded_resources_and_simulator(self):
+        (self.app / "OMRResources").mkdir()
+        with self.assertRaisesRegex(release.ReleaseError, "embedded JVM"):
+            release.verify_cloud_archive(self.app, {"kind": "cloud"}, self.root)
+        (self.app / "OMRResources").rmdir()
+        self.platform = "IOSSIMULATOR"
+        with self.assertRaisesRegex(release.ReleaseError, "not an iOS device"):
+            release.verify_cloud_archive(self.app, {"kind": "cloud"}, self.root)
+
+    def test_cloud_build_requires_cloud_policy_and_excludes_embedded_policy(self):
+        with patch.object(release, "settings", return_value=("verify", False, "com.example.yinban", "", "1.0.0", "1")):
+            self.assertEqual(release.cloud_build()["kind"], "cloud")
+            self.conditions = "CLOUD_OMR_MOBILE EMBEDDED_OMR_RUNTIME"
+            with self.assertRaisesRegex(release.ReleaseError, "cloud policy"):
+                release.cloud_build()
+
+    def test_cloud_export_requires_exact_source_and_both_simulator_results(self):
+        with patch.object(release, "settings", return_value=("export", False, "com.example.yinban", "TESTTEAM00", "1.0.0", "1")), \
+                patch.dict(os.environ, {"RELEASE_ACCEPTANCE_RUN": "123", "GITHUB_REPOSITORY": "example/repo", "GITHUB_SHA": "a" * 40}):
+            self.assertEqual(release.cloud_build()["acceptance"]["id"], 123)
+            self.run_metadata["head_sha"] = "b" * 40
+            with self.assertRaisesRegex(release.ReleaseError, "exact source"):
+                release.cloud_build()
+            self.run_metadata["head_sha"] = "a" * 40
+            self.jobs[1]["conclusion"] = "failure"
+            with self.assertRaisesRegex(release.ReleaseError, "iPhone, iPad"):
+                release.cloud_build()
 
 
 if __name__ == "__main__":

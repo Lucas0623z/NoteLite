@@ -15,6 +15,8 @@ let score,session,groups=[],graphics=[],phase='idle',scoreID=null;
 let micStream,audioContext,micAnalyser,animation,midiAccess,selectedMidi,inputGeneration=0;
 let playback=[],playbackTimer,tickTimer,beatTimer,beatStartTimer,createdAt,activeStartedAt=null,elapsedMilliseconds=0,lastReport=null;
 let renderedRange='',resizeTimer;
+let microphoneWindowMs=4096/48000*1000;
+const preferences={soundEnabled:true,encouragementEnabled:true};
 const gate=new PitchGate(),buffer=new Float32Array(4096),detector=PitchDetector.forFloat32Array(4096);
 const labels={wrong:'错音',extra:'多弹 / 过早',missing:'漏音',early:'抢拍',late:'慢拍',intonation:'音准偏差'};
 
@@ -23,7 +25,7 @@ function guard(fn){return(...args)=>Promise.resolve().then(()=>fn(...args)).catc
 function openSettings(focus){$('settings-message').textContent='';if(!$('settings').open)$('settings').showModal();if(focus)$(focus)?.focus();}
 function view(name){document.body.dataset.view=name;$('review-view').hidden=name!=='review';$('practice-nav').classList.toggle('selected',name==='practice');$('review-nav').classList.toggle('selected',name==='review');if(name==='practice'&&score&&phase!=='loading')requestAnimationFrame(()=>{renderScore(true);if(session?.active)cursorAt(session.current);});}
 function setPhase(next){
-  phase=next;document.body.dataset.phase=phase;
+  phase=next;if(document.body.dataset.phase!==phase)document.body.dataset.phase=phase;
   const locked=['connecting','active','paused','loading'].includes(phase);
   for(const id of ['part','instrument-choice','input','mode','bpm','a4','from','to','verified','import','demo','listen','settings-listen'])$(id).disabled=locked;
   $('start').disabled=phase==='connecting'||phase==='loading'||!score;
@@ -93,13 +95,21 @@ function receive(midi,time=performance.now(),cents=0){
   $('heard').textContent=noteName(midi)+(Math.abs(cents)>3?` ${cents>0?'+':''}${Math.round(cents)}¢`:'');
   const result=session.noteOn(midi,time,cents);if(!result)return;
   if(result.kind==='wrong'||result.kind==='extra'){colorGroup(result.group,'#b84f45');message(`第 ${result.group.measure} 小节 · 第 ${formatBeat(result.group.beat)} 拍：应弹 ${result.group.notes.map(n=>noteName(n.midi)).join(' + ')}，听到 ${noteName(midi)}。`,'warning');}
-  else if(result.kind==='correct'){colorGroup(result.group,'#417f62');message(result.complete?'这个位置已弹对，继续下一音。':'音高正确，请继续弹齐和弦。');}
+  else if(result.kind==='correct'){
+    colorGroup(result.group,'#417f62');
+    const position=result.complete?session.current:result.group;
+    message(preferences.encouragementEnabled?(result.complete?'这个位置已弹对，继续下一音。':'音高正确，请继续弹齐和弦。'):position?`第 ${position.measure} 小节 · 第 ${formatBeat(position.beat)} 拍`:'本段已完成');
+  }
   update();
 }
-function processAudio(samples,sampleRate){
+function processAudio(samples,sampleRate,frameEndTimeMs=performance.now()){
   if(phase!=='active'||$('input').value!=='microphone'||samples.length!==4096||!(sampleRate>=8000&&sampleRate<=192000))return;
-  buffer.set(samples);const rms=Math.sqrt(buffer.reduce((sum,x)=>sum+x*x,0)/buffer.length),[hz,clarity]=detector.findPitch(buffer,sampleRate);
-  const result=gate.push(hz*440/Number($('a4').value),clarity,rms);if(result)receive(result.midi,performance.now(),result.cents);
+  if(!Number.isFinite(frameEndTimeMs))return;
+  microphoneWindowMs=buffer.length/sampleRate*1000;
+  buffer.set(samples);const tail=buffer.subarray(buffer.length-1024),rms=Math.sqrt(tail.reduce((sum,x)=>sum+x*x,0)/tail.length),[hz,clarity]=detector.findPitch(buffer,sampleRate);
+  // Use the capture clock and the first stable window's centre. WebKit scheduling
+  // or the confirmation frames must not make a played note appear late.
+  const result=gate.push(hz*440/Number($('a4').value),clarity,rms,frameEndTimeMs);if(result)receive(result.midi,result.time-microphoneWindowMs/2,result.cents);
 }
 async function context(){audioContext??=new AudioContext();if(audioContext.state==='suspended')await audioContext.resume();return audioContext;}
 async function connectMic(){
@@ -130,10 +140,14 @@ function releaseInput(){
 function stopDuration(){if(activeStartedAt!==null){elapsedMilliseconds+=performance.now()-activeStartedAt;activeStartedAt=null;}}
 function startClock(ctx,fresh){
   if(session.mode!=='tempo')return;const beat=60000/session.bpm,now=performance.now();
-  if(fresh){session.begin(now+4*beat);for(let i=0;i<4;i++)tone(ctx,880,i*beat/1000,.06,.07);message('预备 4 拍，再开始演奏。');}
+  const click=(delay,duration,volume)=>{if(preferences.soundEnabled&&ctx)tone(ctx,880,delay,duration,volume);};
+  if(fresh){session.begin(now+4*beat);for(let i=0;i<4;i++)click(i*beat/1000,.06,.07);message('预备 4 拍，再开始演奏。');}
   const nextBeat=session.startedAt+Math.max(0,Math.ceil((now-session.startedAt)/beat))*beat;
-  beatStartTimer=setTimeout(()=>{if(phase==='active'){tone(ctx,880,0,.04,.035);beatTimer=setInterval(()=>{if(phase==='active')tone(ctx,880,0,.04,.035);},beat);}},Math.max(0,nextBeat-now));
-  tickTimer=setInterval(()=>{if(phase==='active'){const previous=session.index;session.tick(performance.now());if(previous!==session.index)update();}},40);
+  beatStartTimer=setTimeout(()=>{if(phase==='active'){click(0,.04,.035);beatTimer=setInterval(()=>{if(phase==='active')click(0,.04,.035);},beat);}},Math.max(0,nextBeat-now));
+  // Confirmed microphone events carry their capture time, but can arrive after
+  // the window, stability check and bounded WebKit queue. Do not time out a note
+  // before those pending samples can be graded; noteOn still checks real timing.
+  tickTimer=setInterval(()=>{if(phase==='active'){const previous=session.index;const captureGrace=$('input').value==='microphone'?Math.max(300,microphoneWindowMs+250):0;session.tick(performance.now()-captureGrace);if(previous!==session.index)update();}},40);
 }
 async function start(){
   if(phase==='active'){pause();return;}if(phase==='paused'){await resume();return;}
@@ -147,7 +161,7 @@ async function start(){
   candidate.metadata={input,instrument:$('instrument').textContent,scope:currentOptions(),a4};
   stopPlayback();const generation=++inputGeneration;setPhase('connecting');message('正在连接演奏输入…');
   try{
-    const ctx=candidate.mode==='tempo'?await context():null;if(generation!==inputGeneration)return;
+    const ctx=candidate.mode==='tempo'&&preferences.soundEnabled?await context():null;if(generation!==inputGeneration)return;
     if(!await connectInput()||generation!==inputGeneration)return;
     if(ctx?.state==='suspended')await ctx.resume();if(generation!==inputGeneration)return;
     session=candidate;session.active=true;createdAt=new Date();elapsedMilliseconds=0;activeStartedAt=performance.now();lastReport=null;
@@ -162,7 +176,7 @@ function pause(){
 async function resume(){
   if(phase!=='paused'||!session?.current)return;const generation=++inputGeneration;setPhase('connecting');message('正在重新连接…');
   try{
-    const ctx=session.mode==='tempo'?await context():null;if(generation!==inputGeneration)return;
+    const ctx=session.mode==='tempo'&&preferences.soundEnabled?await context():null;if(generation!==inputGeneration)return;
     if(!await connectInput()||generation!==inputGeneration)return;
     if(ctx?.state==='suspended')await ctx.resume();if(generation!==inputGeneration)return;
     session.resume(performance.now());activeStartedAt=performance.now();setPhase('active');message('继续演奏当前音。');startClock(ctx,false);update();
@@ -176,7 +190,7 @@ function reportData(){
 function finish(showReview=true){
   stopDuration();releaseInput();
   if(!session){setPhase('idle');return null;}
-  if(lastReport){setPhase('finished');if(showReview){renderReport();view('review');}return lastReport;}
+  if(lastReport){if(phase!=='finished')setPhase('finished');if(showReview){renderReport();view('review');}return lastReport;}
   session.finish();lastReport=reportData();bridge.post({type:'report',report:lastReport});setPhase('finished');osmd.cursor.hide();
   $('position').textContent=lastReport.completed?'本段已完成':'练习已结束';message(lastReport.completed?'本段已完成。可以查看记录，重练难点。':'练习记录已保留。未演奏的部分不计为弹对。');renderReport();if(showReview)view('review');return lastReport;
 }
@@ -255,8 +269,15 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
 new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(score&&phase!=='loading'){renderScore();if(session?.active)cursorAt(session.current);}},100);}).observe($('score'));
 window.NoteLiteNative={
   async loadScore(base64,title,id){if(typeof base64!=='string'||base64.length>21*1024*1024)throw new Error('乐谱文件过大。');const bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));await load(readBytes(bytes),title,id);},
+  applyPreferences(values={}){
+    if(!values||typeof values!=='object')return;
+    for(const key of ['soundEnabled','encouragementEnabled'])if(typeof values[key]==='boolean')preferences[key]=values[key];
+    if(['piano','strings','winds','guitar','other','auto'].includes(values.instrument)&&!['connecting','active','paused','loading'].includes(phase)){
+      $('instrument-choice').value=values.instrument;configure(true);
+    }
+  },
   inputResult:(requestId,error)=>bridge.inputResult(requestId,error),noteOn:midi=>receive(midi,performance.now()),audioFrame:processAudio,
-  inputError(error){pause();message(String(error),'warning');},suspend:pause,finish:()=>finish(false)
+  inputError(error){pause();message(String(error),'warning');},suspend:pause,finish:()=>finish(false),getReport:()=>lastReport||reportData()
 };
 setPhase('idle');
 if(bridge.available){$('import').hidden=true;$('demo').hidden=true;$('report').hidden=true;bridge.post({type:'ready'});}
