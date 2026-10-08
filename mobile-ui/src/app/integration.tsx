@@ -26,7 +26,7 @@ export function ConnectedScoresPage({ isDark, normalImage, pressedImage }: { isD
     <input ref={cameraInput} type="file" accept="image/*" capture="environment" aria-label="拍摄曲谱" className="hidden" onChange={event => void onImport(event)} />
     {importLanding && state.records.length > 0 && <button aria-label="返回我的曲谱" onClick={() => setImportLanding(false)} className="absolute top-3 left-4 min-h-11 px-2 text-sm font-bold text-[#999]">‹ 返回我的曲谱</button>}
     {hero ? <button type="button" disabled={!state.canImport} aria-label="上传文件、图片或拍照识谱，开启你的专属陪练" onClick={() => setUploadOpen(true)} className="group relative block w-full max-w-[400px] cursor-pointer touch-manipulation rounded-[18px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#67db23]">
-      <img src={normalImage} alt="作曲家们陪你练琴：上传文件、图片或拍照识谱，开启你的专属陪练吧！" draggable={false} className="block h-auto w-full select-none group-active:opacity-0" />
+      <img src={normalImage} alt="作曲家们陪你练琴：上传文件、图片或拍照识谱，开启你的专属陪练吧！" draggable={false} className="pointer-events-none block h-auto w-full select-none group-active:opacity-0" />
       <img src={pressedImage} alt="" aria-hidden="true" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain opacity-0 group-active:opacity-100" />
     </button> : <div className="mb-5 flex items-center justify-between gap-2"><h1 className="text-[23px] font-bold">我的曲谱</h1><button aria-label="导入乐谱" disabled={!state.canImport} onClick={() => { existingIDs.current = new Set(state.records.map(record => record.id)); setImportLanding(true); }} className={button}>导入乐谱</button></div>}
     {!hero && <div className="space-y-4">{state.records.map(record => {
