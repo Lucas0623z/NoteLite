@@ -1,6 +1,28 @@
 name: Apple cloud client signed release
 
 on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "verify = unsigned iOS device archive; export = signed IPA"
+        type: string
+        default: verify
+      upload:
+        description: "Upload the verified signed IPA for TestFlight processing (export only)"
+        type: boolean
+        default: false
+      acceptance_run_id:
+        description: "Successful Apple clients workflow run for this exact commit, all three native platforms"
+        type: string
+        required: true
+      version:
+        description: "App version"
+        type: string
+        default: "1.0.0"
+      build_number:
+        description: "Build number; empty uses this workflow run number"
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       mode:

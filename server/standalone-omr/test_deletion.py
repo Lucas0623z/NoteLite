@@ -19,7 +19,9 @@ import server
 
 TOKEN="synthetic-deletion-test-"+"a"*40
 XML=b'<score-partwise><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure><attributes><divisions>1</divisions></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration></note></measure></part></score-partwise>'
-PNG=b'\x89PNG\r\n\x1a\n'+b'\0'*100
+# Complete 1x1 grayscale PNG with IHDR/IDAT/IEND and valid chunk CRCs.
+# The production input guard must run unchanged before the process race test.
+PNG=bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b550000000a49444154789c63f80f0001010100b138f6140000000049454e44ae426082')
 
 
 def wait_for(predicate, timeout=5):
@@ -59,6 +61,10 @@ while True: time.sleep(.05)
         self.temp.cleanup()
     def submit(self,data=XML,extension="musicxml",job_id=None):
         return self.service.submit("synthetic."+extension,io.BytesIO(data),len(data),job_id)
+    def test_process_group_fixture_passes_real_png_input_validation_on_every_platform(self):
+        path=self.root/"valid-fixture.png";path.write_bytes(PNG)
+        server.validate_input(path,".png")
+        self.assertEqual((int.from_bytes(PNG[16:20],"big"),int.from_bytes(PNG[20:24],"big")),(1,1))
     def test_running_converter_is_stopped_before_directory_delete_and_retry_is_idempotent(self):
         job=self.submit();folder=self.service.directory(job["id"])
         wait_for(lambda:(folder/"midi-ready").is_file())
@@ -81,7 +87,7 @@ while True: time.sleep(.05)
     @unittest.skipUnless(os.name=="posix","production POSIX process-group cancellation")
     def test_actual_process_group_kills_descendant_after_leader_exit_and_prevents_recreation(self):
         job=self.submit(PNG,"png");folder=self.service.directory(job["id"])
-        wait_for(lambda:(folder/"child.pid").is_file())
+        wait_for(lambda:(folder/"child.pid").is_file() and (folder/"child.pid").read_text().strip().isdigit())
         child=int((folder/"child.pid").read_text())
         self.service.delete(job["id"])
         def child_is_stopped():
