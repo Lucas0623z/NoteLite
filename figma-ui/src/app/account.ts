@@ -1,4 +1,5 @@
 import { CloudError, cloud, createUUID, isNativeCloud, nativeRequest } from "./cloud.ts";
+import { requireAllowedRequest } from "./purchases.ts";
 import type { NoteWiseAnalysis } from "./notewise.ts";
 
 export type AccountIdentity = { authenticated: true; userId: string; username: string; sessionId: string; deviceName: string; expiresAt: string; kind: "browser" | "native" };
@@ -32,6 +33,7 @@ export class AccountClient {
   constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, changed: () => void = () => { cloud.resetSession(); window.dispatchEvent(new Event(ACCOUNT_EVENT)); }) { this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.changed = changed; }
   get current(): AccountIdentity | null { return this.identity; }
   private async request<T>(input: AccountRequest): Promise<T> {
+    requireAllowedRequest("account/request", input);
     const generation = this.generation;
     input = { ...input, expectedUserId: input.path === "/me" || ["/register", "/login"].includes(input.path) ? undefined : this.identity?.userId };
     if (this.native()) return this.bridge<T>("account/request", input, input.base64 ? 300000 : input.path === "/practice-analysis" ? 180000 : 60000);

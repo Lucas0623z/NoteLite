@@ -85,6 +85,7 @@ jobs:
           pnpm --dir figma-ui build
           node apple/scripts/prepare-notewise-profiles.mjs
           python3 apple/scripts/prepare-notewise-model.py
+          python3 apple/scripts/prepare-release-features.py --check
           python3 apple/scripts/prepare-figma-ui.py
       - name: Generate Xcode project
         id: generate
@@ -266,6 +267,7 @@ jobs:
           python3 apple/scripts/prepare-figma-ui.py
           node apple/scripts/prepare-notewise-profiles.mjs
           python3 apple/scripts/prepare-notewise-model.py
+          python3 apple/scripts/prepare-release-features.py --check
       - name: Generate Xcode project
         working-directory: apple
         run: |

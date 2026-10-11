@@ -235,6 +235,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     private func perform(_ action: String, payload: [String: Any], requestID: String) async throws -> Any {
+        try ReleaseFeatures.requireAllowedRequest(action, payload: payload)
         switch action {
         case "notewise/score-digest":
             let xml = try string(payload, "musicxml")

@@ -11,3 +11,6 @@ app/dev/scripts/PracticeStudio.bat text eol=crlf
 # Native instrument resource and its canonical source are identical on all hosts.
 practice-web/src/instruments.js text eol=lf
 apple/NoteLite/NoteWiseProfiles.json text eol=lf
+# Compiled release flags and their canonical hash stay identical on all hosts.
+config/release-features.json text eol=lf
+apple/NoteLite/ReleaseFeatures.swift text eol=lf

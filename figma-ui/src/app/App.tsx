@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import aiIcon from "../imports/image.png";
 import appLogo from "../imports/app-logo.png";
+import { releaseFeatures } from "./release-features";
+import { isPurchaseEntry, requestPurchase } from "./purchases";
 import MyScoresPage from "./MyScoresPage";
 import AccountSettings from "./AccountSettings";
 import ClassroomSettings from "./ClassroomSettings";
@@ -443,9 +445,9 @@ function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, ident
             </g>
           </svg>
           <ul className="my-5 space-y-3">{plan.perks.map((perk) => <li key={perk} className="flex items-start gap-3 text-[16px]"><span className="font-bold text-[#67db23]">✓</span>{perk}</li>)}</ul>
-          <button type="button" onClick={() => setMessage(`${plan.name}：订购服务尚未接入，暂不扣费。`)} className={`${action} text-[#67db23]`}>订购 {plan.name}</button>
+          <button type="button" disabled={!releaseFeatures.inAppPurchases} onClick={() => void requestPurchase().catch(error => setMessage(error.message))} className={`${action} text-[#67db23] disabled:cursor-default disabled:opacity-50`}>{releaseFeatures.inAppPurchases ? `订购 ${plan.name}` : releaseFeatures.purchaseUnavailableMessage}</button>
         </div>
-      </section>)}<p className="text-[12px] text-[#aaa]">套餐内容为设计预览，价格及权益以正式上线为准。</p>{notice}
+      </section>)}<p className="text-[12px] text-[#aaa]">{releaseFeatures.purchaseUnavailableMessage}</p>{notice}
     </div>
   );
 
@@ -1144,11 +1146,13 @@ export default function App() {
     if (settingsDialog.current) settingsDialog.current.scrollTop = settingsDetail ? 0 : settingsScrollPosition.current;
   }, [settingsDetail]);
   function openSettingsDetail(title: string) {
+    if (isPurchaseEntry(title) && !releaseFeatures.inAppPurchases) return;
     settingsScrollPosition.current = settingsDialog.current?.scrollTop ?? 0;
     setDetailOrigin("settings");
     setSettingsDetail(title);
   }
   function accountAction(action: string) {
+    if (isPurchaseEntry(action) && !releaseFeatures.inAppPurchases) return;
     if (action === "装扮" || action === "独家装扮") {
       setDraftAvatar(savedAvatar);
       setPreviewOutfitId("plain");
@@ -1318,7 +1322,7 @@ export default function App() {
         </footer>
         <dialog ref={accountMenu} aria-label="账号菜单" onCancel={() => setAccountMenuOpen(false)} onClose={() => setAccountMenuOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setAccountMenuOpen(false); }} className={`fixed inset-x-0 top-auto bottom-[calc(101px+env(safe-area-inset-bottom))] mx-auto mb-0 w-full max-w-none sm:max-w-[440px] border-0 p-0 font-sans backdrop:bg-black/40 backdrop:[clip-path:inset(0_0_calc(102px_+_env(safe-area-inset-bottom))_0)] open:animate-account-menu motion-reduce:animate-none ${isDark ? "bg-[#191919] text-white" : "bg-white text-[#4b4b4b]"}`}>
           <div>
-            {[{ name: "个人档案", kind: "person" }, { name: "订购", kind: "bolt" }].map((item) => <button key={item.name} type="button" onClick={() => { setAccountMenuOpen(false); accountAction(item.name === "订购" ? "挑选套餐" : item.name); }} className={`flex min-h-[72px] w-full cursor-pointer items-center gap-5 border-b-2 px-6 text-[21px] font-bold focus-visible:outline-2 focus-visible:outline-current ${isDark ? "border-white/10" : "border-[#e5e5e5]"}`}><AccountSymbol kind={item.kind} className={`h-7 w-7 ${item.kind === "person" ? "text-[#29c6df]" : "text-[#7958ee]"}`} />{item.name}</button>)}
+            {[{ name: "个人档案", kind: "person" }, { name: "订购", kind: "bolt" }].map((item) => <button key={item.name} type="button" disabled={isPurchaseEntry(item.name) && !releaseFeatures.inAppPurchases} onClick={() => { setAccountMenuOpen(false); accountAction(item.name === "订购" ? "挑选套餐" : item.name); }} className={`flex min-h-[72px] w-full cursor-pointer items-center gap-5 border-b-2 px-6 text-[21px] font-bold focus-visible:outline-2 focus-visible:outline-current disabled:cursor-default disabled:opacity-50 ${isDark ? "border-white/10" : "border-[#e5e5e5]"}`}><AccountSymbol kind={item.kind} className={`h-7 w-7 ${item.kind === "person" ? "text-[#29c6df]" : "text-[#7958ee]"}`} /><span>{item.name}{isPurchaseEntry(item.name) && !releaseFeatures.inAppPurchases && <small className="ml-2 text-[12px]">{releaseFeatures.purchaseUnavailableMessage}</small>}</span></button>)}
             <button type="button" aria-label="关闭账号菜单" onClick={() => setAccountMenuOpen(false)} className="absolute top-1 right-2 flex h-8 w-8 cursor-pointer items-center justify-center text-[20px] text-[#aaa]">×</button>
           </div>
         </dialog>
@@ -1474,12 +1478,12 @@ export default function App() {
                   <section key={group.label} className={`border-b-2 py-7 ${isDark ? "border-white/10" : "border-[#e5e5e5]"}`}>
                     <h2 className="mb-4 text-[15px] font-medium text-[#aaa]">{group.label}</h2>
                     {group.items.map((item) => (
-                      <button key={item} type="button" onClick={() => openSettingsDetail(item)} className="flex min-h-[60px] w-full cursor-pointer items-center justify-between gap-4 text-left text-[20px] font-bold focus-visible:outline-2 focus-visible:outline-current">
-                        <span>{item}</span>
+                      <button key={item} type="button" disabled={isPurchaseEntry(item) && !releaseFeatures.inAppPurchases} onClick={() => openSettingsDetail(item)} className="flex min-h-[60px] w-full cursor-pointer items-center justify-between gap-4 text-left text-[20px] font-bold focus-visible:outline-2 focus-visible:outline-current disabled:cursor-default disabled:opacity-50">
+                        <span>{item}{isPurchaseEntry(item) && !releaseFeatures.inAppPurchases && <small className="ml-2 text-[12px]">{releaseFeatures.purchaseUnavailableMessage}</small>}</span>
                         <svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="#b5b5b5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 4 8 8-8 8" /></svg>
                       </button>
                     ))}
-                    {(group.label === "订购" || group.label === "客服") && <button type="button" onClick={() => openSettingsDetail(group.label === "订购" ? "恢复订购" : "退出登录")} className={`mt-3 h-12 w-full cursor-pointer rounded-[14px] border-2 border-b-[5px] text-[17px] font-bold text-[#67db23] focus-visible:outline-2 focus-visible:outline-current ${isDark ? "border-white/15" : "border-[#e5e5e5]"} ${pressFeedback}`}>{group.label === "订购" ? "恢复订购" : "退出登录"}</button>}
+                    {(group.label === "订购" || group.label === "客服") && <button type="button" disabled={group.label === "订购" && !releaseFeatures.inAppPurchases} onClick={() => openSettingsDetail(group.label === "订购" ? "恢复订购" : "退出登录")} className={`mt-3 h-12 w-full cursor-pointer rounded-[14px] border-2 border-b-[5px] text-[17px] font-bold text-[#67db23] focus-visible:outline-2 focus-visible:outline-current disabled:cursor-default disabled:opacity-50 ${isDark ? "border-white/15" : "border-[#e5e5e5]"} ${pressFeedback}`}>{group.label === "订购" ? `恢复订购${!releaseFeatures.inAppPurchases ? ` · ${releaseFeatures.purchaseUnavailableMessage}` : ""}` : "退出登录"}</button>}
                   </section>
                 ))}
                 <div className="flex flex-col items-start gap-6 py-7">

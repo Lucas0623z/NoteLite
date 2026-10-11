@@ -74,6 +74,7 @@ jobs:
         run: |
           node apple/scripts/prepare-notewise-profiles.mjs
           python3 apple/scripts/prepare-notewise-model.py
+          python3 apple/scripts/prepare-release-features.py --check
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen generate --spec apple/project.yml
       - name: Verify the unsigned device archive

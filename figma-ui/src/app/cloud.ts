@@ -1,4 +1,5 @@
 /** OMR transport only. Credentials stay in HttpOnly cookies or the native Keychain. */
+import { requireAllowedRequest } from "./purchases.ts";
 export type CloudScore = { id: string; index: number; name: string; noteCount: number; musicxml: string; midi: string };
 export type CloudJob = {
   id: string; filename: string; state: "queued" | "running" | "succeeded" | "failed";
@@ -47,6 +48,7 @@ export function createUUID(): string {
 export function isNativeCloud(): boolean { return typeof window !== "undefined" && !!window.webkit?.messageHandlers?.noteLiteCloud; }
 function developmentProxyEnabled(): boolean { return import.meta.env?.DEV === true && import.meta.env?.NOTELITE_DEV_PROXY_ENABLED === true; }
 export function nativeRequest<T>(action: string, payload: unknown = {}, timeout = 30000): Promise<T> {
+  try { requireAllowedRequest(action, payload); } catch (error) { return Promise.reject(error); }
   const handler = typeof window !== "undefined" && window.webkit?.messageHandlers?.noteLiteCloud;
   if (!handler) return Promise.reject(new CloudError("当前设备没有原生连接桥接。"));
   if (!window.NoteLiteCloudNative) {

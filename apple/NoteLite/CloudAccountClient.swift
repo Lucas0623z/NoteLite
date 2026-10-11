@@ -220,6 +220,7 @@ final class CloudAccountClient {
     }
 
     func request(_ input: [String: Any]) async throws -> Any {
+        try ReleaseFeatures.requireAllowedRequest("account/request", payload: input)
         let keys: Set<String> = ["path", "method", "body", "etag", "response", "base64", "uploadOffset", "expectedUserId"]
         guard Set(input.keys).isSubset(of: keys), let path = input["path"] as? String,
               let method = input["method"] as? String, let representation = input["response"] as? String,

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/cloud.test.ts tests/osmd.test.ts tests/async-score.test.ts tests/score-rules.test.ts tests/score-document-edit.test.ts tests/notation-interaction.test.ts tests/score-position.test.ts tests/score-playback.test.ts tests/account.test.ts tests/practice-records.test.ts tests/practice-summary.test.ts tests/notewise.test.ts",
+    "test": "node --experimental-strip-types --test tests/cloud.test.ts tests/osmd.test.ts tests/async-score.test.ts tests/score-rules.test.ts tests/score-document-edit.test.ts tests/notation-interaction.test.ts tests/score-position.test.ts tests/score-playback.test.ts tests/account.test.ts tests/practice-records.test.ts tests/practice-summary.test.ts tests/notewise.test.ts tests/purchases.test.ts",
     "preview": "vite preview",
     "format": "oxfmt"
   },

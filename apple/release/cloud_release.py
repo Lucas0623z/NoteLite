@@ -98,7 +98,7 @@ def test_outcomes(value):
                     components = identifier.split("/")
                     key = "/".join(components[-2:])
                 else:
-                    suite = next((s for s in reversed(ancestry) if s in {"FigmaShellUITests", "NoteWiseTests", "NoteWiseRecordedTranscriptionTests"}), None)
+                    suite = next((s for s in reversed(ancestry) if s in {"FigmaShellUITests", "NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "ReleaseFeatureTests"}), None)
                     key = (suite + "/" + name) if suite and name.startswith("test") else None
                 if key:
                     release.require(key not in result, "Duplicate native test result; release requires one actual result per test.")
@@ -118,6 +118,8 @@ def required_tests(platform):
     # Any added NoteWise inference regression in this exact source must also pass.
     source = (ROOT / "apple/NoteLiteTests/NoteWiseTests.swift").read_text(encoding="utf-8")
     required |= {"NoteWiseTests/" + name for name in re.findall(r"\bfunc\s+(test[A-Za-z0-9_]+)\s*\(", source)}
+    source = (ROOT / "apple/NoteLiteTests/ReleaseFeatureTests.swift").read_text(encoding="utf-8")
+    required |= {"ReleaseFeatureTests/" + name for name in re.findall(r"\bfunc\s+(test[A-Za-z0-9_]+)\s*\(", source)}
     return required
 
 
@@ -321,6 +323,7 @@ def archive():
         # immediately before Xcode; neither silently rewrites a stale profile.
         release.run(["node", str(ROOT / "apple/scripts/prepare-notewise-profiles.mjs")], capture=True)
         release.run([sys.executable, str(ROOT / "apple/scripts/prepare-notewise-model.py")], capture=True)
+        release.run([sys.executable, str(ROOT / "apple/scripts/prepare-release-features.py"), "--check"], capture=True)
         archive_path = private / "NoteLite-cloud.xcarchive"
         command = ["xcodebuild", "archive", "-project", str(project), "-scheme", "NoteLite", "-configuration", "Release",
                    "-destination", "generic/platform=iOS", "-archivePath", str(archive_path), "-derivedDataPath", str(private / "DerivedData"),
