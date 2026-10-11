@@ -1,5 +1,9 @@
 # 音伴-你的音乐搭子 for iPhone / iPad / Mac
 
+当前分支的正式入口采用最新版 Figma Make 成品 UI，通过本地 WKWebView 保留 React/CSS 的比例布局，并接入设备配对的 HTTPS 云识谱与修订服务。原生侧负责安全文件导入、Keychain、网络和结果保存，页面不叠原生工具栏。新界面的构建、接口、方向及验收边界见 [Figma 与云识谱说明](FIGMA-CLOUD.md)。本阶段尚未接入听音。
+
+以下是保留的旧原生客户端与嵌入引擎说明；历史运行记录只证明对应旧提交，不代表当前 Figma 界面已在 Apple 设备上通过验收。
+
 音伴的原生 SwiftUI 客户端，最低支持 **iOS 16 / iPadOS 16 / macOS 13**。界面采用 [音伴 Figma 设计](https://www.figma.com/design/auKshwj0bSnA6UxzLpcqlN?node-id=22-4648)，分别使用手机导航、平板分栏和 Mac 工作区。
 
 **完整 iOS 构建已接入应用内 Orpheus AI 引擎，并通过 iPhone / iPad 模拟器完整识谱验收。** 打包真实运行时的构建在设备上识别新导入的扫描谱，不要求用户配置服务器，也没有将新任务切换到服务器的选项。只运行 `apple/project.yml` 得到的是基础客户端，不包含体积较大的 Java 运行时、OCR 库和识谱资源；该构建仍通过可选的 [桥接服务](../bridge/README.md) 识别扫描谱。直接导入 MusicXML 后练习，两种构建均可离线使用。原有 Java 桌面校谱工具继续可用。
@@ -41,6 +45,12 @@ cd practice-web
 npm ci
 npm run build
 cd ..
+npm install --global pnpm@11.25.0
+pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+pnpm --dir figma-ui typecheck
+pnpm --dir figma-ui test
+pnpm --dir figma-ui build
+python3 apple/scripts/prepare-figma-ui.py
 cd apple
 xcodegen generate --spec project.yml
 open NoteLite.xcodeproj

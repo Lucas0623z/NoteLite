@@ -1,0 +1,11 @@
+[Unit]
+Description=Check NoteLite IP certificate renewal hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10min
+Persistent=true
+Unit=notelite-cert-renew.service
+
+[Install]
+WantedBy=timers.target

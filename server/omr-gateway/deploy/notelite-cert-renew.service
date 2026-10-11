@@ -1,0 +1,12 @@
+[Unit]
+Description=Renew NoteLite short-lived IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/notelite-gateway/deploy/renew-certificate.sh
+TimeoutStartSec=15min
+UMask=0077
+PrivateTmp=true
+NoNewPrivileges=true

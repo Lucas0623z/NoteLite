@@ -1,0 +1,122 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { CloudClient, CloudError, createUUID, errorMessage, nativeRequest } from "../src/app/cloud.ts";
+
+const id = "11111111-1111-4111-8111-111111111111";
+const job = { id, filename: "练习.pdf", state: "succeeded", revision: 2, scores: [], artifacts: {} };
+type Call = { path: string; init: RequestInit; headers: Headers };
+function mock(routes: Record<string, unknown | ((call: Call) => Response)>) {
+  const calls: Call[] = [];
+  const fetcher = async (path: string | URL | Request, init: RequestInit = {}) => {
+    const call = { path: String(path), init, headers: new Headers(init.headers) }; calls.push(call);
+    const route = routes[`${init.method || "GET"} ${path}`];
+    if (typeof route === "function") return route(call);
+    assert.notEqual(route, undefined, `Unexpected request ${init.method || "GET"} ${path}`);
+    return new Response(JSON.stringify(route), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  return { client: new CloudClient(fetcher as typeof fetch, () => false), calls };
+}
+
+test("browser pairing uses a cookie session and CSRF; no Bearer or token is put in the UI", async () => {
+  const { client, calls } = mock({ "POST /api/pair": { csrf: "csrf-example" }, "POST /api/jobs?filename=%E7%BB%83%E4%B9%A0.pdf": job });
+  await client.pair("  pairing-code  ", "Test device");
+  await client.upload(new Blob(["%PDF"], { type: "application/pdf" }), "练习.pdf");
+  assert.deepEqual(JSON.parse(calls[0].init.body as string), { code: "pairing-code", deviceName: "Test device", mode: "browser" });
+  assert.equal(calls[1].headers.get("X-NoteLite-CSRF"), "csrf-example");
+  assert.equal(calls[1].headers.has("Authorization"), false);
+  assert.equal(calls[1].init.credentials, "same-origin");
+  assert.ok(calls[1].init.body instanceof Blob);
+});
+
+test("a browser reload obtains CSRF from the existing HttpOnly session before edits", async () => {
+  const { client, calls } = mock({ "GET /api/session": { authenticated: true, csrf: "session-csrf" }, [`PATCH /api/jobs/${id}/notes?score=3`]: job });
+  const edits = [{ partId: "P2", measureIndex: 8, noteIndex: 2, pitch: { step: "F", alter: 1, octave: 5 }, duration: 6, dot: 1 }];
+  await client.patch(id, 3, 1, edits);
+  assert.equal(calls[0].path, "/api/session");
+  assert.equal(calls[1].headers.get("X-NoteLite-CSRF"), "session-csrf");
+  assert.deepEqual(JSON.parse(calls[1].init.body as string), { revision: 1, score: 3, edits });
+});
+
+test("full MusicXML PUT includes If-Match and preserves the selected movement", async () => {
+  const { client, calls } = mock({ "GET /api/session": { authenticated: true, csrf: "c" }, [`PUT /api/jobs/${id}/score?score=4`]: job });
+  const xml = '<score-partwise version="4.0" />'; await client.put(id, 4, 7, xml);
+  assert.equal(calls[1].headers.get("If-Match"), '"7"');
+  assert.equal(calls[1].headers.get("Content-Type"), "application/vnd.recordare.musicxml+xml");
+  assert.equal(calls[1].init.body, xml);
+});
+
+test("conflicting edits surface status 409 without an automatic overwrite", async () => {
+  const { client, calls } = mock({ "GET /api/session": { authenticated: true, csrf: "c" }, [`PATCH /api/jobs/${id}/notes?score=0`]: () => new Response(JSON.stringify({ error: "revision changed" }), { status: 409 }) });
+  await assert.rejects(client.patch(id, 0, 1, [{ partId: "P1", measureIndex: 0, noteIndex: 0, rest: true }]), (error) => error instanceof CloudError && error.status === 409 && errorMessage(error).includes("重新载入"));
+  assert.equal(calls.length, 2);
+});
+
+test("authorization failures surface an actionable connection message", async () => {
+  const { client } = mock({ "GET /api/jobs": () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }) });
+  await assert.rejects(client.jobs(), (error) => error instanceof CloudError && errorMessage(error).includes("云端识谱设置"));
+});
+
+test("a lost write response is marked unknown so the UI must reload before another edit", async () => {
+  const { client } = mock({ "GET /api/session": { authenticated: true, csrf: "c" }, [`PUT /api/jobs/${id}/score?score=0`]: () => { throw new Error("connection lost"); } });
+  await assert.rejects(client.put(id, 0, 1, "<score-partwise/>"), (error) => error instanceof CloudError && error.code === "write_status_unknown" && errorMessage(error).includes("重新载入"));
+});
+
+test("restored cloud originals can be read without a cached local upload", async () => {
+  const { client, calls } = mock({ [`GET /api/jobs/${id}/original?score=0`]: () => new Response("%PDF-1.7", { headers: { "Content-Type": "application/pdf" } }) });
+  const blob = await client.original(id, 0, "original.pdf");
+  assert.equal(blob?.type, "application/pdf"); assert.equal(await blob?.text(), "%PDF-1.7"); assert.equal(calls.length, 1);
+});
+
+test("invalid task identifiers, movements and revisions never reach the network", async () => {
+  const { client, calls } = mock({});
+  await assert.rejects(client.job("../other-owner")); await assert.rejects(client.notes(id, -1));
+  await assert.rejects(client.patch(id, 0, 0, [])); await assert.rejects(client.put(id, 0, NaN, "xml"));
+  assert.equal(calls.length, 0);
+});
+
+test("empty or oversized uploads are rejected before sending", async () => {
+  const { client, calls } = mock({});
+  await assert.rejects(client.upload(new Blob([]), "empty.pdf"));
+  await assert.rejects(client.upload(new Blob([new Uint8Array(32 * 1024 * 1024 + 1)]), "large.pdf"), (error) => error instanceof CloudError && error.status === 413);
+  assert.equal(calls.length, 0);
+});
+
+test("XML and notes use the selected movement and accept uncompressed XML text", async () => {
+  const { client, calls } = mock({ [`GET /api/jobs/${id}/score/musicxml?score=2`]: () => new Response("<score-partwise/>"), [`GET /api/jobs/${id}/notes?score=2`]: { jobId: id, revision: 2, score: 2, parts: [], notes: [] } });
+  assert.equal(await client.score(id, 2), "<score-partwise/>");
+  assert.equal((await client.notes(id, 2)).score, 2); assert.equal(calls.length, 2);
+});
+
+test("native requests preserve actions, selected score, revisions and export filenames", async () => {
+  const calls: { action: string; payload: unknown; timeout?: number }[] = [];
+  const bridge = async <T>(action: string, payload: unknown = {}, timeout?: number): Promise<T> => { calls.push({ action, payload, timeout }); return job as T; };
+  const client = new CloudClient(async () => { throw new Error("native must not use browser fetch"); }, () => true, bridge);
+  await client.pair("connection-code", "iPad"); await client.patch(id, 2, 9, [{ partId: "P1", measureIndex: 1, noteIndex: 0, delete: true }]);
+  await client.export(id, 2, "original", "original.pdf");
+  assert.equal(calls[0].action, "device/pair");
+  assert.deepEqual(calls[1].payload, { jobId: id, score: 2, revision: 9, edits: [{ partId: "P1", measureIndex: 1, noteIndex: 0, delete: true }] });
+  assert.deepEqual(calls[2].payload, { jobId: id, score: 2, kind: "original", filename: "original.pdf" });
+  assert.equal(calls[1].timeout, 300000);
+});
+
+test("native bridge resolves callbacks and propagates native failures", async () => {
+  const saved = globalThis.window;
+  globalThis.window = { webkit: { messageHandlers: { noteLiteCloud: { postMessage(message) {
+    const reply = message.action === "health" ? { ok: true as const, result: { status: "ok" } } : { ok: false as const, error: { code: "cancelled", message: "cancelled", status: 499 } };
+    queueMicrotask(() => window.NoteLiteCloudNative!.resolve(message.requestId, reply));
+  } } } } } as Window & typeof globalThis;
+  try { assert.deepEqual(await nativeRequest("health"), { status: "ok" }); await assert.rejects(nativeRequest("jobs/import"), (error) => error instanceof CloudError && error.code === "cancelled" && error.status === 499); }
+  finally { globalThis.window = saved; }
+});
+
+test("HTTPS configuration rejects insecure URLs and credential-bearing URLs", async () => {
+  const client = new CloudClient(async () => { throw new Error("unused"); }, () => true, async <T>() => ({} as T));
+  for (const address of ["http://124.221.211.156", "https://user:secret@example.com", "https://example.com/api", "https://example.com/?secret=x"]) await assert.rejects(client.configure(address));
+  await client.configure("https://124.221.211.156");
+});
+
+test("UUID fallback works in the custom WebView scheme without randomUUID", () => {
+  const original = crypto.randomUUID; Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+  try { assert.match(createUUID(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/); }
+  finally { Object.defineProperty(crypto, "randomUUID", { value: original, configurable: true }); }
+});

@@ -1,0 +1,15 @@
+# Keep the exported artwork and fonts as normal Git binary objects.
+# Source files use LF; no Git LFS checkout is required for Apple builds.
+* text=auto
+*.tsx text eol=lf
+*.ts text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.svg text eol=lf
+*.png -filter -diff -merge -text
+*.jpg -filter -diff -merge -text
+*.jpeg -filter -diff -merge -text
+*.woff2 -filter -diff -merge -text

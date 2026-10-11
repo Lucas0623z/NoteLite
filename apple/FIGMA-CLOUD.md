@@ -1,0 +1,65 @@
+# Figma 界面与云识谱 Apple 客户端
+
+当前入口完整加载 `figma-ui` 的 Figma Make 成品页面，SwiftUI 不重画页面，也不叠加原生导航栏。源设计为 https://www.figma.com/make/pixNf29vNFHLDrih3Xcikc/iPhone-App-Page-Design 。比例与响应布局的浏览器检查、Apple 编译/模拟器截图、真实设备检查是不同验收项，不能互相替代。
+
+## 构建
+
+先构建原练习资源（保留旧客户端测试），再构建最新页面并复制到 Apple 的资源目录：
+
+```sh
+npm --prefix practice-web ci
+npm --prefix practice-web run build
+npm install --global pnpm@11.25.0
+pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+pnpm --dir figma-ui typecheck
+pnpm --dir figma-ui test
+pnpm --dir figma-ui build
+python3 apple/scripts/prepare-figma-ui.py
+cd apple
+xcodegen generate --spec project.yml
+xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+```
+
+`apple/FigmaUI` 是生成目录，不提交 Git。XcodeGen 将它完整打包进 iOS/macOS 应用。WKWebView 只从 `notelite-ui://app` 读取这份本地资源，拒绝越界、外部符号链接及远程页面；文件导入内容不能获得原生接口。页面自己处理安全区，原生视图使用 `.ignoresSafeArea()` 与 `contentInsetAdjustmentBehavior = .never`，避免重复偏移。
+
+`.github/workflows/apple-client.yml` 检查 runner 实际安装的稳定 Xcode，然后构建 iOS、Mac、无签名真机应用，运行保留的旧功能测试和新界面测试，保存截图。不以 Windows 浏览器截图声称 Apple 实机通过。
+
+## 原生云桥接
+
+网页发送 `window.webkit.messageHandlers.noteLiteCloud.postMessage({requestId, action, payload})`，requestId 是唯一字符串。原生只接受受信任本地 origin 的主 frame，最多 16 个并发请求。返回 `window.NoteLiteCloudNative.resolve(requestId, {ok:true,result})`，错误为 `{ok:false,error:{code,message,status?}}`。上传进度通过 `.event({type:'uploadProgress',requestId,progress})`。
+
+| action | payload / 返回 |
+| --- | --- |
+| `configuration/get` | 返回 baseURL、hasCredentials、platform、native、listeningEnabled:false |
+| `configuration/set` | `{baseURL}`；只接受无额外路径的 HTTPS origin |
+| `device/pair` | `{code,deviceName}`；调用 `/api/pair` 的 native 模式，返回设备元数据，删除响应 token |
+| `device/unpair` | 在线撤销本设备云会话后移除 Keychain 凭据；离线失败保留凭据，不删除云端曲谱 |
+| `health` / `session` | 网关健康 / 本设备认证状态 |
+| `jobs/list` / `jobs/get` | 网关原始任务 JSON；get 的参数 `{jobId}` |
+| `jobs/upload` | `{filename,base64}`，返回任务；支持 PDF、PNG、JPEG、XML/MXL，上限 32 MiB |
+| `jobs/import` | 原生文件选择后上传，等待完成并返回任务；取消为 cancelled |
+| `score/get` | `{jobId,score}`，返回 MusicXML 字符串 |
+| `notes/get` | `{jobId,score}`，返回音符列表与修订号 |
+| `notes/patch` | `{jobId,score,revision,edits}`，成功返回新任务 JSON |
+| `score/put` | `{jobId,score,revision,musicxml}`，原始 XML + If-Match 请求 |
+| `files/get` | `{jobId,score,kind}`，小文件返回 base64；大文件使用导出 |
+| `files/export` | `{jobId,score,kind,filename?}`，原生下载后选择保存位置，返回 saved 与 filename |
+| `files/save` | `{filename,base64}`，保存本机示例/校对的结果（上限16 MiB），同样等待用户选择保存位置 |
+| `files/view` | `{jobId,score,kind:'original',filename}`，下载 PDF/PNG/JPEG 原稿，交系统 Quick Look 预览（上限32 MiB），关闭后清理临时文件 |
+| `request/cancel` | `{targetRequestId}`，取消尚未返回的本机请求，关闭文件选择/保存窗口并释放等待状态；不会回滚服务器已经提交的修改 |
+| `orientation/set` | `{mode:'landscape'|'restore'}` |
+
+默认服务地址为 `https://124.221.211.156`。新设备用一次性配对码获得自身凭据，凭据只在 Keychain 中，按 HTTPS origin 分开保存，不同步、不发给 JavaScript。请求不跟随重定向，也不接受任意下载 URL。应用未包含 OMR 内部管理员令牌。缺少配对码时可使用原有“载入示例曲谱”本地功能；它明确标为示例，并不声称运行了云识谱。
+
+保存修改调用网关的修订接口；只有服务器同步发布新的 MusicXML/MIDI 后，才返回成功。409 要重新读取并复核，不能盲目覆盖。没有调用旧 `/v1` 的任务删除逻辑。
+
+写请求允许最长 240 秒无响应、总计 300 秒，覆盖服务器同步生成 MIDI 的时限。网络中断时返回 `write_status_unknown`，需要重新载入任务确认最终修订号。原生导入与保存使用有明确成功/取消回调的系统文件窗口，支持 iOS 16 / macOS 13；正常取消不会遗留等待状态。原稿预览不执行文件中的网页脚本，也不授予子 frame 原生接口。
+
+## 方向与验收边界
+
+iPhone/iPad 进入看谱或练习页面，网页经生产桥接请求本机横屏；退出时请求恢复进入前的界面方向。使用 iOS 16 的 UIWindowScene 几何 API 与 UIApplicationDelegate 的支持方向回调，没有私有 KVC 旋转。iPad 分屏或系统限制拒绝方向变更时，会返回 orientationError 事件，不能伪装旋转成功。Mac 按实际窗口宽高响应，方向请求不改变窗口。
+
+`FigmaShellUITests` 在 Apple 模拟器运行正式“导入曲谱 → 载入示例曲谱 → 查看曲谱 → 返回”的界面流程，断言实际 MusicXML 排版成功、四个音符和应用重启后的本机读取，进入练习页检查未接入听音的提示，检查本机横屏及恢复，并保存实际屏幕截图；这些测试不运行云 OMR，也不使用假识谱。`CloudOMRTests` 使用明确标注的 URLProtocol 传输替身测试新 API、凭据与修改契约。服务器真实识谱/编辑验收另有实际 PNG/PDF 结果。
+
+原 `LibraryView`、设备嵌入识谱和 `PracticeView` 保留。DEBUG 的旧 `--uitesting-import-*` 启动参数继续进入旧界面，使其单元/界面测试仍有意义；生产启动一律进入 Figma 新界面。当前阶段没有启动原生音频输入、听音检测或评分，须 UI 与云服务检查后再接入。

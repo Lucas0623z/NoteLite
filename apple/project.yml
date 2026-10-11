@@ -23,6 +23,9 @@ targets:
       - path: ../app/res/practice
         type: folder
         buildPhase: resources
+      - path: FigmaUI
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lucas0623z.yinban
@@ -53,6 +56,9 @@ targets:
       - path: NoteLite
         excludes: ["**/*.plist", "**/*.entitlements"]
       - path: ../app/res/practice
+        type: folder
+        buildPhase: resources
+      - path: FigmaUI
         type: folder
         buildPhase: resources
     settings:

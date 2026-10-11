@@ -3,12 +3,18 @@ import SwiftUI
 @main
 @MainActor
 struct NoteLiteApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(NoteLiteOrientationAppDelegate.self) private var orientationDelegate
+    #endif
     @StateObject private var library = LibraryStore()
     @StateObject private var history = PracticeHistoryStore()
 
     var body: some Scene {
         WindowGroup("音伴-你的音乐搭子") {
-            LibraryView()
+            Group {
+                if legacyTestInterface { LibraryView() }
+                else { FigmaShellView() }
+            }
                 .environmentObject(library)
                 .environmentObject(history)
                 .tint(NoteLiteTheme.accent)
@@ -39,6 +45,19 @@ struct NoteLiteApp: App {
         }
         #if os(macOS)
         .defaultSize(width: 1440, height: 900)
+        #endif
+    }
+
+    /// Existing library/embedded-engine tests deliberately retain their original interface.
+    /// Production launches always show the bundled Figma product interface.
+    private var legacyTestInterface: Bool {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        return !arguments.contains("--uitesting-figma") && arguments.contains(where: {
+            $0 == "--uitesting-legacy" || $0.hasPrefix("--uitesting-import-")
+        })
+        #else
+        return false
         #endif
     }
 }

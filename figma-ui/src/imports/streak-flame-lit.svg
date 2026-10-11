@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">火焰图标 · 点燃</title>
+  <desc id="desc">橙色外焰与黄色内焰，圆润的多邻国风格连续打卡图标，透明背景。</desc>
+  <g transform="translate(63 0) scale(0.78 1) translate(-63 0)">
+  <path d="M57 10C55 8 52 9 52 12C52 27 42 36 36 44C32 48 29 50 25 48C23 47 22 44 22 42C22 40 20 39 19 41C15 49 12 61 12 75C12 101 33 118 63 118C93 118 114 99 114 74C114 57 105 42 98 34C97 32 94 33 94 36C94 42 91 47 86 50C82 31 69 23 57 10Z" fill="#FF9600"/>
+  <path d="M65 58C64 56 61 56 60 59C55 69 48 73 44 82C37 96 47 108 63 108C78 108 89 97 85 84C83 77 79 72 75 68C74 67 72 68 72 71C72 74 71 77 69 79C70 70 68 64 65 58Z" fill="#FFC800"/>
+  </g>
+</svg>

@@ -1,0 +1,4 @@
+@import './styles/fonts.css';
+@import 'tailwindcss';
+@import './styles/theme.css';
+@import './styles/score-workspace.css';

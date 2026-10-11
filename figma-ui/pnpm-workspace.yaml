@@ -1,0 +1,3 @@
+allowBuilds:
+  # OSMD renders SVG in the WebView. Its optional native headless GL addon is unused.
+  gl: false

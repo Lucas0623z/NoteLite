@@ -2,10 +2,11 @@ name: Apple clients
 
 on:
   push:
-    branches: [main, master, codex/audiveris-apple-builds]
+    branches: [main, master, codex/audiveris-apple-builds, codex/figma-cloud-ui]
     paths:
       - "apple/**"
       - "practice-web/**"
+      - "figma-ui/**"
       - "app/res/practice/**"
       - "tools/audiveris-port/manage-embedded-simulators.py"
       - "tools/audiveris-port/test_manage_embedded_simulators.py"
@@ -14,6 +15,7 @@ on:
     paths:
       - "apple/**"
       - "practice-web/**"
+      - "figma-ui/**"
       - "app/res/practice/**"
       - "tools/audiveris-port/manage-embedded-simulators.py"
       - "tools/audiveris-port/test_manage_embedded_simulators.py"
@@ -22,10 +24,6 @@ on:
 
 permissions:
   contents: read
-
-env:
-  # Pin the stable toolchain; the runner also contains preview Xcode versions.
-  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
 concurrency:
   group: apple-client-${{ github.ref }}
@@ -37,6 +35,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Select an installed stable Xcode
+        run: bash apple/scripts/select-xcode.sh
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -63,6 +63,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Select an installed stable Xcode
+        run: bash apple/scripts/select-xcode.sh
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -74,6 +76,14 @@ jobs:
           npm ci
           npm test
           npm run build
+      - name: Build the Figma interface and prepare native resources
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+          pnpm --dir figma-ui typecheck
+          pnpm --dir figma-ui test
+          pnpm --dir figma-ui build
+          python3 apple/scripts/prepare-figma-ui.py
       - name: Generate Xcode project
         id: generate
         working-directory: apple
@@ -122,6 +132,9 @@ jobs:
             if [ -d ../app/res/practice/icons ]; then
               diff -r ../app/res/practice/icons "$resources/practice/icons"
             fi
+            test -s "$resources/FigmaUI/index.html"
+            test -d "$resources/FigmaUI/assets"
+            diff -r FigmaUI "$resources/FigmaUI"
           done
       - name: Package unsigned native builds
         working-directory: apple
@@ -177,6 +190,8 @@ jobs:
         family: [iPhone, iPad]
     steps:
       - uses: actions/checkout@v4
+      - name: Select an installed stable Xcode
+        run: bash apple/scripts/select-xcode.sh
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -187,6 +202,14 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Build the Figma interface and prepare native resources
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+          pnpm --dir figma-ui typecheck
+          pnpm --dir figma-ui test
+          pnpm --dir figma-ui build
+          python3 apple/scripts/prepare-figma-ui.py
       - name: Generate Xcode project
         working-directory: apple
         run: |
