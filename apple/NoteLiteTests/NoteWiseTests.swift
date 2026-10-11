@@ -7,7 +7,7 @@ final class NoteWiseTests:XCTestCase {
         for (id,minimum) in expected {
             let profile=try NoteWiseInstrumentProfiles.resolve(id)
             XCTAssertEqual(profile.minMidi,minimum);XCTAssertGreaterThan(profile.maxMidi,minimum)
-            XCTAssertEqual(profile.frequency(69,tuning:442),442,accuracy:.000001)
+            XCTAssertEqual(profile.frequency(69,tuning:442),442,accuracy:0.000001)
         }
         XCTAssertThrowsError(try NoteWiseInstrumentProfiles.resolve("unknown"))
     }
@@ -29,7 +29,7 @@ final class NoteWiseTests:XCTestCase {
     func testActualSharedMPMYINWrapperDetectsA4AndReliableSilenceRelease() throws {
         let rate=48000.0
         var audio=[Float](repeating:0,count:4800)
-        audio += (0..<19200).map {Float(.2*sin(2*Double.pi*440*Double($0)/rate))}
+        audio += (0..<19200).map {Float(0.2*sin(2*Double.pi*440*Double($0)/rate))}
         audio += [Float](repeating:0,count:14400)
         let events=try NoteWiseTestProbe.detect(audio)
         let ons=events.filter{$0["type"] as? String=="note-on"},offs=events.filter{$0["type"] as? String=="note-off"}
@@ -41,7 +41,7 @@ final class NoteWiseTests:XCTestCase {
     }
     func testSilenceDoesNotInventCorrectNotesAndStopReleaseIsNotNatural() throws {
         XCTAssertTrue(try NoteWiseTestProbe.detect([Float](repeating:0,count:48000)).isEmpty)
-        let audio=(0..<24000).map{Float(.2*sin(2*Double.pi*442*Double($0)/48000))}
+        let audio=(0..<24000).map{Float(0.2*sin(2*Double.pi*442*Double($0)/48000))}
         let events=try NoteWiseTestProbe.detect(audio,a4:442)
         XCTAssertEqual(events.filter{$0["type"] as? String=="note-on"}.count,1)
         XCTAssertEqual(events.last?["reason"] as? String,"stop")
