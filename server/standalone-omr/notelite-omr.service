@@ -1,0 +1,26 @@
+[Unit]
+Description=NoteLite standalone OMR, score editing and MusicXML/MIDI export
+After=network.target
+
+[Service]
+Type=simple
+User=audiveris
+Group=audiveris
+WorkingDirectory=/opt/notelite-omr
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/notelite-omr/server.py --host 127.0.0.1 --port 8765 --storage /var/lib/audiveris/jobs --token-file /var/lib/audiveris/access-token
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/audiveris
+MemoryMax=6G
+CPUQuota=200%
+TasksMax=256
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

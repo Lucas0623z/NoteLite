@@ -9,6 +9,7 @@
   "verify_account_service.py",
   "test_account_service.py",
   "test_account_omr_integration.py",
+  "test_account_deletion.py",
   "test_practice_analysis.py",
   "test_performance_analysis.py",
   "test_history_analysis_versions.py",

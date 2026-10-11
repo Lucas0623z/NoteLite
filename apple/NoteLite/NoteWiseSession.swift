@@ -3,6 +3,16 @@ import AVFoundation
 import CryptoKit
 import Darwin
 
+@MainActor
+protocol NoteWiseCapturing: AnyObject {
+    var onPCM: ((AVAudioPCMBuffer, AVAudioTime) -> Void)? { get set }
+    var onMIDI: (([MIDIPerformanceEvent]) -> Void)? { get set }
+    var onError: ((String) -> Void)? { get set }
+    func start(_ mode: String) async throws
+    func stop()
+}
+extension NativePracticeInput: NoteWiseCapturing {}
+
 /// Detection and disk recording run on this serial native queue, never the UI or WebView.
 private final class NoteWiseAudioProcessor: @unchecked Sendable {
     let queue = DispatchQueue(label: "com.notelite.notewise.capture", qos: .userInitiated)
@@ -13,6 +23,8 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
     private var count: UInt64 = 0
     private var totalBytes = 0
     private var detectorOffsetMs:Double = 0
+    private let submissionLock = NSLock()
+    private var acceptingBuffers = true
     private let a4: Double
     private let minimum: Double
     private let maximum: Double
@@ -31,6 +43,9 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
               let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: buffer.frameLength) else { return }
         copy.frameLength = buffer.frameLength
         copy.floatChannelData![0].update(from: source, count: Int(buffer.frameLength))
+        submissionLock.lock()
+        defer { submissionLock.unlock() }
+        guard acceptingBuffers else { return }
         queue.async { [self] in
             guard !failed else { return }
             do {
@@ -69,6 +84,9 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
         }
     }
     func pause() {
+        submissionLock.lock()
+        defer { submissionLock.unlock() }
+        guard acceptingBuffers else { return }
         queue.async { [self] in
             if let dsp { nw_finish(dsp); drain(); nw_destroy(dsp); self.dsp=nil }
             detectorOffsetMs = rate>0 ? 1000 * Double(count)/rate : 0
@@ -76,8 +94,11 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
     }
     func finish() async -> [String: Any] {
         await withCheckedContinuation { continuation in
+            submissionLock.lock()
+            defer { submissionLock.unlock() }
+            acceptingBuffers = false
             queue.async { [self] in
-                if let dsp { nw_finish(dsp); drain() }
+                if let dsp { nw_finish(dsp); drain(); nw_destroy(dsp); self.dsp = nil }
                 file = nil
                 continuation.resume(returning: ["available": count > 0 && !failed, "sampleRate": rate,
                     "sampleCount": count, "durationMs": rate > 0 ? 1000 * Double(count) / rate : 0,
@@ -89,7 +110,9 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
 
 @MainActor
 final class NoteWiseSession {
-    private let input = NativePracticeInput()
+    private let input: NoteWiseCapturing
+    private let takeStore: NoteWiseTakeStore
+    private var deletedScopes = Set<String>()
     private var processor: NoteWiseAudioProcessor?
     private var takeID: String?
     private var scope = ""
@@ -102,14 +125,40 @@ final class NoteWiseSession {
     private var connected = false
     var event: (([String: Any]) -> Void)?
 
-    private func folder() throws -> URL {
-        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true).appendingPathComponent("NoteLite/NoteWiseTakes", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        return root
+    init(input: NoteWiseCapturing? = nil, recordingsDirectory: URL? = nil) {
+        self.input = input ?? NativePracticeInput()
+        takeStore = NoteWiseTakeStore(directory: recordingsDirectory)
     }
     private func validate(_ id: String) throws -> String {
-        guard let value=UUID(uuidString: id) else { throw NoteLiteError.invalidResponse }; return value.uuidString.lowercased()
+        try takeStore.identifier(id)
+    }
+    private func requireAvailable(scope: String) throws {
+        deletedScopes.formUnion(try takeStore.pendingPurges())
+        guard !deletedScopes.contains(scope) else {
+            throw CloudOMRError(code: "account_deleted", message: "此账户已注销。", status: 410)
+        }
+    }
+    func resumePendingAccountDeletions() async throws {
+        let pending = try takeStore.pendingPurges()
+        deletedScopes.formUnion(pending)
+        let store = takeStore
+        try await Task.detached(priority: .utility) {
+            for scope in pending { try store.purge(scope: scope) }
+        }.value
+    }
+    /// Called only after the account service has accepted verified deletion.
+    /// Synchronous state detachment prevents new guest input being stopped by
+    /// this old account's asynchronous queue drain.
+    func deleteRecordings(accountScope: String, waitingFor readers: [Task<Void, Never>] = []) async throws -> Int {
+        try takeStore.checkAccountScope(accountScope)
+        deletedScopes.insert(accountScope)
+        let writer = scope == accountScope ? detachCapture() : nil
+        let persistence: Result<Void, Error> = Result { try takeStore.schedulePurge(scope: accountScope) }
+        _ = await writer?.finish()
+        for reader in readers { await reader.value }
+        try persistence.get()
+        let store = takeStore
+        return try await Task.detached(priority: .utility) { try store.purge(scope: accountScope) }.value
     }
     private func emit(_ value: [String: Any]) {
         guard let takeID else { return }
@@ -117,20 +166,23 @@ final class NoteWiseSession {
         event?(value.merging(["type": "notewiseInput", "takeId": takeID, "sequence": sequence]) { old, _ in old })
     }
     func start(_ payload: [String: Any], scope: String) async throws -> [String: Any] {
+        try requireAvailable(scope: scope)
+        try Task.checkCancellation()
         guard let raw=payload["takeId"] as? String, let kind=payload["inputKind"] as? String,
               ["midi", "microphone"].contains(kind), let a4=payload["tuning"] as? Double,
               a4.isFinite, (400...480).contains(a4) else { throw NoteLiteError.invalidResponse }
         let id=try validate(raw)
         let profile=kind == "microphone" ? try NoteWiseInstrumentProfiles.resolve(payload["instrument"] as? String ?? "piano") : nil
         if takeID != nil && (takeID != id || self.scope != scope) { _ = await stop() }
+        try requireAvailable(scope: scope)
+        try Task.checkCancellation()
         let current=generation
         if takeID == nil {
+            try takeStore.register(id, scope: scope, inputKind: kind)
             takeID=id; self.scope=scope; sequence=0; midiOffset=0; midiID=0
-            let identity: [String: Any] = ["takeId": id, "scope": scope, "inputKind": kind, "createdAt": ISO8601DateFormatter().string(from: Date())]
-            try JSONSerialization.data(withJSONObject: identity).write(to: folder().appendingPathComponent(id+".json"), options: .atomic)
             if kind == "microphone" {
                 guard let profile else { throw NoteLiteError.invalidResponse }
-                processor = NoteWiseAudioProcessor(url: try folder().appendingPathComponent(id+".wav"), a4: a4,
+                processor = NoteWiseAudioProcessor(url: try takeStore.audioURL(id), a4: a4,
                     minimum: profile.frequency(profile.minMidi, tuning: a4), maximum: profile.frequency(profile.maxMidi, tuning: a4), window: profile.windowSize,
                     event: { [weak self] value in Task { @MainActor [weak self] in guard let self,self.takeID==id,self.generation==current else{return};self.emit(["inputKind":"microphone", "event":value]) } },
                     error: { [weak self] message in Task { @MainActor [weak self] in guard let self,self.takeID==id,self.generation==current else{return};self.input.stop();self.emit(["status":"interrupted", "message":message]) } })
@@ -142,7 +194,7 @@ final class NoteWiseSession {
         } else {
             midiStarted=ProcessInfo.processInfo.systemUptime
             input.onMIDI = { [weak self] values in
-                guard let self else { return }
+                guard let self, self.generation == current, self.takeID == id, self.scope == scope else { return }
                 for value in values {
                     var info=mach_timebase_info_data_t(); mach_timebase_info(&info)
                     let timestamp=value.timestamp == 0 ? ProcessInfo.processInfo.systemUptime : Double(value.timestamp)*Double(info.numer)/Double(info.denom)/1_000_000_000
@@ -158,10 +210,13 @@ final class NoteWiseSession {
                 }
             }
         }
-        input.onError = { [weak self] message in self?.emit(["status":"interrupted","message":message]) }
+        input.onError = { [weak self] message in
+            guard let self, self.generation == current, self.takeID == id, self.scope == scope else { return }
+            self.emit(["status":"interrupted","message":message])
+        }
         do { try await input.start(kind); try Task.checkCancellation() }
-        catch { _ = await stop(); throw error }
-        guard current == generation else { input.stop(); throw CancellationError() }
+        catch { if current == generation { _ = await stop() }; throw error }
+        guard current == generation else { throw CancellationError() }
         connected=true
         return ["connected":true,"takeId":id,"inputKind":kind,"detectorVersion":kind == "midi" ? "midi-stream-2" : "native-mpm-yin-1",
             "captureClock":["source":kind == "midi" ? "host-monotonic" : "audio-sample","unit":"ms","timingCalibrated":false],
@@ -175,22 +230,27 @@ final class NoteWiseSession {
     }
     func interruptIfConnected(_ message:String) { guard connected else{return};pause();emit(["status":"interrupted","message":message]) }
     func checkActive(_ raw:String,scope:String) throws {
+        try requireAvailable(scope: scope)
         guard try validate(raw)==takeID, self.scope==scope else { throw NoteLiteError.invalidResponse }
     }
+    private func detachCapture() -> NoteWiseAudioProcessor? {
+        connected = false
+        input.stop(); input.onPCM = nil; input.onMIDI = nil; input.onError = nil
+        generation = UUID()
+        let writer = processor
+        processor = nil; takeID = nil; scope = ""; activeMIDI.removeAll()
+        return writer
+    }
     func stop() async -> [String: Any] {
-        connected=false
-        input.stop(); generation=UUID()
-        let result=await processor?.finish() ?? ["available":false]
         let id=takeID
-        processor=nil; takeID=nil; activeMIDI.removeAll()
+        let writer = detachCapture()
+        let result=await writer?.finish() ?? ["available":false]
         return result.merging(["takeId":id ?? ""]) { old,_ in old }
     }
     func recording(_ raw: String, scope: String) throws -> URL {
-        let id=try validate(raw), root=try folder()
-        let identity=try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent(id+".json"))) as? [String: Any]
-        guard identity?["scope"] as? String == scope, identity?["inputKind"] as? String == "microphone" else { throw NoteLiteError.invalidResponse }
-        let url=root.appendingPathComponent(id+".wav")
-        guard FileManager.default.fileExists(atPath:url.path), takeID != id else { throw NoteLiteError.server("请先结束并保存这次录音。") }
-        return url
+        try requireAvailable(scope: scope)
+        let id=try validate(raw)
+        guard takeID != id else { throw NoteLiteError.server("请先结束并保存这次录音。") }
+        return try takeStore.recording(id, scope: scope)
     }
 }

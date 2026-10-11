@@ -57,7 +57,7 @@ def main():
     import gateway
     gateway_store = gateway.Store(args.gateway_root)
     bridge = OMRBridge(gateway_store, token, args.public_origin, upstream_port=args.upstream_port)
-    store = IntegratedStore(args.root, omr_import=bridge.import_score, legacy_claim=bridge.claim,
+    store = IntegratedStore(args.root, omr_import=bridge.import_score, legacy_claim=bridge.claim, omr_delete=bridge.delete_owner, omr_fence=bridge.deletion_fence,
                                   max_recording=args.max_recording_mb * 1024 ** 2,
                                   recording_quota=args.recording_quota_mb * 1024 ** 2,
                                   disk_reserve=args.disk_reserve_mb * 1024 ** 2)

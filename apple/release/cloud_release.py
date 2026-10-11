@@ -98,7 +98,7 @@ def test_outcomes(value):
                     components = identifier.split("/")
                     key = "/".join(components[-2:])
                 else:
-                    suite = next((s for s in reversed(ancestry) if s in {"FigmaShellUITests", "NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "ReleaseFeatureTests"}), None)
+                    suite = next((s for s in reversed(ancestry) if s in {"FigmaShellUITests", "NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "ReleaseFeatureTests", "AccountDeletionNativeTests"}), None)
                     key = (suite + "/" + name) if suite and name.startswith("test") else None
                 if key:
                     release.require(key not in result, "Duplicate native test result; release requires one actual result per test.")
@@ -120,6 +120,8 @@ def required_tests(platform):
     required |= {"NoteWiseTests/" + name for name in re.findall(r"\bfunc\s+(test[A-Za-z0-9_]+)\s*\(", source)}
     source = (ROOT / "apple/NoteLiteTests/ReleaseFeatureTests.swift").read_text(encoding="utf-8")
     required |= {"ReleaseFeatureTests/" + name for name in re.findall(r"\bfunc\s+(test[A-Za-z0-9_]+)\s*\(", source)}
+    source = (ROOT / "apple/NoteLiteTests/AccountDeletionNativeTests.swift").read_text(encoding="utf-8")
+    required |= {"AccountDeletionNativeTests/" + name for name in re.findall(r"\bfunc\s+(test[A-Za-z0-9_]+)\s*\(", source)}
     return required
 
 

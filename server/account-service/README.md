@@ -342,3 +342,22 @@ python -m unittest discover -s server/omr-gateway -v
 Production cache fingerprints still include the exact configured prompt and
 schema hashes, model settings and rule versions. Changing private assets changes
 that fingerprint; it does not reuse analyses produced by different instructions.
+
+
+## 永久注销账户
+
+`DELETE /api/account/account` 必须有当前登录会话、当前密码和二次确认：
+
+```json
+{"password":"仅用于示例的当前长密码","confirmation":"DELETE_ACCOUNT"}
+```
+
+浏览器还必须提供相同 HTTPS Origin、CSRF 与账户一致性头。错误密码、错误账户、缺少确认和撤销的会话不能删除资料。应用“账户 → 永久注销账户”先重新输入密码，再显示不可恢复的第二次确认；普通“退出登录”仍保留个人数据。
+
+一次 SQLite 事务真实删除用户行、全部会话、个人谱、练习快照和分析版本、AI 请求与缓存、课堂关系和本人提交的作业。老师删除账户会关闭自己创建的课堂，删除该课堂的作业、课堂快照与提交录音；其他用户已领取到个人谱库的副本及其他用户的私人练习历史保留。`secure_delete` 清除 SQLite 被删除页中的内容。网关写入事务在账户提交前保持未提交的所有者栅栏；账户 SQL 失败会回滚栅栏，不误锁仍存在的账号。
+
+私有 OMR worker 会取消并等待进行中的识谱/改谱进程，再删除原始文件、所有谱面版本、MusicXML、MIDI 与识谱结果。服务无法立即删除 OMR/录音文件时，只有不透明用户 UUID 与录音 UUID 留在持久清理队列，账户与会话已删除；返回 `202`、`accountDeleted:true`、`deleted:false`、`status:"pending"`。后台每 15 秒及重启后自动重试；只有实际文件和 OMR 清理完成才返回/移除 `completed` 状态。`200` 返回 `deleted:true,status:"completed"`。任何删除接口错误都不回传用户名、密码、服务凭据或私有路径。
+
+当前设备仅清除原账号的 Web 本机谱库、练习数据库和 Apple 录音/摘要缓存；IndexedDB 和 native 录音存储分别持久记录 UUID 栅栏，阻止迟到任务重新写回。访客及其他账户的本机记录保留。Apple 本机文件暂时被占用会显示“本机清理待完成”并在下次打开时重试。其他离线设备无法被远程擦除，但其旧会话已不可访问服务器。
+
+专项回归：`test_account_deletion.py` 检查真实 HTTP/SQLite/录音、密码/CSRF/二次确认、学生与老师删除边界、全部会话撤销、实际账户行消失、不可复活的 AI 缓存、SQL 回滚和待清理重试。`test_account_omr_integration.py` 检查真实 account/gateway/worker HTTP 联动与私有所有权、旧设备迁移、SQL 回滚栅栏和上游失败。所有测试只创建合成账户，不操作真实用户。

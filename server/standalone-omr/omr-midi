@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+umask 0027
+unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS
+exec /opt/audiveris/lib/runtime/bin/java -Xms32m -Xmx512m \
+  -Djava.awt.headless=true \
+  -cp '/opt/notelite-omr/lib/*:/opt/audiveris/lib/app/*' \
+  com.notelite.omr.score.OmrMidiConverter "$@"

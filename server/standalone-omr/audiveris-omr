@@ -1,0 +1,14 @@
+#!/bin/bash
+set -euo pipefail
+umask 0027
+export TESSDATA_PREFIX=/var/lib/audiveris/tessdata
+export OMP_THREAD_LIMIT=2
+unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS
+exec flock -w 30 -E 75 /var/lib/audiveris/.omr.lock \
+  /opt/audiveris/lib/runtime/bin/java \
+  -Xms256m -Xmx4g -XX:ActiveProcessorCount=2 \
+  -Djava.awt.headless=true -Dsun.java2d.uiScale=1 \
+  --add-exports=java.desktop/sun.awt.image=ALL-UNNAMED \
+  --enable-native-access=ALL-UNNAMED \
+  -cp '/opt/audiveris/lib/app/*' Audiveris \
+  -batch -transcribe -export "$@"

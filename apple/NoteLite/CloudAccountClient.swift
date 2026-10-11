@@ -135,7 +135,7 @@ final class CloudAccountClient {
         switch p.count {
         case 1:
             let verbs: [String: Set<String>] = ["health": ["GET"], "register": ["POST"], "login": ["POST"],
-                "me": ["GET"], "logout": ["POST"], "sessions": ["GET"], "catalog": ["GET"],
+                "me": ["GET"], "logout": ["POST"], "account": ["DELETE"], "sessions": ["GET"], "catalog": ["GET"],
                 "scores": ["GET", "POST"], "history": ["GET", "POST"], "courses": ["GET", "POST"], "uploads": ["POST"],
                 "practice-analysis": ["POST"]]
             allowed = verbs[p[0]]?.contains(method) == true
@@ -231,9 +231,10 @@ final class CloudAccountClient {
         }
         let auth = path == "/register" || path == "/login"
         let logout = path == "/logout"
+        let deleting = path == "/account" && method == "DELETE"
         guard !changingAuthentication else { throw CloudOMRError(code: "busy", message: "正在更新登录状态，请稍后重试。") }
-        if auth || logout { changingAuthentication = true }
-        defer { if auth || logout { changingAuthentication = false } }
+        if auth || logout || deleting { changingAuthentication = true }
+        defer { if auth || logout || deleting { changingAuthentication = false } }
         let identity = try credential()
         let isPublic = auth || path == "/health"
         if !isPublic && identity == nil { throw Self.unauthenticated() }
@@ -265,11 +266,16 @@ final class CloudAccountClient {
                     object["mode"] = "native"
                     value = object
                 }
+                if deleting {
+                    guard let object = body as? [String: Any], Set(object.keys) == ["password", "confirmation"],
+                          let password = object["password"] as? String, (15...256).contains(password.unicodeScalars.count),
+                          password.utf8.count <= 1024, object["confirmation"] as? String == "DELETE_ACCOUNT" else { throw Self.invalidRequest() }
+                }
                 let data = try JSONSerialization.data(withJSONObject: value)
-                guard data.count <= (auth ? 4096 : 24 * 1024 * 1024) else { throw Self.invalidRequest() }
+                guard data.count <= (auth || deleting ? 4096 : 24 * 1024 * 1024) else { throw Self.invalidRequest() }
                 request.httpBody = data
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            } else if auth { throw Self.invalidRequest() }
+            } else if auth || deleting { throw Self.invalidRequest() }
         }
         if let etag = input["etag"] {
             guard let etag = etag as? String, route.path.count == 4, route.path[2] == "scores", method == "PUT",
@@ -283,7 +289,7 @@ final class CloudAccountClient {
                 try removeIfCurrent(identity)
                 return ["authenticated": false]
             }
-            try Self.validate(response, data: data, accepted: auth ? [201] : method == "POST" ? [200, 201] : [200])
+            try Self.validate(response, data: data, accepted: auth ? [201] : deleting ? [200, 202] : method == "POST" ? [200, 201] : [200])
             guard data.count <= (representation == "text" ? 10 * 1024 * 1024 : 16 * 1024 * 1024) else { throw NoteLiteError.invalidResponse }
             try checkStillCurrent(identity)
             if representation == "text" {
@@ -306,6 +312,10 @@ final class CloudAccountClient {
                       (object["sessionId"] as? String)?.lowercased() == identity?.sessionID else { throw NoteLiteError.invalidResponse }
                 return Self.publicIdentity(object)
             }
+            if deleting {
+                guard Self.isAcceptedDeletion(result) else { throw NoteLiteError.invalidResponse }
+                try removeIfCurrent(identity)
+            }
             if logout || (method == "DELETE" && route.path == ["api", "account", "sessions", identity?.sessionID ?? ""]) { try removeIfCurrent(identity) }
             return result
         } catch {
@@ -314,6 +324,18 @@ final class CloudAccountClient {
             }
             throw error
         }
+    }
+
+    private static func strictJSONBoolean(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    static func isAcceptedDeletion(_ result: Any) -> Bool {
+        guard let value = result as? [String: Any], Self.strictJSONBoolean(value["authenticated"]) == false,
+              Self.strictJSONBoolean(value["accountDeleted"]) == true, Self.strictJSONBoolean(value["deletionRequested"]) == true,
+              let deleted = Self.strictJSONBoolean(value["deleted"]), value["status"] as? String == (deleted ? "completed" : "pending") else { return false }
+        return true
     }
 
     func downloadAudio(submissionID: String, expectedUserID: Any? = nil) async throws -> CloudAccountAudioFile {
@@ -430,6 +452,10 @@ final class CloudAccountDigestStore {
     }
     private var contexts: [UUID: Context] = [:]
     func clear() { contexts.removeAll() }
+    func clear(accountScope: String) {
+        guard !accountScope.isEmpty else { return }
+        contexts = contexts.filter { $0.value.scope != accountScope && !$0.value.scope.hasPrefix(accountScope + "|") }
+    }
     var count: Int { contexts.count }
     func start(size: Any?, scope: String) throws -> [String: Any] {
         contexts = contexts.filter { Date().timeIntervalSince($0.value.touched) < 300 }

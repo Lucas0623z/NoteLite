@@ -289,6 +289,7 @@ class PracticeAnalysis:
         if event_ids is not None and (not isinstance(event_ids, list) or not 1 <= len(event_ids) <= 200 or any(not isinstance(v, str) or not UUID_RE.fullmatch(v) for v in event_ids) or len(set(event_ids)) != len(event_ids)):
             raise AnalysisError(400, "请提供最多 200 条不同的练习记录标识。")
         with self.store.connect() as db:
+            self.store.require_active_user(db, user_id)
             if event_ids is None:
                 selected = list(db.execute("SELECT event_id,length(CAST(payload AS BLOB)) AS size FROM history WHERE user_id=? ORDER BY created DESC,event_id DESC LIMIT 201", (user_id,)))
                 has_more, selected = len(selected) > 200, selected[:200]
@@ -444,6 +445,7 @@ class PracticeAnalysis:
         try:
             with self.lock, self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
+                self.store.require_active_user(db, user_id)
                 old = db.execute("SELECT * FROM practice_analysis_v2_requests WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone()
                 if old:
                     if old["input_sha"] != input_sha:
@@ -495,6 +497,8 @@ class PracticeAnalysis:
             except Exception:
                 result, state = self.fallback(prepared, request_id, retry_allowed=False), "unknown"
             with self.store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                self.store.require_active_user(db, user_id)
                 db.execute("UPDATE practice_analysis_v2_requests SET state=?,result=? WHERE user_id=? AND request_id=?", (state, json_bytes(result).decode(), user_id, request_id))
                 if state == "completed":
                     db.execute("INSERT OR REPLACE INTO practice_analysis_v2_cache VALUES(?,?,?,?)", (user_id, input_sha, json_bytes(result["output"]).decode(), self.clock()))

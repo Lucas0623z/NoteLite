@@ -7,7 +7,8 @@ The OMR ownership and legacy-claim adapters are explicitly fail-closed hooks.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
 import hmac
@@ -176,7 +177,7 @@ SAMPLE_XML = '''<?xml version="1.0" encoding="UTF-8"?>
 
 
 class Store:
-    def __init__(self, root, *, clock=time.time, omr_import=None, legacy_claim=None,
+    def __init__(self, root, *, clock=time.time, omr_import=None, legacy_claim=None, omr_delete=None, omr_fence=None,
                  max_recording=100 * 1024 * 1024, recording_quota=1024 ** 3, disk_reserve=256 * 1024 * 1024):
         root = Path(root).absolute()
         if root.is_symlink():
@@ -186,7 +187,9 @@ class Store:
         if self.path.is_symlink():
             raise ValueError("数据库不能为符号链接。")
         self.lock, self.clock = threading.RLock(), clock
-        self.omr_import, self.legacy_claim = omr_import, legacy_claim
+        self.owner_context = ContextVar("notelite-account-request-owner", default=None)
+        self.deletion_lock = threading.Lock()
+        self.omr_import, self.legacy_claim, self.omr_delete, self.omr_fence = omr_import, legacy_claim, omr_delete, omr_fence
         self.recordings = root / "recordings"
         if self.recordings.is_symlink():
             raise ValueError("录音目录不能为符号链接。")
@@ -195,6 +198,7 @@ class Store:
         with self.connect() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,salt TEXT NOT NULL,password_hash TEXT NOT NULL,created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS account_deletions(user_id TEXT PRIMARY KEY,recordings TEXT NOT NULL,created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),kind TEXT NOT NULL,name TEXT NOT NULL,token_hash TEXT UNIQUE NOT NULL,csrf_hash TEXT NOT NULL,expires REAL NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL);
             CREATE INDEX IF NOT EXISTS user_sessions ON sessions(user_id);
             CREATE TABLE IF NOT EXISTS catalog(id TEXT PRIMARY KEY,title TEXT NOT NULL,composer TEXT NOT NULL,license TEXT NOT NULL,source TEXT NOT NULL,xml TEXT NOT NULL);
@@ -235,7 +239,10 @@ class Store:
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA synchronous=FULL")
+            db.execute("PRAGMA secure_delete=ON")
             try:
+                if self.owner_context.get() is not None:
+                    self.require_active_user(db, self.owner_context.get())
                 yield db
                 db.commit()
             except Exception:
@@ -243,6 +250,120 @@ class Store:
                 raise
             finally:
                 db.close()
+
+    @staticmethod
+    def require_active_user(db, user_id):
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+            raise APIError(401, "账户已注销，请重新读取登录状态。")
+
+    @contextmanager
+    def owner_scope(self, user_id):
+        token = self.owner_context.set(user_id)
+        try:
+            yield
+        finally:
+            self.owner_context.reset(token)
+
+    def install_analysis_guards(self, db):
+        # Old schema versions intentionally lacked a foreign key. Guard both
+        # INSERT and UPDATE so a delayed provider response cannot resurrect data.
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table in ("practice_analysis_v2_requests", "practice_analysis_v2_cache", "practice_analysis_requests", "practice_analysis_cache"):
+            if table in tables:
+                for action in ("INSERT", "UPDATE"):
+                    db.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_active_{action.lower()} BEFORE {action} ON {table} WHEN NOT EXISTS(SELECT 1 FROM users WHERE id=NEW.user_id) BEGIN SELECT RAISE(ABORT,'account_unavailable'); END")
+
+    def request_deletion(self, user_id, session_id, data):
+        fields(data, {"password", "confirmation"}, {"password", "confirmation"})
+        if data["confirmation"] != "DELETE_ACCOUNT":
+            raise APIError(400, "请再次确认永久注销账户。")
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row:
+                raise APIError(401, "账户已注销。")
+        _, candidate = password_hash(data["password"], row["salt"])
+        if not hmac.compare_digest(candidate, row["password_hash"]):
+            raise APIError(403, "当前密码不正确，账户未注销。")
+        # The gateway writer transaction is uncommitted until the account
+        # transaction commits. A failed account SQL operation rolls back both
+        # the owner fence and personal-data deletion, keeping the account usable.
+        with self.lock:
+            try:
+                with self.omr_fence(user_id) if self.omr_fence is not None else nullcontext():
+                    with self.connect() as db:
+                        db.execute("BEGIN IMMEDIATE")
+                        current = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+                        session = db.execute("SELECT 1 FROM sessions WHERE id=? AND user_id=? AND revoked=0 AND expires>?", (session_id, user_id, self.clock())).fetchone()
+                        if not current or not session or current["password_hash"] != row["password_hash"]:
+                            raise APIError(401, "登录状态已改变，请重新确认注销。")
+                        self.install_analysis_guards(db)
+                        owned_class = "SELECT id FROM courses WHERE creator=?"
+                        class_assignments = "SELECT a.id FROM assignments a JOIN courses c ON c.id=a.course_id WHERE c.creator=?"
+                        recordings = [r[0] for r in db.execute(f"SELECT id FROM uploads WHERE user_id=? OR assignment_id IN ({class_assignments})", (user_id, user_id))]
+                        db.execute(f"DELETE FROM submissions WHERE user_id=? OR assignment_id IN ({class_assignments})", (user_id, user_id))
+                        db.execute(f"DELETE FROM uploads WHERE user_id=? OR assignment_id IN ({class_assignments})", (user_id, user_id))
+                        db.execute(f"DELETE FROM assignments WHERE course_id IN ({owned_class})", (user_id,))
+                        db.execute(f"DELETE FROM codes WHERE course_id IN ({owned_class})", (user_id,))
+                        db.execute(f"DELETE FROM course_deliveries WHERE user_id=? OR course_id IN ({owned_class})", (user_id, user_id))
+                        db.execute(f"DELETE FROM memberships WHERE user_id=? OR course_id IN ({owned_class})", (user_id, user_id))
+                        db.execute(f"DELETE FROM course_scores WHERE course_id IN ({owned_class})", (user_id,))
+                        db.execute("DELETE FROM courses WHERE creator=?", (user_id,))
+                        db.execute("DELETE FROM history_analysis_versions WHERE user_id=?", (user_id,))
+                        db.execute("DELETE FROM history WHERE user_id=?", (user_id,))
+                        db.execute("DELETE FROM score_requests WHERE user_id=?", (user_id,))
+                        db.execute("DELETE FROM scores WHERE user_id=?", (user_id,))
+                        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                        for table in ("practice_analysis_v2_requests", "practice_analysis_v2_cache", "practice_analysis_requests", "practice_analysis_cache"):
+                            if table in tables:
+                                db.execute("DELETE FROM " + table + " WHERE user_id=?", (user_id,))
+                        db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+                        # Only opaque IDs remain while filesystem/OMR cancellation retries.
+                        # The actual username, password hash and account record are deleted.
+                        db.execute("INSERT INTO account_deletions VALUES(?,?,?)", (user_id, json.dumps(recordings), self.clock()))
+                        db.execute("DELETE FROM users WHERE id=?", (user_id,))
+            except Exception:
+                # A gateway commit can fail after the account commit. The opaque
+                # cleanup queue is already durable: report pending and retry;
+                # never restore or silently disable an existing account.
+                with self.owner_scope(None), self.connect() as db:
+                    committed = not db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone() and db.execute("SELECT 1 FROM account_deletions WHERE user_id=?", (user_id,)).fetchone()
+                if not committed:
+                    raise
+        with self.owner_scope(None):
+            complete = self.process_deletion(user_id)
+        return {"authenticated": False, "accountDeleted": True, "deletionRequested": True,
+                "deleted": complete, "status": "completed" if complete else "pending"}
+
+    def process_deletion(self, user_id):
+        # Persisted queue means an unavailable OMR worker or an open Windows
+        # recording cannot turn account deletion into a false completion.
+        if not self.deletion_lock.acquire(blocking=False):
+            return False
+        try:
+            with self.connect() as db:
+                request = db.execute("SELECT recordings FROM account_deletions WHERE user_id=?", (uid(user_id),)).fetchone()
+            if not request:
+                return True
+            try:
+                for recording in json.loads(request[0]):
+                    self.recording_path(recording).unlink(missing_ok=True)
+                if self.omr_delete is not None:
+                    self.omr_delete(user_id)
+                elif self.omr_import is not None or self.legacy_claim is not None:
+                    raise APIError(503, "识谱删除适配器尚未配置。")
+                with self.connect() as db:
+                    db.execute("DELETE FROM account_deletions WHERE user_id=?", (user_id,))
+                return True
+            except (APIError, OSError, ValueError):
+                return False
+        finally:
+            self.deletion_lock.release()
+
+    def process_deletions(self):
+        with self.connect() as db:
+            users = [r[0] for r in db.execute("SELECT user_id FROM account_deletions ORDER BY created LIMIT 100")]
+        for user_id in users:
+            self.process_deletion(user_id)
 
     def register(self, data):
         fields(data, {"username", "password", "mode", "deviceName"}, {"username", "password"})
@@ -277,6 +398,7 @@ class Store:
             return self.new_session(db, row["id"], name, data)
 
     def new_session(self, db, user_id, name, data):
+        self.require_active_user(db, user_id)
         kind, device_name = self.session_options(data)
         token, session_id = secrets.token_urlsafe(32), str(uuid.uuid4())
         csrf = csrf_value(token)
@@ -1061,11 +1183,29 @@ class Server(ThreadingHTTPServer):
             raise ValueError("必须配置无路径的 HTTPS public-origin。")
         self.origin, self.authority, self.store = origin.rstrip("/"), parsed.netloc.lower(), store
         self.practice_analysis = from_environment(store)
+        with store.connect() as db:
+            store.install_analysis_guards(db)
         self.internal_key = internal_key
         if internal_key is not None:
             token_hash(internal_key)
         self.limiter, self.capacity = RateLimit(), threading.BoundedSemaphore(16)
         super().__init__(address, Handler)
+        self.deletion_stop = threading.Event()
+        self.deletion_thread = threading.Thread(target=self.retry_deletions, daemon=True)
+        self.deletion_thread.start()
+
+    def retry_deletions(self):
+        while not self.deletion_stop.is_set():
+            try:
+                self.store.process_deletions()
+            except (sqlite3.Error, OSError, APIError):
+                pass
+            self.deletion_stop.wait(15)
+
+    def server_close(self):
+        self.deletion_stop.set()
+        super().server_close()
+        self.deletion_thread.join(timeout=1)
 
     def process_request(self, request, address):
         if not self.capacity.acquire(blocking=False):
@@ -1229,7 +1369,13 @@ class Handler(BaseHTTPRequestHandler):
             self.login_response(self.server.store.register(data) if route == "/register" else self.server.store.login(data))
             return
         session = self.identity()
+        with self.server.store.owner_scope(session["user_id"]):
+            return self.protected_dispatch(route, query, session, source)
+
+    def protected_dispatch(self, route, query, session, source):
         user_id, store = session["user_id"], self.server.store
+        with store.connect():
+            pass  # Recheck a previously authenticated request after deletion.
         expected = self.headers.get_all("X-NoteLite-Expected-User", [])
         if expected:
             if len(expected) != 1:
@@ -1252,6 +1398,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.command == "GET" and route == "/sessions" and not query:
             self.respond(200, {"sessions": store.session_list(user_id)})
+            return
+        if self.command == "DELETE" and route == "/account" and not query:
+            self.server.limiter.check(("account-delete", user_id), 6, 3600)
+            self.server.limiter.check(("account-delete-ip", source), 20, 3600)
+            result = store.request_deletion(user_id, session["id"], self.body(4096))
+            self.respond(200 if result["deleted"] else 202, result, [("Set-Cookie", COOKIE + "=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")])
             return
         if self.command == "POST" and route == "/logout" and not query:
             store.revoke(user_id, session["id"])
@@ -1453,7 +1605,11 @@ class Handler(BaseHTTPRequestHandler):
             token_hash(data["deviceToken"])
             # Adapter verifies BOTH existing device + account, CSRF for browser,
             # migrates jobs atomically, revokes/rotates old principals, audits counts.
-            self.respond(200, store.legacy_claim(user_id, data, self.headers.get("Origin")))
+            # Keep the account lock across migration; deletion cannot commit
+            # between active-owner validation and the gateway ownership transfer.
+            with store.connect():
+                result = store.legacy_claim(user_id, data, self.headers.get("Origin"))
+            self.respond(200, result)
             return
         raise APIError(404, "接口不存在。")
 

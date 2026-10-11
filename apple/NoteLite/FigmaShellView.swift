@@ -71,12 +71,15 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     @Published var audioPreview: FigmaAccountAudioPreview?
     private(set) var webView: WKWebView!
     private var requests: [String: Task<Void, Never>] = [:]
+    private var requestAccountScopes: [String: String] = [:]
+    private var deletedAccountScopes = Set<String>()
     private var importContinuation: CheckedContinuation<URL, Error>?
     private var exportContinuation: CheckedContinuation<String, Error>?
     private var importRequestID: String?
     private var exportRequestID: String?
     private var previewDirectory: URL?
     private var audioFile: CloudAccountAudioFile?
+    private var audioAccountScope: String?
     private var accountClients: [String: CloudAccountClient] = [:]
     private let accountDigests = CloudAccountDigestStore()
     private let noteWise = NoteWiseSession()
@@ -147,6 +150,10 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         }
         errorMessage = nil
         loaded = true
+        Task { [weak self] in
+            do { try await self?.noteWise.resumePendingAccountDeletions() }
+            catch { self?.event(["type": "localCleanupPending", "message": "本机录音清理尚未完成，请重新打开应用。"] ) }
+        }
         webView.load(URLRequest(url: URL(string: "notelite-ui://app/index.html")!))
     }
 
@@ -185,7 +192,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         }
         requests[requestID] = Task { [weak self] in
             guard let self else { return }
-            defer { requests.removeValue(forKey: requestID) }
+            defer { requests.removeValue(forKey: requestID); requestAccountScopes.removeValue(forKey: requestID) }
             do {
                 let result = try await perform(action, payload: payload, requestID: requestID)
                 if Task.isCancelled, action == "account/digest/start", let value = result as? [String: Any],
@@ -236,6 +243,13 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
 
     private func perform(_ action: String, payload: [String: Any], requestID: String) async throws -> Any {
         try ReleaseFeatures.requireAllowedRequest(action, payload: payload)
+        if action.hasPrefix("notewise/") || action.hasPrefix("account/") {
+            let scope = origin + "|" + (try accountClient().credential()?.userID ?? "guest")
+            guard !deletedAccountScopes.contains(scope) else {
+                throw CloudOMRError(code: "account_deleted", message: "此账户已注销。", status: 410)
+            }
+            requestAccountScopes[requestID] = scope
+        }
         switch action {
         case "notewise/score-digest":
             let xml = try string(payload, "musicxml")
@@ -255,6 +269,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             guard audioPreview == nil, previewURL == nil, filePanel == nil else { throw CloudOMRError(code:"busy", message:"请先关闭当前播放器或文件窗口。") }
             let scope = try accountClient().credential()?.userID ?? "guest"
             let url = try noteWise.recording(string(payload, "takeId"), scope: origin + "|" + scope)
+            audioAccountScope = origin + "|" + scope
             audioPreview = FigmaAccountAudioPreview(player: AVPlayer(url:url))
             return ["previewOpened":true]
         case "notewise/refine":
@@ -287,7 +302,24 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         case "account/request":
             let capturedOrigin = origin
             let account = try accountClient()
-            let result = try await account.request(payload)
+            let deletionScope: String?
+            if payload["path"] as? String == "/account", payload["method"] as? String == "DELETE",
+               let identity = try account.credential() {
+                deletionScope = capturedOrigin + "|" + identity.userID
+            } else { deletionScope = nil }
+            var result = try await account.request(payload)
+            if let deletionScope, var deletionResult = result as? [String: Any], CloudAccountClient.isAcceptedDeletion(result) {
+                do {
+                    try await purgeDeletedAccount(deletionScope, excluding: requestID)
+                    deletionResult["localCleanupPending"] = false
+                } catch {
+                    // The server already deleted the account. Preserve that
+                    // accepted response and expose a real local cleanup failure.
+                    deletionResult["localCleanupPending"] = true
+                    deletionResult["localCleanupMessage"] = "账户已注销，本机录音清理待完成；重新打开应用会继续清理。"
+                }
+                result = deletionResult
+            }
             guard origin == capturedOrigin else {
                 throw CloudOMRError(code: "identity_changed", message: "服务地址已更改，请重新打开当前内容。", status: 409)
             }
@@ -326,6 +358,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                 }
                 guard playable else { throw CloudOMRError(code: "unsupported_audio", message: "当前设备不能播放这种录音格式。") }
                 audioFile = file
+                audioAccountScope = capturedOrigin + "|" + (try account.credential()!.userID)
                 audioPreview = FigmaAccountAudioPreview(player: AVPlayer(url: file.url))
                 return ["previewOpened": true]
             } catch { file.remove(); throw error }
@@ -534,6 +567,20 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         audioPreview = nil
         audioFile?.remove()
         audioFile = nil
+        audioAccountScope = nil
+    }
+
+    private func purgeDeletedAccount(_ scope: String, excluding requestID: String) async throws {
+        deletedAccountScopes.insert(scope)
+        let pending = requests.compactMap { id, task in
+            id != requestID && requestAccountScopes[id] == scope ? task : nil
+        }
+        pending.forEach { $0.cancel() }
+        accountDigests.clear(accountScope: scope)
+        if audioAccountScope == scope { clearAudio() }
+        // deleteRecordings detaches input and persists its cleanup marker before
+        // the first suspension. Drain/cancel native readers before removing WAVs.
+        _ = try await noteWise.deleteRecordings(accountScope: scope, waitingFor: pending)
     }
 
     private func cancelRequest(_ requestID: String) {

@@ -1,7 +1,9 @@
 import { CloudError, cloud, createUUID, isNativeCloud, nativeRequest } from "./cloud.ts";
+import { purgeDeletedAccountData } from "./account-local-data.ts";
 import { requireAllowedRequest } from "./purchases.ts";
 import type { NoteWiseAnalysis } from "./notewise.ts";
 
+export type AccountDeletion = { authenticated: false; accountDeleted: true; deletionRequested: true; deleted: boolean; status: "completed" | "pending"; localCleanupPending?: boolean; localCleanupMessage?: string };
 export type AccountIdentity = { authenticated: true; userId: string; username: string; sessionId: string; deviceName: string; expiresAt: string; kind: "browser" | "native" };
 export type PersonalScore = { id: string; title: string; revision: number; etag: string; updatedAt: string; omr?: { jobId: string; scoreIndex: number; revision: number } };
 export type CatalogScore = { id: string; title: string; composer: string; license: string; source: string };
@@ -30,7 +32,8 @@ export class AccountClient {
   private native: typeof isNativeCloud;
   private bridge: typeof nativeRequest;
   private changed: () => void;
-  constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, changed: () => void = () => { cloud.resetSession(); window.dispatchEvent(new Event(ACCOUNT_EVENT)); }) { this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.changed = changed; }
+  private purge: (owner: string) => Promise<void>;
+  constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, changed: () => void = () => { cloud.resetSession(); window.dispatchEvent(new Event(ACCOUNT_EVENT)); }, purge: (owner: string) => Promise<void> = purgeDeletedAccountData) { this.purge = purge; this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.changed = changed; }
   get current(): AccountIdentity | null { return this.identity; }
   private async request<T>(input: AccountRequest): Promise<T> {
     requireAllowedRequest("account/request", input);
@@ -81,6 +84,16 @@ export class AccountClient {
     const value = await this.request<AccountIdentity>({ path: `/${mode}`, method: "POST", body: { username, password, mode: this.native() ? "native" : "browser", deviceName: this.native() ? "黑白键 Apple" : "黑白键浏览器" }, response: "json" });
     if (generation !== this.generation) throw new CloudError("账户操作已更新，请重新读取当前账户。");
     this.retain(value); this.changed(); return this.identity!;
+  }
+  async deleteAccount(password: string): Promise<AccountDeletion> {
+    if (!this.identity) throw new CloudError("请先登录账户。", 401);
+    const owner = this.identity.userId, generation = ++this.generation;
+    const result = await this.request<AccountDeletion>({ path: "/account", method: "DELETE", body: { password, confirmation: "DELETE_ACCOUNT" }, response: "json" });
+    if (result?.authenticated !== false || result.accountDeleted !== true || result.deletionRequested !== true || typeof result.deleted !== "boolean" || result.status !== (result.deleted ? "completed" : "pending")) throw new CloudError("注销结果尚未确认，请重新读取账户状态。", undefined, "write_status_unknown");
+    if (generation === this.generation && this.identity?.userId === owner) { this.identity = null; this.csrf = ""; this.changed(); }
+    try { await this.purge(owner); }
+    catch { return { ...result, localCleanupPending: true, localCleanupMessage: "账户已注销，本机资料清理待重试。请关闭其他旧版应用窗口并重新打开应用。" }; }
+    return result;
   }
   async logout(): Promise<void> { const generation = ++this.generation; await this.request({ path: "/logout", method: "POST", response: "json" }); if (generation !== this.generation) return; this.identity = null; this.csrf = ""; this.changed(); }
   sessions() { return this.request<{ sessions: { sessionId: string; deviceName: string; kind: string; createdAt: string; expiresAt: string }[] }>({ path: "/sessions", method: "GET", response: "json" }); }

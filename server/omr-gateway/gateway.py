@@ -90,6 +90,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,hash TEXT UNIQUE NOT NULL,kind TEXT NOT NULL,csrf TEXT NOT NULL,expires REAL NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS legacy_claims(owner TEXT PRIMARY KEY,user_id TEXT NOT NULL,created REAL NOT NULL,count INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS deleted_owners(owner TEXT PRIMARY KEY,created REAL NOT NULL);
             """)
         if os.name == "posix":
             root.chmod(0o700)
@@ -125,6 +126,7 @@ class Store:
         owner = canonical_uuid(owner) if owner else self.default_owner()
         code, expires = secrets.token_urlsafe(32), time.time() + ttl
         with self.connect() as db:
+            self.check_owner(db, owner)
             db.execute("DELETE FROM pairs WHERE expires < ? OR used=1", (time.time(),))
             db.execute("INSERT INTO pairs(hash,owner,expires) VALUES(?,?,?)", (digest(code), owner, expires))
         return {"code": code, "owner": owner, "expiresAt": stamp(expires)}
@@ -143,6 +145,7 @@ class Store:
             pair = db.execute("SELECT owner FROM pairs WHERE hash=? AND expires>? AND used=0", (digest(code), time.time())).fetchone()
             if not pair:
                 raise GatewayError(401, "配对码无效、已使用或已过期。")
+            self.check_owner(db, pair[0])
             db.execute("UPDATE pairs SET used=1 WHERE hash=?", (digest(code),))
             db.execute("INSERT INTO devices VALUES(?,?,?,?,?,?,?,0)", (device, pair[0], name.strip(), digest(token), kind, csrf, expires))
         return {"deviceId": device, "owner": pair[0], "deviceName": name.strip(), "expiresAt": stamp(expires), "token": token, "csrf": csrf, "kind": kind}
@@ -154,23 +157,92 @@ class Store:
             row = db.execute("SELECT * FROM devices WHERE hash=? AND kind=? AND expires>? AND revoked=0", (digest(token), kind, time.time())).fetchone()
             if not row:
                 raise GatewayError(401, "设备凭据无效或已过期，请重新配对。")
+            self.check_owner(db, row["owner"])
             return dict(row)
 
-    def own(self, job, owner):
-        with self.connect() as db:
-            row = db.execute("SELECT owner FROM jobs WHERE id=?", (job,)).fetchone()
-            if not row or not hmac.compare_digest(row[0], owner):
-                raise GatewayError(404, "任务不存在。")
+    def check_owner(self, db, owner):
+        canonical_uuid(owner)
+        if db.execute("SELECT 1 FROM deleted_owners WHERE owner=?", (owner,)).fetchone():
+            raise GatewayError(410, "账户已申请注销，识谱资料正在清理。")
 
-    def register(self, job, owner):
-        canonical_uuid(job)
+    @contextmanager
+    def owner_operation(self, owner):
+        # SQLite coordinates the separate account and gateway processes. A
+        # write reservation spans upstream creation and ownership registration,
+        # so permanent deletion cannot miss a received but unregistered job.
         with self.connect() as db:
-            if db.execute("SELECT 1 FROM legacy_claims WHERE owner=?", (owner,)).fetchone():
-                raise GatewayError(409, "旧设备资料已迁移，请使用账户重新登录。")
-            db.execute("INSERT INTO jobs VALUES(?,?,?)", (job, owner, time.time()))
+            try:
+                db.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as error:
+                raise GatewayError(503, "识谱操作正在结束，请稍后重试。") from error
+            self.check_owner(db, owner)
+            yield db
+
+    @contextmanager
+    def deletion_fence(self, owner):
+        # Account deletion performs its own SQLite commit inside this fence.
+        # Until that commit succeeds, tombstones remain uncommitted so an
+        # account-transaction failure cannot strand a still-existing account.
+        # The writer reservation prevents cached gateway requests committing
+        # a new job before account deletion and its durable retry queue exist.
+        canonical_uuid(owner)
+        with self.connect() as db:
+            try:
+                db.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as error:
+                raise GatewayError(503, "识谱操作正在结束，请稍后重试注销。") from error
+            db.execute("INSERT OR IGNORE INTO deleted_owners VALUES(?,?)", (owner, time.time()))
+            for row in db.execute("SELECT owner FROM legacy_claims WHERE user_id=?", (owner,)).fetchall():
+                db.execute("INSERT OR IGNORE INTO deleted_owners VALUES(?,?)", (row[0], time.time()))
+            yield db
+
+    def freeze_owner(self, owner):
+        # Durable retries use the same reservation without an account write.
+        with self.deletion_fence(owner):
+            pass
+
+    def delete_owner(self, owner):
+        self.freeze_owner(owner)
+        with self.connect() as db:
+            return [row[0] for row in db.execute("SELECT id FROM jobs WHERE owner=? ORDER BY id", (owner,))]
+
+    def finish_delete_owner(self, owner):
+        canonical_uuid(owner)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM deleted_owners WHERE owner=?", (owner,)).fetchone():
+                raise GatewayError(409, "注销清理尚未锁定此账户。")
+            db.execute("DELETE FROM jobs WHERE owner=?", (owner,))
+            previous = [row[0] for row in db.execute("SELECT owner FROM legacy_claims WHERE user_id=?", (owner,))]
+            for legacy in previous:
+                db.execute("DELETE FROM devices WHERE owner=?", (legacy,))
+                db.execute("DELETE FROM pairs WHERE owner=?", (legacy,))
+            db.execute("DELETE FROM devices WHERE owner=?", (owner,))
+            db.execute("DELETE FROM pairs WHERE owner=?", (owner,))
+            db.execute("DELETE FROM legacy_claims WHERE owner=? OR user_id=?", (owner, owner))
+
+    def own(self, job, owner, db=None):
+        if db is None:
+            with self.connect() as connection:
+                return self.own(job, owner, connection)
+        self.check_owner(db, owner)
+        row = db.execute("SELECT owner FROM jobs WHERE id=?", (job,)).fetchone()
+        if not row or not hmac.compare_digest(row[0], owner):
+            raise GatewayError(404, "任务不存在。")
+
+    def register(self, job, owner, db=None):
+        canonical_uuid(job)
+        if db is None:
+            with self.connect() as connection:
+                return self.register(job, owner, connection)
+        self.check_owner(db, owner)
+        if db.execute("SELECT 1 FROM legacy_claims WHERE owner=?", (owner,)).fetchone():
+            raise GatewayError(409, "旧设备资料已迁移，请使用账户重新登录。")
+        db.execute("INSERT INTO jobs VALUES(?,?,?)", (job, owner, time.time()))
 
     def list_ids(self, owner):
         with self.connect() as db:
+            self.check_owner(db, owner)
             return {row[0] for row in db.execute("SELECT id FROM jobs WHERE owner=?", (owner,))}
 
     def revoke(self, device):
@@ -484,12 +556,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.command == "POST" and set(query) == {"filename"}:
                 self.server.limiter.check(("upload", identity["owner"]), 12)
-                status, value = self.json_upstream(self.read_body(MAX_UPLOAD))
-                try:
-                    self.server.store.register(value["id"], identity["owner"])
-                except (KeyError, GatewayError, sqlite3.Error) as error:
-                    # A received-but-unregistered job remains private to the administrator.
-                    raise GatewayError(502, "任务已接收但未能登记，请联系管理员，避免重复上传。") from error
+                body = self.read_body(MAX_UPLOAD)
+                failure = None
+                with self.server.store.owner_operation(identity["owner"]) as db:
+                    job = str(uuid.uuid4())
+                    self.server.store.register(job, identity["owner"], db=db)
+                    try:
+                        status, value = self.json_upstream(body, {"X-NoteLite-Job-Id": job})
+                        if not isinstance(value, dict) or value.get("id") != job:
+                            raise GatewayError(502, "任务标识未确认，请刷新任务列表后重试。")
+                    except GatewayError as error:
+                        # Keep the reserved ID on lost/invalid responses: private
+                        # cleanup can still reach any accepted upload.
+                        failure = error
+                if failure:
+                    raise failure
                 self.json(status, value)
                 return
             raise GatewayError(400 if self.command in {"GET", "POST"} else 405, "请求方法或参数无效。")
@@ -513,14 +594,19 @@ class Handler(BaseHTTPRequestHandler):
             data = self.read_json(128 * 1024)
             if not isinstance(data.get("revision"), int) or isinstance(data["revision"], bool) or data["revision"] < 1:
                 raise GatewayError(400, "保存修改必须提供有效修订号。")
-            status, value = self.json_upstream(json.dumps(data, ensure_ascii=False).encode("utf8"))
+            with self.server.store.owner_operation(identity["owner"]) as db:
+                self.server.store.own(job, identity["owner"], db=db)
+                status, value = self.json_upstream(json.dumps(data, ensure_ascii=False).encode("utf8"))
             self.json(status, value)
             return
         if self.command == "PUT" and action == "score":
             revisions = self.headers.get_all("If-Match", [])
             if len(revisions) != 1 or not re.fullmatch(r'"?[1-9][0-9]*"?', revisions[0]):
                 raise GatewayError(400, "保存修改必须提供 If-Match 修订号。")
-            status, value = self.json_upstream(self.read_body(MAX_XML), {"If-Match": revisions[0]})
+            body = self.read_body(MAX_XML)
+            with self.server.store.owner_operation(identity["owner"]) as db:
+                self.server.store.own(job, identity["owner"], db=db)
+                status, value = self.json_upstream(body, {"If-Match": revisions[0]})
             self.json(status, value)
             return
         raise GatewayError(405, "请求方法无效。")

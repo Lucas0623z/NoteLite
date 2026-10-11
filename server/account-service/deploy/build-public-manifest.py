@@ -13,7 +13,7 @@ def public_manifest(root):
         raise ValueError("Invalid public source list")
     if len(set(n.casefold() for n in names)) != len(names):
         raise ValueError("Duplicate public source path")
-    required = {"account_service.py", "practice_analysis.py", "performance_analysis.py", "fixtures/notewise-v2.json", "test_performance_analysis.py", "test_history_analysis_versions.py"}
+    required = {"account_service.py", "practice_analysis.py", "performance_analysis.py", "fixtures/notewise-v2.json", "test_performance_analysis.py", "test_history_analysis_versions.py", "test_account_deletion.py"}
     if not required <= set(names):
         raise ValueError("Incomplete performance analysis source offer")
     result = {}

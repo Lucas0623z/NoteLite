@@ -33,16 +33,20 @@ class OMRHandler(BaseHTTPRequestHandler):
         if self.headers.get("Authorization")!="Bearer "+self.server.token:self.reply(401,{});return
         path=urlsplit(self.path).path
         if path=="/api/jobs" and self.command=="POST":
-            self.rfile.read(int(self.headers["Content-Length"]));job={"id":str(uuid.uuid4()),"state":"succeeded","revision":1,"filename":"synthetic.musicxml"}
+            self.rfile.read(int(self.headers["Content-Length"]));job={"id":self.headers.get("X-NoteLite-Job-Id") or str(uuid.uuid4()),"state":"succeeded","revision":1,"filename":"synthetic.musicxml"}
             self.server.jobs[job["id"]]=job;self.reply(202,job)
         elif path=="/api/jobs":self.reply(200,{"jobs":list(self.server.jobs.values())})
+        elif path.startswith("/api/jobs/") and self.command=="DELETE":
+            if getattr(self.server,"fail_delete",False): self.reply(503,{});return
+            job_id=path.split("/")[3]; absent=self.server.jobs.pop(job_id,None) is None
+            self.reply(200,{"id":job_id,"deleted":True,"alreadyAbsent":absent})
         elif path.startswith("/api/jobs/"):
             job=self.server.jobs.get(path.split("/")[3])
             if not job:self.reply(404,{});return
             if path.endswith("musicxml"):self.reply(200,account.SAMPLE_XML.encode(),f'"{job["revision"]}"')
             else:self.reply(200,job)
         else:self.reply(404,{})
-    do_GET=do_POST=dispatch
+    do_GET=do_POST=do_DELETE=dispatch
 
 
 class IntegrationTests(unittest.TestCase):
@@ -52,7 +56,7 @@ class IntegrationTests(unittest.TestCase):
         cls.gstore=gateway.Store(Path(cls.root.name)/"gateway");cls.upstream=ThreadingHTTPServer(("127.0.0.1",0),OMRHandler)
         cls.upstream.token=secrets.token_urlsafe(32);cls.upstream.jobs={}
         cls.bridge=OMRBridge(cls.gstore,cls.upstream.token,cls.origin,upstream_port=cls.upstream.server_port)
-        cls.astore=IntegratedStore(Path(cls.root.name)/"accounts",omr_import=cls.bridge.import_score,legacy_claim=cls.bridge.claim)
+        cls.astore=IntegratedStore(Path(cls.root.name)/"accounts",omr_import=cls.bridge.import_score,legacy_claim=cls.bridge.claim,omr_delete=cls.bridge.delete_owner,omr_fence=cls.bridge.deletion_fence)
         def user_exists(owner):
             with cls.astore.connect() as db:return db.execute("SELECT 1 FROM users WHERE id=?",(owner,)).fetchone() is not None
         cls.bridge.account_user_exists=user_exists
@@ -79,6 +83,52 @@ class IntegrationTests(unittest.TestCase):
         finally:connection.close()
     def upload(self,identity=None,headers=None):return self.call("POST","/api/jobs?filename=synthetic.musicxml",account.SAMPLE_XML.encode(),identity,headers,202)
     def legacy(self,kind="native",owner=None):return self.gstore.redeem(self.gstore.pair(owner or str(uuid.uuid4()))["code"],"Old synthetic device",kind)
+    def test_account_deletion_cancels_private_omr_results_and_preserves_other_owner(self):
+        user=self.astore.register({"username":"delete_"+uuid.uuid4().hex[:16],"password":"only synthetic long test password","mode":"native"})
+        first=self.upload(user);other=self.upload(self.other)
+        old=self.legacy();legacy_job=self.upload(old)
+        self.call("POST","/api/account/legacy/claim",{"deviceToken":old["token"],"deviceKind":"native"},user,account_api=True)
+        self.call("DELETE","/api/account/account",{"password":"only synthetic long test password","confirmation":"DELETE_ACCOUNT"},user,account_api=True)
+        self.assertNotIn(first["id"],self.upstream.jobs)
+        self.assertNotIn(legacy_job["id"],self.upstream.jobs)
+        self.assertIn(other["id"],self.upstream.jobs)
+        self.call("GET","/api/jobs/"+other["id"],identity=self.other)
+        self.call("GET","/api/jobs",identity=user,expected=401)
+        with self.gstore.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs WHERE owner=?",(user["userId"],)).fetchone()[0],0)
+            self.assertIsNotNone(db.execute("SELECT 1 FROM deleted_owners WHERE owner=?",(old["owner"],)).fetchone())
+
+    def test_account_delete_sql_rollback_does_not_leave_gateway_owner_frozen(self):
+        user=self.astore.register({"username":"rollback_"+uuid.uuid4().hex[:16],"password":"only synthetic long test password","mode":"native"})
+        job=self.upload(user)
+        with self.astore.connect() as db:
+            db.execute("CREATE TRIGGER synthetic_rollback BEFORE DELETE ON users WHEN OLD.id='"+user["userId"]+"' BEGIN SELECT RAISE(ABORT,'synthetic SQL failure'); END")
+        try:
+            self.call("DELETE","/api/account/account",{"password":"only synthetic long test password","confirmation":"DELETE_ACCOUNT"},user,expected=503,account_api=True)
+            # Bridge maps a transaction/fence failure to static retryable 503.
+            self.call("GET","/api/account/me",identity=user,account_api=True)
+            self.call("GET","/api/jobs/"+job["id"],identity=user)
+            self.upload(user)
+            with self.gstore.connect() as db:
+                self.assertIsNone(db.execute("SELECT 1 FROM deleted_owners WHERE owner=?",(user["userId"],)).fetchone())
+        finally:
+            with self.astore.connect() as db: db.execute("DROP TRIGGER synthetic_rollback")
+
+    def test_worker_unavailable_retains_cleanup_queue_and_blocked_owner_until_retry(self):
+        user=self.astore.register({"username":"retry_"+uuid.uuid4().hex[:16],"password":"only synthetic long test password","mode":"native"})
+        job=self.upload(user)
+        self.upstream.fail_delete=True
+        try:
+            result=self.call("DELETE","/api/account/account",{"password":"only synthetic long test password","confirmation":"DELETE_ACCOUNT"},user,expected=202,account_api=True)
+            self.assertFalse(result["deleted"])
+            self.assertTrue(result["accountDeleted"])
+            self.assertIn(job["id"],self.upstream.jobs)
+            self.call("GET","/api/jobs",identity=user,expected=401)
+            with self.assertRaises(gateway.GatewayError): self.gstore.register(str(uuid.uuid4()),user["userId"])
+        finally: self.upstream.fail_delete=False
+        self.assertTrue(self.astore.process_deletion(user["userId"]))
+        self.assertNotIn(job["id"],self.upstream.jobs)
+
     def test_01_account_cross_device_job_and_exact_snapshot(self):
         job=self.upload(self.first);self.call("GET","/api/jobs/"+job["id"],identity=self.second)
         self.call("GET","/api/jobs/"+job["id"],identity=self.other,expected=404)

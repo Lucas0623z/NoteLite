@@ -81,3 +81,44 @@ test("analysis retains its request identity and uses only the authenticated acco
   assert.deepEqual(JSON.parse(calls[1].init.body as string), { requestId: owner, eventIds: [owner] });
   assert.equal(new Headers(calls[1].init.headers).get("X-NoteLite-Expected-User"), owner);
 });
+
+
+test("permanent deletion requires the exact accepted response and clears only the authenticated owner's local data", async () => {
+  const deletedIdentity = { ...identity, userId: "55555555-5555-4555-8555-555555555555" };
+  const purged: string[] = [], calls: { path: string; init: RequestInit }[] = [];
+  const client = new AccountClient(async (path, init = {}) => {
+    calls.push({ path: String(path), init });
+    return new Response(JSON.stringify(String(path).endsWith("/me") ? { ...deletedIdentity, csrf: "proof" } : { authenticated: false, accountDeleted: true, deletionRequested: true, deleted: false, status: "pending" }), { status: String(path).endsWith("/me") ? 200 : 202 });
+  }, () => false, undefined, () => {}, async (owner) => { purged.push(owner); });
+  await client.me();
+  const result = await client.deleteAccount("synthetic deletion password");
+  assert.equal(result.status, "pending"); assert.equal(client.current, null);
+  assert.deepEqual(purged, [deletedIdentity.userId]);
+  assert.equal(calls[1].init.method, "DELETE");
+  assert.equal(new Headers(calls[1].init.headers).get("X-NoteLite-Expected-User"), deletedIdentity.userId);
+  assert.deepEqual(JSON.parse(calls[1].init.body as string), { password: "synthetic deletion password", confirmation: "DELETE_ACCOUNT" });
+});
+test("wrong password, unavailable service and malformed success cannot remove identity or purge data", async () => {
+  for (const result of [{ status: 403, body: { error: "wrong password" } }, { status: 503, body: { error: "unavailable" } }, { status: 200, body: { authenticated: false } }, { status: 200, body: { authenticated: 0, accountDeleted: 1, deletionRequested: 1, deleted: 1, status: "completed" } }]) {
+    let purged = false;
+    const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : result.body), { status: String(path).endsWith("/me") ? 200 : result.status }), () => false, undefined, () => {}, async () => { purged = true; });
+    await client.me(); await assert.rejects(client.deleteAccount("synthetic deletion password"));
+    assert.equal(client.current?.userId, owner); assert.equal(purged, false);
+  }
+});
+test("a late accepted deletion purges its original account without signing out a newly authenticated owner", async () => {
+  let finish: (result: Response) => void = () => {};
+  const reply = new Promise<Response>((resolve) => { finish = resolve; });
+  const nextIdentity = { ...identity, userId: "66666666-6666-4666-8666-666666666666" };
+  const purged: string[] = [];
+  const client = new AccountClient(async (path) => String(path).endsWith("/account") ? reply : new Response(JSON.stringify({ ...(String(path).endsWith("/login") ? nextIdentity : identity), csrf: "proof" })), () => false, undefined, () => {}, async (owner) => { purged.push(owner); });
+  await client.me(); const deleting = client.deleteAccount("synthetic deletion password");
+  await client.authenticate("login", "other", "synthetic long password");
+  finish(new Response(JSON.stringify({ authenticated: false, accountDeleted: true, deletionRequested: true, deleted: true, status: "completed" })));
+  await deleting; assert.equal(client.current?.userId, nextIdentity.userId); assert.deepEqual(purged, [owner]);
+});
+test("accepted deletion exposes actual local cleanup failure while retaining the server's deleted state", async () => {
+  const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { authenticated: false, accountDeleted: true, deletionRequested: true, deleted: true, status: "completed" })), () => false, undefined, () => {}, async () => { throw new Error("Synthetic open local file"); });
+  await client.me(); const result = await client.deleteAccount("synthetic deletion password");
+  assert.equal(result.localCleanupPending, true); assert.equal(result.accountDeleted, true); assert.equal(client.current, null);
+});

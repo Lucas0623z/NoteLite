@@ -6,11 +6,13 @@ on:
     paths:
       - 'server/account-service/**'
       - 'server/omr-gateway/**'
+      - 'server/standalone-omr/**'
       - '.github/workflows/account-service-ci.yml'
   push:
     paths:
       - 'server/account-service/**'
       - 'server/omr-gateway/**'
+      - 'server/standalone-omr/**'
       - '.github/workflows/account-service-ci.yml'
 
 permissions:
@@ -31,3 +33,6 @@ jobs:
         run: python -m unittest discover -s server/account-service -v
       - name: Test original OMR gateway boundaries
         run: python -m unittest discover -s server/omr-gateway -v
+      - name: Test real OMR process cancellation and private job deletion on Linux
+        working-directory: server/standalone-omr
+        run: python -m unittest -v test_deletion

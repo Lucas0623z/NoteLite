@@ -3,8 +3,11 @@
 Only service processes read the administrator credential. XML is snapshotted
 from a single immutable revision; caller-supplied ownership is never accepted.
 """
+from contextlib import contextmanager
 import hashlib
 import hmac
+import json
+import sqlite3
 from http.client import HTTPConnection
 import socket
 import time
@@ -17,6 +20,13 @@ class OMRBridge:
         self.store, self.token, self.origin = gateway_store, upstream_token, origin
         self.port, self.account_user_exists = upstream_port, account_user_exists
 
+    def check_owner(self, db, owner):
+        try:
+            self.store.check_owner(db, owner)
+        except Exception as error:
+            status = 410 if getattr(error, "status", None) == 410 else 503
+            raise APIError(status, "识谱账户已注销或所有者验证暂不可用。") from None
+
     def import_score(self, user, job, index, revision):
         uid(user);uid(job)
         if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index <= 63:
@@ -24,6 +34,7 @@ class OMRBridge:
         if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
             raise APIError(400, "修订号无效。")
         with self.store.connect() as db:
+            self.check_owner(db, user)
             row = db.execute("SELECT owner FROM jobs WHERE id=?", (job,)).fetchone()
             if not row or not hmac.compare_digest(row[0], user):
                 raise APIError(404, "任务不存在。")
@@ -53,6 +64,51 @@ class OMRBridge:
         finally:
             connection.close()
 
+    @contextmanager
+    def deletion_fence(self, user):
+        uid(user)
+        try:
+            with self.store.deletion_fence(user):
+                yield
+        except APIError:
+            raise
+        except Exception:
+            # Gateway/SQLite errors expose only a static retry message, never
+            # credentials, job paths or upstream process output.
+            raise APIError(503, "识谱服务正在保存，请稍后重试注销。") from None
+
+    def delete_owner(self, user):
+        uid(user)
+        try:
+            jobs = self.store.delete_owner(user)
+            for job in jobs:
+                uid(job)
+                # Recheck ownership under the durable tombstone. A UUID cannot
+                # become a new account's job between the list and deletion.
+                with self.store.connect() as db:
+                    row = db.execute("SELECT owner FROM jobs WHERE id=?", (job,)).fetchone()
+                    if not row or not hmac.compare_digest(row[0], user):
+                        raise APIError(503, "识谱资料清理待重试。")
+                    connection = HTTPConnection("127.0.0.1", self.port, timeout=30)
+                    try:
+                        connection.request("DELETE", f"/api/jobs/{job}", headers={
+                            "Host": f"127.0.0.1:{self.port}", "Authorization": "Bearer " + self.token,
+                        })
+                        response = connection.getresponse()
+                        raw = response.read(4097)
+                        if response.status != 200 or len(raw) > 4096:
+                            raise APIError(503, "识谱资料清理待重试。")
+                        result = json.loads(raw)
+                        if not isinstance(result, dict) or result.get("id") != job or result.get("deleted") is not True:
+                            raise APIError(503, "识谱资料清理待重试。")
+                    finally:
+                        connection.close()
+            self.store.finish_delete_owner(user)
+        except APIError:
+            raise
+        except Exception:
+            raise APIError(503, "识谱资料清理待重试。") from None
+
     def claim(self, user, data, origin):
         uid(user)
         token, kind = data.get("deviceToken"), data.get("deviceKind")
@@ -74,6 +130,8 @@ class OMRBridge:
             raise APIError(409, "账户谱库不能通过旧设备迁移。")
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            self.check_owner(db, user)
+            self.check_owner(db, owner)
             # Recheck validity in the same transaction as the ownership change.
             row = db.execute("SELECT owner FROM devices WHERE id=? AND hash=? AND kind=? AND expires>? AND revoked=0",
                              (identity["id"], hashlib.sha256(token.encode("ascii")).hexdigest(), kind, time.time())).fetchone()

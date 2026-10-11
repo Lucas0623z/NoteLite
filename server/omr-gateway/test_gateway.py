@@ -41,8 +41,14 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             self.reply(200, {"status": "ok", "engine": "Audiveris", "engineVersion": "5.11.0"})
         elif path == "/api/jobs" and self.command == "POST":
             self.rfile.read(int(self.headers["Content-Length"]))
-            job = {"id": str(uuid.uuid4()), "state": "succeeded", "filename": "score.musicxml", "revision": 1, "scores": [], "artifacts": {}}
+            job = {"id": self.headers.get("X-NoteLite-Job-Id") or str(uuid.uuid4()), "state": "succeeded", "filename": "score.musicxml", "revision": 1, "scores": [], "artifacts": {}}
+            if getattr(self.server, "upload_entered", None):
+                self.server.upload_entered.set()
+                self.server.upload_release.wait(5)
             self.server.jobs[job["id"]] = job
+            if getattr(self.server, "lose_upload_response", False):
+                self.close_connection = True
+                return
             self.reply(202, job)
         elif path == "/api/jobs" and self.command == "GET":
             self.reply(200, {"jobs": list(self.server.jobs.values())})

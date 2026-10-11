@@ -5,6 +5,7 @@ import ScoreWorkspace from "./ScoreWorkspace";
 import { cloud, CloudError, createUUID, errorMessage, isNativeCloud, nativeRequest, type CloudJob } from "./cloud";
 import { completedJobNotice, uploadedJobNotice, type ScoreNotice } from "./job-notice";
 import { startJobPolling } from "./job-polling";
+import { openOwnedDatabase, ownedStores, guardAccountWrite, isDeletedAccountOwner } from "./account-local-data";
 import { account, ACCOUNT_EVENT, type PersonalScore } from "./account";
 
 type Score = { id: string; name: string; format: string; file?: Blob; sample?: boolean; job?: CloudJob; removed?: boolean; owner?: string; personal?: PersonalScore; officialId?: string };
@@ -21,18 +22,15 @@ function traceDialog(event: DialogEvent, dialog: HTMLDialogElement | null, panel
 const sampleScore = `<score-partwise version="4.0"><work><work-title>示例练习</work-title></work><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>${["C", "D", "E", "F"].map((step) => `<note><pitch><step>${step}</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>`).join("")}</measure></part></score-partwise>`;
 
 async function openScoreDB(): Promise<IDBDatabase> {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("heibaikey-scores", 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("scores", { keyPath: "id" });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+  return openOwnedDatabase("heibaikey-scores", "scores", "id");
 }
-async function scoreStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function scoreStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>, owner = account.current?.userId || "guest"): Promise<T> {
   const db = await openScoreDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction("scores", mode);
-    const request = action(transaction.objectStore("scores"));
+    const transaction = db.transaction(ownedStores("scores"), mode);
+    let request: IDBRequest<T>;
+    const write = () => { request = action(transaction.objectStore("scores")); };
+    if (mode === "readwrite") guardAccountWrite(transaction, owner, write); else write();
     transaction.oncomplete = () => { db.close(); resolve(request.result); };
     transaction.onerror = transaction.onabort = () => { db.close(); reject(transaction.error); };
   });
@@ -44,15 +42,15 @@ function scoreFromJob(job: CloudJob, previous?: Score): Score {
 
 async function persistPolledJobs(jobs: CloudJob[], signal: AbortSignal, owner: string): Promise<Score[]> {
   const db = await openScoreDB();
-  if (signal.aborted) { db.close(); return []; }
+  if (signal.aborted || isDeletedAccountOwner(owner)) { db.close(); return []; }
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction("scores", "readwrite");
+    const transaction = db.transaction(ownedStores("scores"), "readwrite");
     const store = transaction.objectStore("scores");
     const request = store.getAll();
     const updated: Score[] = [];
     const abort = () => { try { transaction.abort(); } catch { /* Already completed. */ } };
     signal.addEventListener("abort", abort, { once: true });
-    request.onsuccess = () => {
+    request.onsuccess = () => guardAccountWrite(transaction, owner, () => {
       const latest = new Map((request.result as Score[]).map((score) => [score.id, score]));
       for (const job of jobs) {
         const previous = latest.get(job.id);
@@ -61,7 +59,7 @@ async function persistPolledJobs(jobs: CloudJob[], signal: AbortSignal, owner: s
         if (!previous || scoreOwner(previous) !== owner || previous.removed || (previous.job?.revision ?? 0) > job.revision) continue;
         const score = scoreFromJob(job, previous); store.put(score); updated.push(score);
       }
-    };
+    });
     const finish = () => { signal.removeEventListener("abort", abort); db.close(); };
     transaction.oncomplete = () => { finish(); resolve(updated); };
     transaction.onerror = transaction.onabort = () => { finish(); reject(transaction.error || new DOMException("Polling cancelled", "AbortError")); };
@@ -234,7 +232,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   async function save(score: Score) {
     score = { ...score, owner: score.owner || owner.current };
     if (score.owner !== owner.current) throw new Error("账户已切换，请重新打开曲谱。");
-    await scoreStore("readwrite", (store) => store.put(score));
+    await scoreStore("readwrite", (store) => store.put(score), scoreOwner(score));
     if (score.owner !== owner.current) return;
     setScores((previous) => {
       const index = previous.findIndex((item) => item.id === score.id);
@@ -352,8 +350,8 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
         await save({ ...selected, name: name.trim(), ...(personal ? { personal } : {}) });
       }
       else {
-        if (selected.job || selected.personal) await scoreStore("readwrite", (store) => store.put({ ...selected, removed: true }));
-        else await scoreStore("readwrite", (store) => store.delete(selected.id));
+        if (selected.job || selected.personal) await scoreStore("readwrite", (store) => store.put({ ...selected, removed: true }), scoreOwner(selected));
+        else await scoreStore("readwrite", (store) => store.delete(selected.id), scoreOwner(selected));
         setScores((previous) => previous.filter((score) => score.id !== selected.id));
       }
       setPanel(null);
