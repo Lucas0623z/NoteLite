@@ -68,10 +68,10 @@ jobs:
       RELEASE_ACCEPTANCE_RUN: ${{ inputs.acceptance_run_id }}
     steps:
       - uses: actions/checkout@v4
-      - name: Test exact-commit acceptance, packaging and signing gates
-        run: python3 -B apple/release/test_cloud_release.py
       - name: Select stable Xcode and check manual release settings
         run: python3 apple/release/cloud_release.py prepare
+      - name: Test exact-commit acceptance, packaging and signing gates
+        run: python3 -B apple/release/test_cloud_release.py
       - name: Verify all actual native acceptance results before accessing signing credentials
         env:
           GH_TOKEN: ${{ github.token }}
