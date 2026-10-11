@@ -3,6 +3,7 @@ import normal from "../imports/my-scores-upload-normal.png";
 import pressed from "../imports/my-scores-upload-pressed.png";
 import ScoreWorkspace from "./ScoreWorkspace";
 import { cloud, CloudError, createUUID, errorMessage, isNativeCloud, nativeRequest, type CloudJob } from "./cloud";
+import { completedJobNotice, uploadedJobNotice, type ScoreNotice } from "./job-notice";
 
 type Score = { id: string; name: string; format: string; file?: Blob; sample?: boolean; job?: CloudJob; removed?: boolean };
 type Panel = "import" | "rename" | "delete" | "view" | "practice" | "settings" | null;
@@ -37,7 +38,9 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   const [panel, setPanel] = useState<Panel>(null);
   const [selected, setSelected] = useState<Score | null>(null);
   const [name, setName] = useState("");
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<ScoreNotice>({ text: "" });
+  const message = notice.text;
+  function setMessage(text: string) { setNotice({ text }); }
   const [busy, setBusy] = useState(false);
   const [baseURL, setBaseURL] = useState(() => isNativeCloud() ? "https://124.221.211.156" : window.location.origin);
   const [pairCode, setPairCode] = useState("");
@@ -128,7 +131,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
     const timer = window.setTimeout(async () => {
       for (const score of waiting) {
         try { const job = await cloud.job(score.id); if (live) await acceptJob(job, score); }
-        catch (error) { if (live) setMessage(errorMessage(error)); }
+        catch (error) { if (live) setNotice((current) => current.jobId === score.id ? { ...current, text: errorMessage(error) } : current); }
       }
       // Saving a fresh score object schedules the next bounded poll.
       if (live) setScores((previous) => [...previous]);
@@ -172,6 +175,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
     if (previous?.removed) return;
     const imported: Score = { ...previous, id: job.id, name: previous?.name || job.filename, format: previous?.format || job.filename.split(".").pop()?.toUpperCase() || "", job };
     await save(imported);
+    setNotice((current) => completedJobNotice(current, job));
     setSelected((current) => current?.id === imported.id ? imported : current);
     return imported;
   }
@@ -224,7 +228,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
       setSelected(imported);
       setPanel(null);
       setImportPage(false);
-      setMessage(job.recognitionMode === "import" ? "曲谱正在导入，完成后可查看、校对和导出。" : "曲谱正在识别，完成后可查看、校对和导出。");
+      setNotice(uploadedJobNotice(job));
     } catch (error) {
       if (error instanceof CloudError && error.status === 401) { pendingFile.current = file; setPanel("settings"); }
       setMessage(errorMessage(error));
@@ -237,7 +241,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
     setBusy(true);
     try {
       const job = await cloud.importNative(); await acceptJob(job);
-      setPanel(null); setImportPage(false); setMessage("曲谱已上传，正在处理…");
+      setPanel(null); setImportPage(false); setNotice(uploadedJobNotice(job));
     } catch (error) { if (!(error instanceof CloudError && error.code === "cancelled")) setMessage(errorMessage(error)); }
     finally { setBusy(false); }
   }
@@ -286,7 +290,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
         {scores.length > 0 && <button type="button" onClick={() => setImportPage(false)} className="self-start px-4 py-3 text-sm text-[#999] focus-visible:outline-2">‹ 返回我的曲谱</button>}
         <div className="scores-page flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8">
           <button type="button" aria-label="导入曲谱" onPointerDown={() => traceDialog("trigger-pointer-down", dialog.current, panel)} onPointerUp={() => traceDialog("trigger-pointer-up", dialog.current, panel)} onClick={() => { traceDialog("trigger-click", dialog.current, panel); openPanel("import"); }} className="group relative block w-full max-w-[400px] cursor-pointer touch-manipulation rounded-[18px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#67db23]">
-            <img src={normal} alt="上传文件、图片或拍照识谱，开启你的专属陪练吧！" draggable={false} className="block h-auto w-full select-none group-active:opacity-0" />
+            <img src={normal} alt="上传文件、图片或拍照识谱，开启你的专属陪练吧！" draggable={false} style={{ pointerEvents: "none" }} className="block h-auto w-full select-none group-active:opacity-0" />
             <img src={pressed} alt="" aria-hidden="true" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain opacity-0 group-active:opacity-100" />
           </button>
         </div>

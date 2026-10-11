@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import PracticeSession from "./PracticeSession";
 import { resolveOSMDConstructor } from "./osmd";
 import { cancelNativeFileRequests, cloud, CloudError, downloadBlob, errorMessage, isNativeCloud, type CloudJob, type CloudNote, type NoteEdit } from "./cloud";
@@ -26,6 +26,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const [noteType, setNoteType] = useState("quarter");
   const [dot, setDot] = useState("0");
   const [rest, setRest] = useState(false);
+  const [draftOwner, setDraftOwner] = useState<NoteInfo | null>(null);
   const [conflict, setConflict] = useState(false);
   const [originalView, setOriginalView] = useState(false);
   const [xmlDraft, setXmlDraft] = useState("");
@@ -37,6 +38,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const xmlFile = (!!job && !!remoteReady && !originalView) || (!job && ["XML", "MUSICXML"].includes(format));
   const notation = !originalView && (xmlFile || (!job && format === "MXL"));
   const current = notes[selected];
+  const draftReady = !!current && draftOwner === current;
   const filtered = notes.filter((note) => !measure || note.measure === measure);
 
   useEffect(() => () => { generation.current++; cancelNativeFileRequests(); }, []);
@@ -106,7 +108,10 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
     })));
   }, [xml, job?.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // Match the fields to the selected note before painting. Ownership also
+    // prevents a prior selection/revision's fields being saved to a new note.
+    setDraftOwner(current || null);
     if (current) { setStep(current.step); setOctave(current.octave); setAlter(current.alter); setDuration(current.duration); setNoteType(current.source?.type || "quarter"); setDot(String(current.source?.dot || 0)); setRest(current.rest); }
   }, [current]);
 
@@ -175,7 +180,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   }
 
   async function savePitch() {
-    if (!current) return;
+    if (!current || !draftReady || busy || conflict) return;
     if (job && current.source) {
       const edit: NoteEdit = { partId: current.source.partId, measureIndex: current.source.measureIndex, noteIndex: current.source.noteIndex };
       if (rest !== current.rest) edit.rest = rest;
@@ -256,7 +261,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
               <label className="score-field">八度<select value={octave} onChange={(event) => setOctave(event.currentTarget.value)}>{Array.from({ length: 10 }, (_, value) => <option key={value}>{value}</option>)}</select></label>
             </div>}
             {job && <div className="score-pitch-fields"><label className="score-field">时值<input aria-label="音符时值" type="number" min="0" step="any" disabled={busy || conflict} value={duration} onChange={(event) => setDuration(event.currentTarget.value)} /></label><label className="score-field">记谱时值<select aria-label="记谱时值" disabled={busy || conflict} value={noteType} onChange={(event) => setNoteType(event.currentTarget.value)}>{["", "maxima", "long", "breve", "whole", "half", "quarter", "eighth", "16th", "32nd", "64th", "128th", "256th", "512th", "1024th"].map((type) => <option key={type} value={type}>{type || "未指定"}</option>)}</select></label><label className="score-field">附点<select aria-label="附点数量" disabled={busy || conflict} value={dot} onChange={(event) => setDot(event.currentTarget.value)}>{[0, 1, 2, 3, 4].map((value) => <option key={value}>{value}</option>)}</select></label></div>}
-            {(!rest || job) && <button type="button" className="score-tool score-tool-primary" disabled={busy || conflict || (step === current.step && octave === current.octave && alter === current.alter && (!job || duration === current.duration && noteType === current.source?.type && Number(dot) === current.source?.dot && rest === current.rest))} onClick={() => void savePitch()}>{busy ? "正在保存…" : "保存校对"}</button>}
+            {(!rest || job) && <button type="button" className="score-tool score-tool-primary" disabled={busy || conflict || !draftReady || (step === current.step && octave === current.octave && alter === current.alter && (!job || duration === current.duration && noteType === current.source?.type && Number(dot) === current.source?.dot && rest === current.rest))} onClick={() => void savePitch()}>{busy ? "正在保存…" : "保存校对"}</button>}
             {job && current.source && <button type="button" className="score-tool" disabled={busy || conflict} onClick={() => { if (window.confirm(`删除第 ${current.measure} 小节的音符 ${selected + 1}？`)) void publishEdit([{ partId: current.source!.partId, measureIndex: current.source!.measureIndex, noteIndex: current.source!.noteIndex, delete: true }]); }}>删除当前音符</button>}
           </section>}
         </> : <div className="score-empty-inspector"><h3>{job ? "等待可校对乐谱" : "原稿已准备好"}</h3><p>{job ? "识谱完成后会显示音符列表。" : "导入 MusicXML 可校对音高。图片、PDF 和压缩曲谱重新导入云端服务后，可提取音符。"}</p></div>}

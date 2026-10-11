@@ -15,14 +15,19 @@ final class FigmaMacWKWebView: WKWebView {
         guard let window, let size = Self.requestedTestSize,
               configuredWindow != ObjectIdentifier(window) else { return }
         configuredWindow = ObjectIdentifier(window)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak window] in
-            guard let window else { return }
-            window.setContentSize(size)
-            // Keep the top edge visible. A tall content area may exceed the
-            // runner display; the UI test records that limit with its screenshot.
-            if let visible = window.screen?.visibleFrame {
-                window.setFrameOrigin(NSPoint(x: visible.minX + 16,
-                                              y: visible.maxY - window.frame.height - 16))
+        // The later attempt happens after SwiftUI has applied its initial saved
+        // frame; both attempts still resize the actual AppKit content window.
+        for delay in [0.15, 1.25] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
+                guard let window else { return }
+                window.setContentSize(size)
+                if let visible = window.screen?.visibleFrame {
+                    window.setFrameOrigin(NSPoint(x: visible.minX + 16,
+                                                  y: visible.maxY - window.frame.height - 16))
+                }
+                window.contentView?.layoutSubtreeIfNeeded()
+                let content = window.contentView?.bounds.size ?? .zero
+                FigmaUITestDiagnostics.record("[NoteLite window] resize delay=\(delay) requested=\(size.width)x\(size.height) content=\(content.width)x\(content.height) frame=\(window.frame.width)x\(window.frame.height) visible=\(window.isVisible)")
             }
         }
         #endif

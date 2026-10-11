@@ -23,13 +23,8 @@ final class FigmaShellUITests: XCTestCase {
             let actualSize = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 abs(web.frame.width - size.width) <= 1 && abs(web.frame.height - size.height) <= 1
             }, object: web)
-            XCTAssertEqual(XCTWaiter.wait(for: [actualSize], timeout: 15), .completed,
-                           "Requested native content dimensions must actually reach WKWebView")
+            let resizeResult = XCTWaiter.wait(for: [actualSize], timeout: 15)
             let window = app.windows.firstMatch.frame
-            XCTAssertEqual(window.width, web.frame.width, accuracy: 1)
-            XCTAssertGreaterThanOrEqual(window.height, web.frame.height,
-                                        "Window decoration may add height but must not shrink page content")
-            XCTAssertTrue(app.navigationBars.allElementsBoundByIndex.isEmpty)
             let displays = NSScreen.screens.map { screen -> [String: Any] in
                 ["frame": rectValue(screen.frame), "visibleFrame": rectValue(screen.visibleFrame),
                  "scale": screen.backingScaleFactor]
@@ -50,6 +45,12 @@ final class FigmaShellUITests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
             capture(app, name: "Figma-mac-\(Int(size.width))x\(Int(size.height))-actual-window")
+            XCTAssertEqual(resizeResult, .completed,
+                           "Requested native content dimensions must actually reach WKWebView")
+            XCTAssertEqual(window.width, web.frame.width, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(window.height, web.frame.height,
+                                        "Window decoration may add height but must not shrink page content")
+            XCTAssertTrue(app.navigationBars.allElementsBoundByIndex.isEmpty)
             app.terminate()
         }
     }
@@ -60,7 +61,7 @@ final class FigmaShellUITests: XCTestCase {
     #endif
 
     @MainActor
-    func testBundledFigmaInterfaceAndScoreOrientationRestore() {
+    func testBundledFigmaInterfaceAndScoreOrientationRestore() throws {
         continueAfterFailure = false
         executionTimeAllowance = 300
         #if os(iOS)
@@ -68,6 +69,13 @@ final class FigmaShellUITests: XCTestCase {
         #endif
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting-figma"]
+        #if os(macOS)
+        let exportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NoteLite-Figma-export-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: exportDirectory) }
+        app.launchEnvironment["NOTELITE_UI_EXPORT_DIRECTORY"] = exportDirectory.path
+        #endif
         app.launch()
         let libraryTab = button("我的曲谱", in: app)
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 45), "Bundled Figma JavaScript and local fonts must load in WKWebView")
@@ -144,6 +152,28 @@ final class FigmaShellUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [released], timeout: 10), .completed,
                            "Cancel must release the pending export and permit another export")
         }
+        #if os(macOS)
+        // Save on the third attempt, after the real two cancellations above.
+        // This verifies bytes on disk, rather than only a success message.
+        download.tap()
+        let save = app.buttons.matching(identifier: "Save").firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 20))
+        save.tap()
+        XCTAssertTrue(text("文件已导出。", in: app).waitForExistence(timeout: 15))
+        let exports = try FileManager.default.contentsOfDirectory(at: exportDirectory, includingPropertiesForKeys: nil)
+        XCTAssertEqual(exports.count, 1)
+        let output = try XCTUnwrap(exports.first)
+        XCTAssertEqual(output.pathExtension, "musicxml")
+        let bytes = try Data(contentsOf: output)
+        let document = try XMLDocument(data: bytes)
+        XCTAssertEqual(try document.nodes(forXPath: "/score-partwise/part/measure/note").count, 4)
+        XCTAssertEqual(try document.nodes(forXPath: "/score-partwise/part/measure/note/pitch/step").compactMap(\.stringValue), ["C", "D", "E", "F"])
+        XCTAssertEqual(try document.nodes(forXPath: "/score-partwise/part/measure/note/pitch/octave").compactMap(\.stringValue), ["4", "4", "4", "4"])
+        let exported = XCTAttachment(data: bytes, uniformTypeIdentifier: "public.xml")
+        exported.name = "Figma-actual-saved-MusicXML-after-cancellation"
+        exported.lifetime = .keepAlways
+        add(exported)
+        #endif
 
         let startPractice = button("开始练习", in: app)
         XCTAssertTrue(startPractice.waitForExistence(timeout: 10))
@@ -174,12 +204,19 @@ final class FigmaShellUITests: XCTestCase {
             .matching(NSPredicate(format: "label == %@ OR value == %@", "MusicXML 谱面", "MusicXML 谱面")).firstMatch
         XCTAssertTrue(rendered.waitForExistence(timeout: 60),
                       "The actual OSMD dynamic module must load and render the MusicXML SVG")
-        let loaded = app.webViews.staticTexts
-            .matching(NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@", "MusicXML 已载入", "MusicXML 已载入")).firstMatch
-        XCTAssertTrue(loaded.waitForExistence(timeout: 10))
+        // Some SVG static text exposes NSNumber as its AXValue on macOS.
+        // Read actual string values before matching; a BEGINSWITH expression
+        // over every value otherwise throws on OSMD's numeric annotations.
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.webViews.staticTexts.allElementsBoundByIndex.contains { element in
+                element.label.hasPrefix("MusicXML 已载入") ||
+                (element.value as? String)?.hasPrefix("MusicXML 已载入") == true
+            }
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
         XCTAssertTrue(text("4 个音符 / 休止符", in: app).exists)
-        for pitch in ["C4", "D4", "E4", "F4"] {
-            let note = app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "小节 · \(pitch)", "小节 · \(pitch)")).firstMatch
+        for (index, pitch) in ["C4", "D4", "E4", "F4"].enumerated() {
+            let note = app.webViews.buttons.matching(identifier: "第 1 小节 · \(pitch) #\(index + 1)").firstMatch
             XCTAssertTrue(note.exists, "The XML must provide an actual \(pitch) note for editing")
         }
     }

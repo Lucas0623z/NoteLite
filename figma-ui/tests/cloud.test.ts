@@ -1,9 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cancelNativeFileRequests, CloudClient, CloudError, createUUID, errorMessage, nativeRequest } from "../src/app/cloud.ts";
+import { completedJobNotice, uploadedJobNotice } from "../src/app/job-notice.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const job = { id, filename: "练习.pdf", state: "succeeded", revision: 2, scores: [], artifacts: {} };
+
+test("the upload notice follows its actual successful or failed recognition result", () => {
+  const waiting = uploadedJobNotice({ id, state: "running", recognitionMode: "audiveris" });
+  assert.match(waiting.text, /正在识别/);
+  assert.match(completedJobNotice(waiting, { id, state: "succeeded" }).text, /识谱已完成/);
+  assert.match(completedJobNotice(waiting, { id, state: "failed", error: "原稿不清晰" }).text, /识谱未完成.*原稿不清晰/);
+  assert.match(uploadedJobNotice({ id, state: "succeeded", recognitionMode: "import" }).text, /曲谱已导入/);
+});
+
+test("a completed earlier job cannot replace a later upload or a user's new notice", () => {
+  const laterUpload = uploadedJobNotice({ id: "22222222-2222-4222-8222-222222222222", state: "queued" });
+  const userNotice = { text: "设备已连接，可以上传曲谱并保存校对。" };
+  const completed = { id, state: "succeeded" as const };
+  assert.equal(completedJobNotice(laterUpload, completed), laterUpload);
+  assert.equal(completedJobNotice(userNotice, completed), userNotice);
+});
+
+test("a nonterminal poll preserves the currently owned progress notice", () => {
+  const waiting = uploadedJobNotice({ id, state: "queued" });
+  assert.equal(completedJobNotice(waiting, { id, state: "running" }), waiting);
+});
 type Call = { path: string; init: RequestInit; headers: Headers };
 function mock(routes: Record<string, unknown | ((call: Call) => Response)>, previewEnabled?: () => boolean) {
   const calls: Call[] = [];

@@ -130,7 +130,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                   diagnostic.hasPrefix("[NoteLite dialog]") else { return }
             // The diagnostic protocol contains static event tags/booleans only,
             // never filenames, account details, score XML or device credentials.
-            NSLog("%@", String(diagnostic.prefix(500)))
+            FigmaUITestDiagnostics.record(String(diagnostic.prefix(500)))
             return
         }
         #endif

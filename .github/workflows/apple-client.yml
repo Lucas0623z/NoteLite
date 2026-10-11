@@ -148,6 +148,12 @@ jobs:
             apple/音伴-macOS-unsigned.zip
             apple/NoteLite-iOS-simulator.zip
             apple/NoteLite-iOS-device-unsigned.zip
+      - name: Configure supported display mode for native UI verification
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_macos.outcome == 'success' }}
+        run: |
+          mkdir -p apple/Screenshots/native-diagnostics
+          swift apple/scripts/configure-ui-test-display.swift > apple/Screenshots/native-diagnostics/display-modes.json
+          cat apple/Screenshots/native-diagnostics/display-modes.json
       - name: Test native macOS app
         if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_macos.outcome == 'success' }}
         working-directory: apple
@@ -155,6 +161,17 @@ jobs:
           xcodebuild test -project NoteLite.xcodeproj -scheme NoteLiteMac \
             -destination 'platform=macOS' -parallel-testing-enabled NO \
             -resultBundlePath TestResults-macOS.xcresult CODE_SIGNING_ALLOWED=NO
+      - name: Export native Figma event diagnostics
+        if: always()
+        working-directory: apple
+        run: |
+          mkdir -p Screenshots/native-diagnostics
+          for log in "$HOME/Library/Containers/com.notelite.mac/Data/Library/Caches/FigmaUITestDiagnostics.log" "$HOME/Library/Caches/FigmaUITestDiagnostics.log"; do
+            if [ -f "$log" ]; then
+              cp "$log" Screenshots/native-diagnostics/dialog-and-window.log
+              break
+            fi
+          done
       - name: Export native interface screenshots
         if: always()
         working-directory: apple
@@ -244,6 +261,19 @@ jobs:
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 360 \
             NOTELITE_SIM_SWIFT_PATH= CODE_SIGNING_ALLOWED=NO
+      - name: Export simulator Figma event diagnostics
+        if: always()
+        continue-on-error: true
+        env:
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+        run: |
+          mkdir -p apple/Screenshots/native-diagnostics
+          if [ -n "${DEVICE_ID:-}" ]; then
+            app_data=$(xcrun simctl get_app_container "$DEVICE_ID" com.lucas0623z.yinban data 2>/dev/null || true)
+            if [ -n "$app_data" ] && [ -f "$app_data/Library/Caches/FigmaUITestDiagnostics.log" ]; then
+              cp "$app_data/Library/Caches/FigmaUITestDiagnostics.log" apple/Screenshots/native-diagnostics/dialog-and-window.log
+            fi
+          fi
       - name: Remove dedicated simulator
         if: always()
         run: python3 tools/audiveris-port/manage-embedded-simulators.py cleanup apple/SimulatorResults

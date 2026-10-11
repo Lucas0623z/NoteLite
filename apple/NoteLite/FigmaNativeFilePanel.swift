@@ -58,6 +58,17 @@ final class FigmaNativeFilePanel: NSObject {
         panel.nameFieldStringValue = source.lastPathComponent
         panel.allowedContentTypes = [UTType(filenameExtension: source.pathExtension) ?? .data]
         panel.canCreateDirectories = true
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--uitesting-figma"),
+           let path = ProcessInfo.processInfo.environment["NOTELITE_UI_EXPORT_DIRECTORY"], path.hasPrefix("/") {
+            // The test still uses the real Save panel and its Save action. A
+            // temporary default directory lets the runner inspect actual output.
+            // Let the system panel access that directory before the sandboxed
+            // app receives the user-selected URL; do not inspect it prematurely.
+            let directory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+            panel.directoryURL = directory
+        }
+        #endif
         result.panel = panel
         let completed: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let destination = panel.url else {
