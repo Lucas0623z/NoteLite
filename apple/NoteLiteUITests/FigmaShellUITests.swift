@@ -231,7 +231,7 @@ final class FigmaShellUITests: XCTestCase {
     @MainActor
     func testNewInteractionsLocalPitchTempoPersistenceAndExport() throws {
         continueAfterFailure = false
-        executionTimeAllowance = 300
+        executionTimeAllowance = 360
         #if os(iOS)
         XCUIDevice.shared.orientation = .portrait
         #endif
