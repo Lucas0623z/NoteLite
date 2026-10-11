@@ -69,7 +69,11 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         if let root = Bundle.main.resourceURL?.appendingPathComponent("FigmaUI", isDirectory: true) {
             configuration.setURLSchemeHandler(FigmaResourceHandler(root: root), forURLScheme: FigmaResourceHandler.scheme)
         }
+        #if os(macOS)
+        webView = FigmaMacWKWebView(frame: .zero, configuration: configuration)
+        #else
         webView = WKWebView(frame: .zero, configuration: configuration)
+        #endif
         webView.navigationDelegate = self
         webView.uiDelegate = self
         #if os(iOS)

@@ -2,7 +2,7 @@ name: Apple clients
 
 on:
   push:
-    branches: [main, master, codex/audiveris-apple-builds, codex/figma-cloud-ui]
+    branches: [main, master, codex/audiveris-apple-builds]
     paths:
       - "apple/**"
       - "practice-web/**"

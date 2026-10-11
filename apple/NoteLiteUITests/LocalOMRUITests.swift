@@ -7,6 +7,7 @@ final class LocalOMRUITests: XCTestCase {
     func testLocalPreprocessingWithoutServer() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments = ["--uitesting-legacy"]
         app.launch()
         let entry = app.descendants(matching: .any).matching(identifier: "local-omr-open").firstMatch
         if !entry.exists {

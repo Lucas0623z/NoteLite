@@ -45,6 +45,7 @@ export function createUUID(): string {
   return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 }
 export function isNativeCloud(): boolean { return typeof window !== "undefined" && !!window.webkit?.messageHandlers?.noteLiteCloud; }
+function developmentProxyEnabled(): boolean { return import.meta.env?.DEV === true && import.meta.env?.NOTELITE_DEV_PROXY_ENABLED === true; }
 export function nativeRequest<T>(action: string, payload: unknown = {}, timeout = 30000): Promise<T> {
   const handler = typeof window !== "undefined" && window.webkit?.messageHandlers?.noteLiteCloud;
   if (!handler) return Promise.reject(new CloudError("当前设备没有原生连接桥接。"));
@@ -99,7 +100,8 @@ export class CloudClient {
   private native: typeof isNativeCloud;
   private bridge: typeof nativeRequest;
   private timeouts: { read: number; write: number };
-  constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, timeouts = { read: 30000, write: 300000 }) { this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.timeouts = timeouts; }
+  private previewEnabled: () => boolean;
+  constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, timeouts = { read: 30000, write: 300000 }, previewEnabled = developmentProxyEnabled) { this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.timeouts = timeouts; this.previewEnabled = previewEnabled; }
   private async request(path: string, init: RequestInit = {}, response: "json" | "text" | "blob" = "json"): Promise<unknown> {
     const method = (init.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD" && path !== "/api/pair" && !this.csrf) await this.session();
@@ -135,9 +137,14 @@ export class CloudClient {
   }
   async configure(baseURL: string): Promise<void> {
     const url = new URL(baseURL);
-    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) throw new CloudError("请填写不包含路径或账号信息的 HTTPS 服务地址。");
-    if (this.native()) { await this.bridge("configuration/set", { baseURL: url.origin }); return; }
+    if (url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) throw new CloudError("请填写不包含路径或账号信息的服务地址。");
+    if (this.native()) {
+      if (url.protocol !== "https:") throw new CloudError("原生设备需要 HTTPS 识谱服务地址。");
+      await this.bridge("configuration/set", { baseURL: url.origin }); return;
+    }
     if (url.origin !== window.location.origin) throw new CloudError("浏览器请打开该服务地址再连接，曲谱请求使用当前页面的安全连接。");
+    const localPreview = this.previewEnabled() && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+    if (url.protocol !== "https:" && !localPreview) throw new CloudError("浏览器需要 HTTPS；回环预览须显式启用开发代理。");
   }
   async pair(code: string, deviceName: string): Promise<void> {
     if (!code.trim()) throw new CloudError("请输入设备连接码。");

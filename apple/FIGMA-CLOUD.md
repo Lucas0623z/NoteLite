@@ -60,6 +60,8 @@ xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
 
 iPhone/iPad 进入看谱或练习页面，网页经生产桥接请求本机横屏；退出时请求恢复进入前的界面方向。使用 iOS 16 的 UIWindowScene 几何 API 与 UIApplicationDelegate 的支持方向回调，没有私有 KVC 旋转。iPad 分屏或系统限制拒绝方向变更时，会返回 orientationError 事件，不能伪装旋转成功。Mac 按实际窗口宽高响应，方向请求不改变窗口。
 
+Mac UI 测试另以 DEBUG 专用启动参数设置真实 AppKit 内容窗口为 1440×900 与 900×1440，核对 WKWebView 实際尺寸、窗口装饰高度和原生导航栏，保存窗口截图及 runner 屏幕尺寸。若 runner 显示器容不下整个竖向窗口，证据会明确记录，不能把截到的屏幕区域声称为完整竖向视觉验收。该参数不会修改生产窗口、CSS 或内容排版。
+
 `FigmaShellUITests` 在 Apple 模拟器运行正式“导入曲谱 → 载入示例曲谱 → 查看曲谱 → 返回”的界面流程，断言实际 MusicXML 排版成功、四个音符和应用重启后的本机读取，进入练习页检查未接入听音的提示，检查本机横屏及恢复，并保存实际屏幕截图；这些测试不运行云 OMR，也不使用假识谱。`CloudOMRTests` 使用明确标注的 URLProtocol 传输替身测试新 API、凭据与修改契约。服务器真实识谱/编辑验收另有实际 PNG/PDF 结果。
 
 原 `LibraryView`、设备嵌入识谱和 `PracticeView` 保留。DEBUG 的旧 `--uitesting-import-*` 启动参数继续进入旧界面，使其单元/界面测试仍有意义；生产启动一律进入 Figma 新界面。当前阶段没有启动原生音频输入、听音检测或评分，须 UI 与云服务检查后再接入。

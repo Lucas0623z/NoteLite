@@ -1,11 +1,64 @@
 import XCTest
 #if os(iOS)
 import UIKit
+#else
+import AppKit
 #endif
 
 /// Runs the shipped Figma controls and the native orientation bridge with the
 /// explicitly labelled offline example. Cloud recognition is verified separately.
 final class FigmaShellUITests: XCTestCase {
+    #if os(macOS)
+    @MainActor
+    func testMacFigmaLandscapeAndPortraitContentWindows() throws {
+        continueAfterFailure = false
+        executionTimeAllowance = 180
+        let app = XCUIApplication()
+        for size in [CGSize(width: 1440, height: 900), CGSize(width: 900, height: 1440)] {
+            app.launchArguments = ["--uitesting-figma", "--uitesting-window-size=\(Int(size.width))x\(Int(size.height))"]
+            app.launch()
+            XCTAssertTrue(button("我的曲谱", in: app).waitForExistence(timeout: 45),
+                          "The real bundled product must load at each native Mac window size")
+            let web = app.webViews.firstMatch
+            let actualSize = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                abs(web.frame.width - size.width) <= 1 && abs(web.frame.height - size.height) <= 1
+            }, object: web)
+            XCTAssertEqual(XCTWaiter.wait(for: [actualSize], timeout: 15), .completed,
+                           "Requested native content dimensions must actually reach WKWebView")
+            let window = app.windows.firstMatch.frame
+            XCTAssertEqual(window.width, web.frame.width, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(window.height, web.frame.height,
+                                        "Window decoration may add height but must not shrink page content")
+            XCTAssertTrue(app.navigationBars.allElementsBoundByIndex.isEmpty)
+            let displays = NSScreen.screens.map { screen -> [String: Any] in
+                ["frame": rectValue(screen.frame), "visibleFrame": rectValue(screen.visibleFrame),
+                 "scale": screen.backingScaleFactor]
+            }
+            let canFitOnDisplay = NSScreen.screens.contains { screen in
+                window.width <= screen.visibleFrame.width && window.height <= screen.visibleFrame.height
+            }
+            let metrics: [String: Any] = [
+                "requestedContent": ["width": size.width, "height": size.height],
+                "actualWindow": rectValue(window), "actualWebView": rectValue(web.frame),
+                "windowDecorationHeight": window.height - web.frame.height,
+                "displayCanContainWholeWindow": canFitOnDisplay, "displays": displays,
+                "screenshotLimitation": canFitOnDisplay ? "Actual native window capture" : "Actual native capture; runner display cannot contain the full tall window"
+            ]
+            let data = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
+            let attachment = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+            attachment.name = "Figma-mac-\(Int(size.width))x\(Int(size.height))-window-metrics"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            capture(app, name: "Figma-mac-\(Int(size.width))x\(Int(size.height))-actual-window")
+            app.terminate()
+        }
+    }
+
+    private func rectValue(_ rect: CGRect) -> [String: CGFloat] {
+        ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
+    }
+    #endif
+
     @MainActor
     func testBundledFigmaInterfaceAndScoreOrientationRestore() {
         continueAfterFailure = false
@@ -16,23 +69,23 @@ final class FigmaShellUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting-figma"]
         app.launch()
-        let libraryTab = app.webViews.buttons.matching(NSPredicate(format: "label == %@ OR value == %@", "我的曲谱", "我的曲谱")).firstMatch
+        let libraryTab = button("我的曲谱", in: app)
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 45), "Bundled Figma JavaScript and local fonts must load in WKWebView")
         XCTAssertTrue(app.navigationBars.allElementsBoundByIndex.isEmpty, "Native navigation bars must not alter the Figma viewport")
         capture(app, name: "Figma-library-portrait")
         libraryTab.tap()
-        let importButton = app.webViews.buttons.matching(NSPredicate(format: "label == %@ OR value == %@", "导入曲谱", "导入曲谱")).firstMatch
-        let sample = app.webViews.buttons.matching(NSPredicate(format: "label == %@ OR value == %@", "载入示例曲谱", "载入示例曲谱")).firstMatch
+        let importButton = button("导入曲谱", in: app)
+        let sample = button("载入示例曲谱", in: app)
         if !sample.waitForExistence(timeout: 3) {
             XCTAssertTrue(importButton.waitForExistence(timeout: 10))
             importButton.tap()
         }
         XCTAssertTrue(sample.waitForExistence(timeout: 10), "The local example must remain available without cloud credentials")
         sample.tap()
-        let viewScore = app.webViews.buttons.matching(NSPredicate(format: "label == %@ OR value == %@", "查看曲谱", "查看曲谱")).firstMatch
+        let viewScore = button("查看曲谱", in: app)
         XCTAssertTrue(viewScore.waitForExistence(timeout: 15))
         viewScore.tap()
-        let close = app.webViews.buttons.matching(NSPredicate(format: "label == %@ OR value == %@", "‹ 我的曲谱", "‹ 我的曲谱")).firstMatch
+        let close = button("‹ 我的曲谱", in: app)
         XCTAssertTrue(close.waitForExistence(timeout: 30))
         assertScoreRendered(app)
         #if os(iOS)
@@ -75,7 +128,8 @@ final class FigmaShellUITests: XCTestCase {
         for _ in 0..<2 {
             XCTAssertTrue(download.waitForExistence(timeout: 10))
             download.tap()
-            let cancel = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Cancel", "取消")).firstMatch
+            let englishCancel = app.buttons.matching(identifier: "Cancel").firstMatch
+            let cancel = englishCancel.waitForExistence(timeout: 2) ? englishCancel : app.buttons.matching(identifier: "取消").firstMatch
             XCTAssertTrue(cancel.waitForExistence(timeout: 20), "The production export must open a native save window")
             cancel.tap()
             let released = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: download)
@@ -134,7 +188,9 @@ final class FigmaShellUITests: XCTestCase {
 
     @MainActor
     private func button(_ label: String, in app: XCUIApplication) -> XCUIElement {
-        app.webViews.buttons.matching(NSPredicate(format: "label == %@ OR value == %@", label, label)).firstMatch
+        // WebKit on macOS reports text buttons as AXTitle while aria-label
+        // buttons have AXDescription. XCTest name matching handles both.
+        app.webViews.buttons.matching(identifier: label).firstMatch
     }
 
     @MainActor

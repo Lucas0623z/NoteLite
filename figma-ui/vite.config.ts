@@ -19,6 +19,9 @@ export default defineConfig(({ mode, command }) => {
 
   return {
     base: './',
+    define: {
+      'import.meta.env.NOTELITE_DEV_PROXY_ENABLED': JSON.stringify(command === 'serve' && !!proxyURL),
+    },
     build: {
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,

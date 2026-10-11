@@ -5,7 +5,7 @@ import { cancelNativeFileRequests, CloudClient, CloudError, createUUID, errorMes
 const id = "11111111-1111-4111-8111-111111111111";
 const job = { id, filename: "练习.pdf", state: "succeeded", revision: 2, scores: [], artifacts: {} };
 type Call = { path: string; init: RequestInit; headers: Headers };
-function mock(routes: Record<string, unknown | ((call: Call) => Response)>) {
+function mock(routes: Record<string, unknown | ((call: Call) => Response)>, previewEnabled?: () => boolean) {
   const calls: Call[] = [];
   const fetcher = async (path: string | URL | Request, init: RequestInit = {}) => {
     const call = { path: String(path), init, headers: new Headers(init.headers) }; calls.push(call);
@@ -14,7 +14,7 @@ function mock(routes: Record<string, unknown | ((call: Call) => Response)>) {
     assert.notEqual(route, undefined, `Unexpected request ${init.method || "GET"} ${path}`);
     return new Response(JSON.stringify(route), { status: 200, headers: { "Content-Type": "application/json" } });
   };
-  return { client: new CloudClient(fetcher as typeof fetch, () => false), calls };
+  return { client: new CloudClient(fetcher as typeof fetch, () => false, nativeRequest, { read: 30000, write: 300000 }, previewEnabled), calls };
 }
 
 test("browser pairing uses a cookie session and CSRF; no Bearer or token is put in the UI", async () => {
@@ -139,6 +139,40 @@ test("HTTPS configuration rejects insecure URLs and credential-bearing URLs", as
   const client = new CloudClient(async () => { throw new Error("unused"); }, () => true, async <T>() => ({} as T));
   for (const address of ["http://124.221.211.156", "https://user:secret@example.com", "https://example.com/api", "https://example.com/?secret=x"]) await assert.rejects(client.configure(address));
   await client.configure("https://124.221.211.156");
+});
+
+test("explicit development proxy allows only the current loopback origin, then reaches pairing", async () => {
+  const saved = globalThis.window; globalThis.window = { location: { origin: "http://localhost:8891" } } as Window & typeof globalThis;
+  try {
+    const { client, calls } = mock({ "GET /api/session": () => new Response(JSON.stringify({ error: "not paired" }), { status: 401 }), "POST /api/pair": { csrf: "paired-csrf" } }, () => true);
+    const initial = await client.configuration();
+    assert.equal(initial.baseURL, "http://localhost:8891"); assert.equal(initial.hasCredentials, false);
+    await client.configure(initial.baseURL); await client.pair("one-time-code", "Browser");
+    assert.equal(calls[1].path, "/api/pair"); assert.equal(calls[1].init.credentials, "same-origin");
+    await assert.rejects(client.configure("http://127.0.0.1:8891"));
+    await assert.rejects(client.configure("https://124.221.211.156"));
+  } finally { globalThis.window = saved; }
+});
+
+test("HTTP loopback is rejected without the development proxy flag, including production", async () => {
+  const saved = globalThis.window; globalThis.window = { location: { origin: "http://localhost:8891" } } as Window & typeof globalThis;
+  try {
+    await assert.rejects(mock({}, () => false).client.configure("http://localhost:8891"), /显式启用开发代理/);
+    await assert.rejects(mock({}).client.configure("http://localhost:8891"), /显式启用开发代理/);
+    const native = new CloudClient(async () => { throw new Error("unused"); }, () => true, nativeRequest, { read: 30, write: 30 }, () => true);
+    await assert.rejects(native.configure("http://localhost:8891"), /原生设备需要 HTTPS/);
+  } finally { globalThis.window = saved; }
+});
+
+test("development flag cannot permit a non-loopback HTTP site; same-origin HTTPS remains valid", async () => {
+  const saved = globalThis.window;
+  try {
+    globalThis.window = { location: { origin: "http://example.com" } } as Window & typeof globalThis;
+    await assert.rejects(mock({}, () => true).client.configure("http://example.com"));
+    globalThis.window = { location: { origin: "https://124.221.211.156" } } as Window & typeof globalThis;
+    await mock({}, () => false).client.configure("https://124.221.211.156");
+    await assert.rejects(mock({}, () => true).client.configure("https://other.example.com"));
+  } finally { globalThis.window = saved; }
 });
 
 test("UUID fallback works in the custom WebView scheme without randomUUID", () => {

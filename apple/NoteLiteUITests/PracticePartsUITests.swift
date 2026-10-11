@@ -26,7 +26,7 @@ final class PracticePartsUITests: XCTestCase {
         app.launch()
         openFixture(app)
         app.terminate()
-        app.launchArguments = []
+        app.launchArguments = ["--uitesting-legacy"]
         app.launchEnvironment.removeValue(forKey: "NOTELITE_UI_PRACTICE_PARTS")
         app.launch()
         openFixture(app)
