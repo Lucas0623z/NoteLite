@@ -3,6 +3,7 @@ import WebKit
 import UniformTypeIdentifiers
 import CoreFoundation
 import QuickLook
+import AVKit
 #if os(iOS)
 import UIKit
 #else
@@ -37,9 +38,21 @@ struct FigmaShellView: View {
         .onChange(of: controller.previewURL) { value in
             if value == nil { controller.clearPreview() }
         }
+        .sheet(item: $controller.audioPreview, onDismiss: { controller.clearAudio() }) { preview in
+            VStack(spacing: 16) {
+                Text("课堂录音").font(.headline)
+                VideoPlayer(player: preview.player).frame(minWidth: 280, minHeight: 150)
+                Button("关闭") { controller.clearAudio() }
+            }.padding(24).onAppear { preview.player.play() }
+        }
         .onAppear { controller.load() }
     }
 
+}
+
+struct FigmaAccountAudioPreview: Identifiable {
+    let id = UUID()
+    let player: AVPlayer
 }
 
 @MainActor
@@ -51,6 +64,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     @Published var javaScriptDialogMessage = ""
     @Published var requiresConfirmation = false
     @Published var previewURL: URL?
+    @Published var audioPreview: FigmaAccountAudioPreview?
     private(set) var webView: WKWebView!
     private var requests: [String: Task<Void, Never>] = [:]
     private var importContinuation: CheckedContinuation<URL, Error>?
@@ -58,6 +72,9 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     private var importRequestID: String?
     private var exportRequestID: String?
     private var previewDirectory: URL?
+    private var audioFile: CloudAccountAudioFile?
+    private var accountClients: [String: CloudAccountClient] = [:]
+    private let accountDigests = CloudAccountDigestStore()
     private var filePanel: FigmaNativeFilePanel?
     private var javaScriptDialogCompletion: ((Bool) -> Void)?
     private var loaded = false
@@ -159,6 +176,10 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             defer { requests.removeValue(forKey: requestID) }
             do {
                 let result = try await perform(action, payload: payload, requestID: requestID)
+                if Task.isCancelled, action == "account/digest/start", let value = result as? [String: Any],
+                   let id = value["digestId"] as? String, let scope = try? accountClient().identityScope() {
+                    _ = try? accountDigests.cancel(id: id, scope: scope)
+                }
                 try Task.checkCancellation()
                 resolve(requestID, result: result)
             } catch { resolve(requestID, error: error) }
@@ -170,7 +191,12 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     private func configuration() throws -> [String: Any] {
-        ["baseURL": origin, "hasCredentials": !(try CloudDeviceTokenStore.read(origin: origin)).isEmpty,
+        let account = try accountClient().credential()
+        let hasCredentials: Bool
+        if account != nil { hasCredentials = true }
+        else { hasCredentials = !(try CloudDeviceTokenStore.read(origin: origin)).isEmpty }
+        return ["baseURL": origin, "hasCredentials": hasCredentials,
+         "hasAccountCredentials": account != nil,
          "platform": platform, "native": true, "listeningEnabled": false]
     }
 
@@ -183,7 +209,17 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     private func client(authenticated: Bool = true) throws -> CloudOMRClient {
-        try CloudOMRClient(origin: origin, token: authenticated ? CloudDeviceTokenStore.read(origin: origin) : "")
+        let account = authenticated ? try accountClient().credential() : nil
+        return try CloudOMRClient(origin: origin, token: authenticated && account == nil ? CloudDeviceTokenStore.read(origin: origin) : "",
+                                  accountToken: account?.token, accountUserID: account?.userID)
+    }
+
+    private func accountClient() throws -> CloudAccountClient {
+        let key = try ServerConfiguration(origin).key
+        if let existing = accountClients[key] { return existing }
+        let value = try CloudAccountClient(origin: key)
+        accountClients[key] = value
+        return value
     }
 
     private func perform(_ action: String, payload: [String: Any], requestID: String) async throws -> Any {
@@ -191,8 +227,56 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         case "configuration/get": return try configuration()
         case "configuration/set":
             let value = try ServerConfiguration(string(payload, "baseURL")).key
+            for (id, task) in requests where id != requestID { task.cancel() }
+            accountDigests.clear()
+            clearAudio()
+            accountClients.removeAll()
             UserDefaults.standard.set(value, forKey: Self.originKey)
             return try configuration()
+        case "account/request":
+            let capturedOrigin = origin
+            let account = try accountClient()
+            let result = try await account.request(payload)
+            guard origin == capturedOrigin else {
+                throw CloudOMRError(code: "identity_changed", message: "服务地址已更改，请重新打开当前内容。", status: 409)
+            }
+            if ["/login", "/register", "/logout"].contains(payload["path"] as? String ?? "") ||
+                ((payload["method"] as? String) == "DELETE" && (payload["path"] as? String)?.hasPrefix("/sessions/") == true) {
+                accountDigests.clear()
+                clearAudio()
+            }
+            return result
+        case "account/digest/start":
+            return try accountDigests.start(size: payload["size"], scope: accountClient().identityScope())
+        case "account/digest/update":
+            return try accountDigests.update(id: string(payload, "digestId"), base64: string(payload, "base64"),
+                                             offset: payload["offset"], scope: accountClient().identityScope())
+        case "account/digest/finish":
+            return try accountDigests.finish(id: string(payload, "digestId"), scope: accountClient().identityScope())
+        case "account/digest/cancel":
+            return try accountDigests.cancel(id: string(payload, "digestId"), scope: accountClient().identityScope())
+        case "account/audio/view":
+            guard audioPreview == nil, previewURL == nil, filePanel == nil else {
+                throw CloudOMRError(code: "busy", message: "请先关闭当前播放或文件窗口。")
+            }
+            let capturedOrigin = origin
+            let account = try accountClient()
+            let scope = try account.identityScope()
+            let file = try await account.downloadAudio(submissionID: string(payload, "submissionId"), expectedUserID: payload["expectedUserId"])
+            do {
+                let playable = try await AVURLAsset(url: file.url).load(.isPlayable)
+                try Task.checkCancellation()
+                guard try account.identityScope() == scope else {
+                    throw CloudOMRError(code: "identity_changed", message: "账号已切换，请重新打开录音。", status: 409)
+                }
+                guard origin == capturedOrigin, audioPreview == nil, previewURL == nil, filePanel == nil else {
+                    throw CloudOMRError(code: "busy", message: "播放状态已更新，请重新打开录音。")
+                }
+                guard playable else { throw CloudOMRError(code: "unsupported_audio", message: "当前设备不能播放这种录音格式。") }
+                audioFile = file
+                audioPreview = FigmaAccountAudioPreview(player: AVPlayer(url: file.url))
+                return ["previewOpened": true]
+            } catch { file.remove(); throw error }
         case "device/pair":
             let pairingOrigin = origin
             let pairingClient = try CloudOMRClient(origin: pairingOrigin, token: "")
@@ -221,12 +305,12 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             }
             return try await upload(data, filename: string(payload, "filename"), requestID: requestID)
         case "jobs/import":
-            guard importContinuation == nil, exportContinuation == nil, filePanel == nil, previewURL == nil else {
+            guard importContinuation == nil, exportContinuation == nil, filePanel == nil, previewURL == nil, audioPreview == nil else {
                 throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。")
             }
             // Pairing must be completed before asking the user for a score file.
             _ = try client()
-            guard !(try CloudDeviceTokenStore.read(origin: origin)).isEmpty else {
+            guard (try configuration())["hasCredentials"] as? Bool == true else {
                 throw CloudOMRError(code: "pairing_required", message: "请先连接识谱服务。")
             }
             let selected = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
@@ -281,7 +365,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             }
             return try await saveFile(data, filename: string(payload, "filename"), requestID: requestID)
         case "files/view":
-            guard previewURL == nil, filePanel == nil else { throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。") }
+            guard previewURL == nil, filePanel == nil, audioPreview == nil else { throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。") }
             guard try string(payload, "kind") == "original" else { throw NoteLiteError.invalidResponse }
             let filename = try string(payload, "filename")
             try FileRules.validateFilename(filename)
@@ -301,7 +385,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                 catch { try? FileManager.default.removeItem(at: directory); throw error }
             }.value
             if Task.isCancelled { try? FileManager.default.removeItem(at: directory); throw CancellationError() }
-            guard previewURL == nil, filePanel == nil else {
+            guard previewURL == nil, filePanel == nil, audioPreview == nil else {
                 try? FileManager.default.removeItem(at: directory)
                 throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。")
             }
@@ -330,7 +414,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     private func saveFile(_ data: Data, filename: String, requestID: String) async throws -> [String: Any] {
-        guard exportContinuation == nil, importContinuation == nil, filePanel == nil, previewURL == nil else {
+        guard exportContinuation == nil, importContinuation == nil, filePanel == nil, previewURL == nil, audioPreview == nil else {
             throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。")
         }
         try FileRules.validateFilename(filename)
@@ -343,7 +427,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         }.value
         defer { try? FileManager.default.removeItem(at: directory) }
         try Task.checkCancellation()
-        guard exportContinuation == nil, importContinuation == nil, filePanel == nil, previewURL == nil else {
+        guard exportContinuation == nil, importContinuation == nil, filePanel == nil, previewURL == nil, audioPreview == nil else {
             throw CloudOMRError(code: "busy", message: "文件选择窗口已经打开。")
         }
         let savedName = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
@@ -391,6 +475,13 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     func clearPreview() {
         if let previewDirectory { try? FileManager.default.removeItem(at: previewDirectory) }
         previewDirectory = nil
+    }
+
+    func clearAudio() {
+        audioPreview?.player.pause()
+        audioPreview = nil
+        audioFile?.remove()
+        audioFile = nil
     }
 
     private func cancelRequest(_ requestID: String) {

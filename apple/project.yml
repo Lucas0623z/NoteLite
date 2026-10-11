@@ -47,6 +47,8 @@ targets:
       - sdk: WebKit.framework
       - sdk: CoreMIDI.framework
       - sdk: AVFoundation.framework
+      - sdk: AVKit.framework
+      - sdk: CryptoKit.framework
       - sdk: ImageIO.framework
   NoteLiteMac:
     type: application
@@ -85,6 +87,8 @@ targets:
       - sdk: WebKit.framework
       - sdk: CoreMIDI.framework
       - sdk: AVFoundation.framework
+      - sdk: AVKit.framework
+      - sdk: CryptoKit.framework
       - sdk: ImageIO.framework
   NoteLiteTests:
     type: bundle.unit-test

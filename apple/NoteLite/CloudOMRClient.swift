@@ -84,15 +84,23 @@ final class CloudOMRClient {
     static let maximumUploadBytes = 32 * 1024 * 1024
     private let configuration: ServerConfiguration
     private let token: String
+    private let accountUserID: String?
     private let session: URLSession
 
-    init(origin: String, token: String, sessionConfiguration: URLSessionConfiguration = .ephemeral) throws {
+    init(origin: String, token: String, accountToken: String? = nil, accountUserID: String? = nil,
+         sessionConfiguration: URLSessionConfiguration = .ephemeral) throws {
         configuration = try ServerConfiguration(origin)
-        self.token = token
+        // An expired account remains authoritative; never silently retry as a legacy device.
+        self.token = accountToken ?? token
+        self.accountUserID = accountUserID
         // Edits synchronously regenerate MIDI; the public proxy may wait 190 seconds.
         sessionConfiguration.timeoutIntervalForRequest = 240
         sessionConfiguration.timeoutIntervalForResource = 300
         sessionConfiguration.urlCache = nil
+        sessionConfiguration.httpShouldSetCookies = false
+        sessionConfiguration.httpCookieStorage = nil
+        sessionConfiguration.httpCookieAcceptPolicy = .never
+        sessionConfiguration.urlCredentialStorage = nil
         session = URLSession(configuration: sessionConfiguration)
     }
 
@@ -245,6 +253,10 @@ final class CloudOMRClient {
                 throw CloudOMRError(code: "pairing_required", message: "请先使用设备配对码连接识谱服务。")
             }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            if let accountUserID {
+                guard UUID(uuidString: accountUserID) != nil else { throw NoteLiteError.invalidResponse }
+                request.setValue(accountUserID.lowercased(), forHTTPHeaderField: "X-NoteLite-Expected-User")
+            }
         }
         return request
     }

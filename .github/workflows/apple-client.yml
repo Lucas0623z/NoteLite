@@ -200,7 +200,7 @@ jobs:
   simulator-clients:
     name: ${{ matrix.family }} interface
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -250,7 +250,7 @@ jobs:
           xcrun simctl boot "$DEVICE_ID"
           xcrun simctl bootstatus "$DEVICE_ID" -b | tee apple/SimulatorResults/boot.log
       - name: Test native interface and model
-        timeout-minutes: 15
+        timeout-minutes: 20
         working-directory: apple
         env:
           DEVICE_ID: ${{ steps.simulator.outputs.device_id }}

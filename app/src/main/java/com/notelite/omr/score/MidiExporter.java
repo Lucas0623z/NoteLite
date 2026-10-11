@@ -26,10 +26,12 @@ import org.audiveris.proxymusic.Backup;
 import org.audiveris.proxymusic.BackwardForward;
 import org.audiveris.proxymusic.Barline;
 import org.audiveris.proxymusic.Direction;
+import org.audiveris.proxymusic.DirectionType;
 import org.audiveris.proxymusic.Ending;
 import org.audiveris.proxymusic.Forward;
 import org.audiveris.proxymusic.Key;
 import org.audiveris.proxymusic.MidiInstrument;
+import org.audiveris.proxymusic.Metronome;
 import org.audiveris.proxymusic.Note;
 import org.audiveris.proxymusic.Pitch;
 import org.audiveris.proxymusic.Repeat;
@@ -207,9 +209,24 @@ public class MidiExporter
         return sequence;
     }
 
-    private record TieKey(int pitch, String voice, BigInteger staff) {}
+    private record TieKey(int pitch, String voice) {}
 
-    private record PlayedNote(TieKey key, long onset, long duration, boolean start, boolean stop) {}
+    private record PlayedNote(TieKey key, BigInteger staff, long onset, long duration, boolean start, boolean stop) {}
+
+    private static class SoundingNote
+    {
+        final TieKey key;
+        final BigInteger staff;
+        final long onset;
+        long off;
+
+        SoundingNote (PlayedNote note, long onset, long off) {
+            key = note.key;
+            staff = note.staff;
+            this.onset = onset;
+            this.off = off;
+        }
+    }
 
     private record Tempo(long onset, BigDecimal bpm) {}
 
@@ -283,8 +300,8 @@ public class MidiExporter
                             start |= tie.getType() == StartStop.START;
                             stop |= tie.getType() == StartStop.STOP;
                         }
-                        TieKey key = new TieKey(pitch, Objects.requireNonNullElse(note.getVoice(), "1"), staff);
-                        data.notes.add(new PlayedNote(key, onset,
+                        TieKey key = new TieKey(pitch, Objects.requireNonNullElse(note.getVoice(), "1"));
+                        data.notes.add(new PlayedNote(key, staff, onset,
                                 note.getGrace() == null ? duration : Math.max(1, (long) ppq * GRACE_TICKS / DEFAULT_PPQ), start, stop));
                     }
                     if (note.getGrace() == null) data.length = Math.max(data.length, onset + duration);
@@ -299,17 +316,27 @@ public class MidiExporter
                     data.length = Math.max(data.length, cursor);
                 } else if (item instanceof Direction direction) {
                     Sound sound = direction.getSound();
-                    long offset = 0;
-                    if (direction.getOffset() != null && direction.getOffset().getSound() == YesNo.YES) {
-                        offset = ticks(direction.getOffset().getValue(), divisions, ppq);
+                    long printedOffset = direction.getOffset() == null ? 0
+                            : ticks(direction.getOffset().getValue(), divisions, ppq);
+                    long soundOffset = direction.getOffset() != null && direction.getOffset().getSound() == YesNo.YES
+                            ? printedOffset : 0;
+                    if (sound != null && sound.getOffset() != null) soundOffset = ticks(sound.getOffset().getValue(), divisions, ppq);
+                    boolean soundTempo = sound != null && sound.getTempo() != null && sound.getTempo().signum() > 0;
+                    if (soundTempo) data.tempos.add(new Tempo(cursor + soundOffset, sound.getTempo()));
+                    // A later sound/offset does not suppress an earlier printed metronome.
+                    // Explicit sound is authoritative only at the same playback position.
+                    if (!soundTempo || soundOffset != printedOffset) {
+                        for (DirectionType type : direction.getDirectionType()) {
+                            BigDecimal printedTempo = metronomeTempo(type.getMetronome());
+                            if (printedTempo != null) data.tempos.add(new Tempo(cursor + printedOffset, printedTempo));
+                        }
                     }
-                    if (sound != null && sound.getOffset() != null) offset = ticks(sound.getOffset().getValue(), divisions, ppq);
-                    if (sound != null && sound.getTempo() != null) data.tempos.add(new Tempo(cursor + offset, sound.getTempo()));
                 } else if (item instanceof Sound sound && sound.getTempo() != null) {
                     long offset = sound.getOffset() == null ? 0 : ticks(sound.getOffset().getValue(), divisions, ppq);
                     data.tempos.add(new Tempo(cursor + offset, sound.getTempo()));
                 }
             }
+            data.notes.sort((a, b) -> Long.compare(a.onset, b.onset));
             data.tempos.sort((a, b) -> Long.compare(a.onset, b.onset));
             if (measure.getImplicit() != YesNo.YES && measure.getNonControlling() != YesNo.YES) data.notatedLength = meterLength;
             for (Tempo change : data.tempos) if (change.bpm.signum() > 0) tempo = change.bpm;
@@ -324,6 +351,39 @@ public class MidiExporter
                 .divide(divisions, 0, RoundingMode.HALF_UP).longValueExact();
     }
 
+    /** Numeric beat-unit metronomes only; leave textual/metric-modulation markings uninterpreted. */
+    private static BigDecimal metronomeTempo (Metronome metronome)
+    {
+        if (metronome == null || metronome.getPerMinute() == null || metronome.getPerMinute().getValue() == null
+                || !metronome.getBeatUnitTied().isEmpty() || !metronome.getMetronomeNote().isEmpty()
+                || metronome.getMetronomeRelation() != null) return null;
+        BigDecimal unit = switch (Objects.requireNonNullElse(metronome.getBeatUnit(), "")) {
+            case "maxima" -> BigDecimal.valueOf(32);
+            case "long" -> BigDecimal.valueOf(16);
+            case "breve" -> BigDecimal.valueOf(8);
+            case "whole" -> BigDecimal.valueOf(4);
+            case "half" -> BigDecimal.valueOf(2);
+            case "quarter" -> BigDecimal.ONE;
+            case "eighth" -> new BigDecimal("0.5");
+            case "16th" -> new BigDecimal("0.25");
+            case "32nd" -> new BigDecimal("0.125");
+            case "64th" -> new BigDecimal("0.0625");
+            case "128th" -> new BigDecimal("0.03125");
+            default -> null;
+        };
+        if (unit == null) return null;
+        BigDecimal perMinute;
+        try { perMinute = new BigDecimal(metronome.getPerMinute().getValue().trim()); }
+        catch (NumberFormatException ex) { return null; }
+        if (perMinute.signum() <= 0) return null;
+        BigDecimal factor = BigDecimal.ONE, dot = new BigDecimal("0.5");
+        for (int i = 0; i < metronome.getBeatUnitDot().size(); i++) {
+            factor = factor.add(dot);
+            dot = dot.divide(BigDecimal.valueOf(2));
+        }
+        return perMinute.multiply(unit).multiply(factor);
+    }
+
     private static void writePart (List<MeasureData> measures, List<Integer> order,
                                    List<Long> lengths, Track track, Track meta, int channel, boolean conductor)
             throws InvalidMidiDataException
@@ -331,10 +391,12 @@ public class MidiExporter
         long measureTick = 0;
         int previous = -1;
         BigDecimal currentTempo = BigDecimal.valueOf(120);
-        Map<TieKey, Long> pending = new HashMap<>();
+        Map<Integer, BigDecimal> visitedEntryTempo = new HashMap<>();
+        Map<TieKey, List<SoundingNote>> pending = new HashMap<>();
+        List<SoundingNote> sounding = new ArrayList<>();
         Map<Integer, byte[]> currentSignatures = new HashMap<>();
         for (int index : order) {
-            if (index != previous + 1) closeTies(pending, track, channel);
+            if (index != previous + 1) pending.clear();
             if (index < measures.size()) {
                 MeasureData data = measures.get(index);
                 if (index != previous + 1) {
@@ -352,43 +414,67 @@ public class MidiExporter
                             measureTick + signature.onset, signature.type, signature.data);
                     currentSignatures.put(signature.type, signature.data);
                 }
-                if (index != previous + 1 && currentTempo.compareTo(data.startingTempo) != 0
-                        && data.tempos.stream().noneMatch(t -> t.onset == 0)) {
-                    addTempo(meta, measureTick, data.startingTempo);
-                    currentTempo = data.startingTempo;
+                BigDecimal entryTempo = index <= previous
+                        ? visitedEntryTempo.getOrDefault(index, data.startingTempo) : currentTempo;
+                visitedEntryTempo.putIfAbsent(index, entryTempo);
+                // Backward repeats restore their actual first-entry tempo. Forward ending
+                // skips keep the tempo already heard, rather than inheriting a skipped bar.
+                if (currentTempo.compareTo(entryTempo) != 0
+                        && data.tempos.stream().noneMatch(t -> t.onset == 0 && t.bpm.signum() > 0)) {
+                    addTempo(meta, measureTick, entryTempo);
                 }
+                currentTempo = entryTempo;
                 for (Tempo tempo : data.tempos) {
                     addTempo(meta, Math.max(0, measureTick + tempo.onset), tempo.bpm);
                     if (tempo.bpm.signum() > 0) currentTempo = tempo.bpm;
                 }
                 for (PlayedNote note : data.notes) {
                     long onset = measureTick + note.onset, off = onset + note.duration;
-                    if (!note.stop || !pending.containsKey(note.key)) {
-                        Long oldOff = pending.remove(note.key);
-                        if (oldOff != null) addNoteOff(track, channel, note.key.pitch, oldOff);
-                        addNoteOn(track, channel, note.key.pitch, onset);
+                    List<SoundingNote> open = pending.computeIfAbsent(note.key, key -> new ArrayList<>());
+                    open.removeIf(tie -> tie.off < onset);
+                    List<SoundingNote> candidates = open.stream().filter(tie -> tie.off == onset).toList();
+                    List<SoundingNote> sameStaff = candidates.stream().filter(tie -> tie.staff.equals(note.staff)).toList();
+                    List<SoundingNote> matching = sameStaff.isEmpty() ? candidates : sameStaff;
+                    if (note.stop && matching.size() > 1) {
+                        throw new IllegalArgumentException("Ambiguous same-voice, same-pitch tie at MIDI tick " + onset);
                     }
-                    if (note.start) pending.put(note.key, off);
-                    else {
-                        addNoteOff(track, channel, note.key.pitch, off);
-                        pending.remove(note.key);
+                    SoundingNote tied = note.stop && !matching.isEmpty() ? matching.get(0) : null;
+                    if (tied != null) {
+                        tied.off = off;
+                        if (!note.start) open.remove(tied);
+                    } else {
+                        SoundingNote played = new SoundingNote(note, onset, off);
+                        sounding.add(played);
+                        if (note.start) open.add(played);
                     }
                 }
             }
             measureTick += lengths.get(index);
             previous = index;
         }
-        closeTies(pending, track, channel);
+        // Resolve ties before emitting events. Note-offs precede new attacks at the same
+        // tick, so an old unfinished tie cannot immediately silence the next note.
+        List<MidiEvent> noteEvents = new ArrayList<>();
+        for (SoundingNote note : sounding) {
+            // Unreadable OMR durations have no playable interval; do not create a
+            // zero-length note whose off-before-on ordering would leave it sounding.
+            if (note.off <= note.onset) continue;
+            ShortMessage on = new ShortMessage(), off = new ShortMessage();
+            on.setMessage(ShortMessage.NOTE_ON, channel, note.key.pitch, DEFAULT_VELOCITY);
+            off.setMessage(ShortMessage.NOTE_OFF, channel, note.key.pitch, 0);
+            noteEvents.add(new MidiEvent(on, note.onset));
+            noteEvents.add(new MidiEvent(off, note.off));
+        }
+        noteEvents.sort((a, b) -> {
+            int tick = Long.compare(a.getTick(), b.getTick());
+            if (tick != 0) return tick;
+            return Integer.compare(((ShortMessage) a.getMessage()).getCommand() == ShortMessage.NOTE_OFF ? 0 : 1,
+                    ((ShortMessage) b.getMessage()).getCommand() == ShortMessage.NOTE_OFF ? 0 : 1);
+        });
+        for (MidiEvent event : noteEvents) track.add(event);
         MetaMessage end = new MetaMessage();
         end.setMessage(0x2f, new byte[0], 0);
         track.add(new MidiEvent(end, measureTick));
-    }
-
-    private static void closeTies (Map<TieKey, Long> pending, Track track, int channel)
-            throws InvalidMidiDataException
-    {
-        for (Map.Entry<TieKey, Long> tie : pending.entrySet()) addNoteOff(track, channel, tie.getKey().pitch, tie.getValue());
-        pending.clear();
     }
 
     /** Standard MIDI can represent one denominator and major/minor key signatures. */
@@ -461,22 +547,6 @@ public class MidiExporter
         }
         int alter = (pitch.getAlter() != null) ? pitch.getAlter().intValue() : 0;
         return (pitch.getOctave() + 1) * 12 + semi + alter;
-    }
-
-    private static void addNoteOn (Track t, int channel, int pitch, long tick)
-            throws InvalidMidiDataException
-    {
-        ShortMessage m = new ShortMessage();
-        m.setMessage(ShortMessage.NOTE_ON, channel, pitch, DEFAULT_VELOCITY);
-        t.add(new MidiEvent(m, tick));
-    }
-
-    private static void addNoteOff (Track t, int channel, int pitch, long tick)
-            throws InvalidMidiDataException
-    {
-        ShortMessage m = new ShortMessage();
-        m.setMessage(ShortMessage.NOTE_OFF, channel, pitch, 0);
-        t.add(new MidiEvent(m, tick));
     }
 
     private record RepeatRegion(int start, int end, int times) {}

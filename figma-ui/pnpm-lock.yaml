@@ -33,6 +33,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.0.0
         version: 6.0.1(vite@8.0.5(@types/node@22.19.17)(jiti@2.6.1))
+      '@xmldom/xmldom':
+        specifier: ^0.9.12
+        version: 0.9.12
       oxfmt:
         specifier: ^0.2.0
         version: 0.2.0
@@ -351,6 +354,10 @@ packages:
         optional: true
       babel-plugin-react-compiler:
         optional: true
+
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
 
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
@@ -1040,6 +1047,8 @@ snapshots:
     dependencies:
       '@rolldown/pluginutils': 1.0.0-rc.7
       vite: 8.0.5(@types/node@22.19.17)(jiti@2.6.1)
+
+  '@xmldom/xmldom@0.9.12': {}
 
   abbrev@4.0.0:
     optional: true

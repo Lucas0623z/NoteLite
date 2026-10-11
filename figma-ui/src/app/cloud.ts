@@ -96,6 +96,7 @@ function jobPath(jobId: string, suffix = "", score?: number): string {
 /** Injectable transport lets tests verify actual HTTP contracts without exposing credentials. */
 export class CloudClient {
   private csrf = "";
+  resetSession(): void { this.csrf = ""; }
   private fetcher: typeof fetch;
   private native: typeof isNativeCloud;
   private bridge: typeof nativeRequest;

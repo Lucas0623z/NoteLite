@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/cloud.test.ts tests/osmd.test.ts tests/async-score.test.ts",
+    "test": "node --experimental-strip-types --test tests/cloud.test.ts tests/osmd.test.ts tests/async-score.test.ts tests/score-rules.test.ts tests/score-document-edit.test.ts tests/notation-interaction.test.ts tests/score-position.test.ts tests/score-playback.test.ts tests/account.test.ts tests/practice-records.test.ts tests/practice-summary.test.ts",
     "preview": "vite preview",
     "format": "oxfmt"
   },
@@ -22,6 +22,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
+    "@xmldom/xmldom": "^0.9.12",
     "oxfmt": "^0.2.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",

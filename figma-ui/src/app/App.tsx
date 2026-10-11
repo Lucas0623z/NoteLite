@@ -1,6 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import aiIcon from "../imports/image.png";
 import MyScoresPage from "./MyScoresPage";
+import AccountSettings from "./AccountSettings";
+import ClassroomSettings from "./ClassroomSettings";
+import PracticeHistory, { usePracticeHistory } from "./PracticeHistory";
+import { analysisRequestID, ownedPracticeRecords, practiceSummary, shouldAllowPracticeAnalysis, type PracticeHistoryState } from "./practice-summary";
+import { account, type AccountIdentity, type AggregateFact, type AggregateObservation, type PracticeAnalysisResult } from "./account";
+import { CloudError, createUUID, errorMessage } from "./cloud";
 import tuningForkDisc from "../imports/01-tuning-fork.svg";
 import metronomeDisc from "../imports/02-metronome.svg";
 import headphonesDisc from "../imports/03-headphones.svg";
@@ -334,17 +340,12 @@ function CoursesPage({ isDark, selectedCourse, onCourseChange, onContinue }: { i
   </div>;
 }
 
-function SettingsContent({ title, isDark, toggleTheme, name, onNameChange }: { title: string; isDark: boolean; toggleTheme: () => void; name: string; onNameChange: (name: string) => void }) {
+function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, identity, history, onReload, onScores }: { title: string; isDark: boolean; toggleTheme: () => void; name: string; onNameChange: (name: string) => void; identity: AccountIdentity | null; history: PracticeHistoryState; onReload: () => void; onScores: () => void }) {
   const { options, toggle } = useSavedOptions();
   const [message, setMessage] = useState("");
   const [notificationGroup, setNotificationGroup] = useState<string | null>(null);
-  const [classCode, setClassCode] = useState("");
-  const [createClassOpen, setCreateClassOpen] = useState(false);
-  const [classroomName, setClassroomName] = useState("");
-  const [classroomMessage, setClassroomMessage] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
-  const codeInputs = useRef<(HTMLInputElement | null)[]>([]);
   const [profile, setProfile] = useState({ username: "", email: "", phone: "" });
   const outline = isDark ? "border-white/15" : "border-[#e5e5e5]";
   const field = `mt-2 h-12 w-full rounded-[13px] border-2 px-4 text-[18px] font-normal outline-none focus:border-[#67db23] ${isDark ? "border-white/15 bg-white/5" : "border-[#e5e5e5] bg-[#f7f7f7]"}`;
@@ -383,20 +384,21 @@ function SettingsContent({ title, isDark, toggleTheme, name, onNameChange }: { t
         }} />
       </div>
       <label className="mb-4 block text-[19px] font-bold">姓名<input value={name} onChange={(event) => onNameChange(event.target.value)} maxLength={30} placeholder="请输入姓名" autoComplete="name" className={field} /></label>
-      <label className="mb-4 block text-[19px] font-bold">用户名<input value={profile.username} onChange={(event) => setProfile({ ...profile, username: event.target.value })} autoComplete="username" placeholder="请输入用户名" className={field} /></label>
-      <label className="mb-4 block text-[19px] font-bold">密码<input type="password" disabled placeholder="接入账号服务后可修改" className={`${field} text-[14px] disabled:opacity-60`} /></label>
+      <AccountSettings key={identity?.userId || "guest"} identity={identity} field={field} action={action} onReload={onReload} />
       <label className="mb-4 block text-[19px] font-bold">邮箱<input type="email" value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} autoComplete="email" placeholder="请输入邮箱" className={field} /></label>
       <label className="mb-4 block text-[19px] font-bold">电话号码<input type="tel" value={profile.phone} onChange={(event) => setProfile({ ...profile, phone: event.target.value })} autoComplete="tel" placeholder="请输入电话号码" className={field} /></label>
-      <p className="mb-5 text-[12px] text-[#999]">姓名保存在本机，其余字段为当前页面草稿。</p>
+      <p className="mb-5 text-[12px] text-[#999]">姓名保存在本机；邮箱、电话号码为当前页面的本机偏好，不用于登录。</p>
       <button type="button" className={action} onClick={() => {
-        const url = URL.createObjectURL(new Blob([JSON.stringify({ name, ...profile, settings: options }, null, 2)], { type: "application/json" }));
+        const url = URL.createObjectURL(new Blob([JSON.stringify({ name, email: profile.email, phone: profile.phone, username: identity?.username || null, settings: options }, null, 2)], { type: "application/json" }));
         const link = document.createElement("a"); link.href = url; link.download = "黑白键-个人数据.json"; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
         setMessage("已导出本机个人资料和设置。");
       }}>导出数据</button>
-      <button type="button" className={`${action} mt-3 text-[#ef6666]`} onClick={() => setMessage("尚未接入账号服务，无法删除远程账户。")}>删除账户</button>
+      <button type="button" disabled className={`${action} mt-3 text-[#ef6666] disabled:opacity-50`}>删除账户（暂未开放）</button>
       {notice}
     </div>
   );
+
+  if (title === "退出登录") return <div className="px-4 py-7"><AccountSettings key={identity?.userId || "guest"} identity={identity} field={field} action={action} onReload={onReload} /></div>;
 
   if (title === "通知") {
     const groups = [
@@ -419,47 +421,7 @@ function SettingsContent({ title, isDark, toggleTheme, name, onNameChange }: { t
 
   if (title === "隐私设置") return <div className="px-4 py-4">{toggleRow("信息收集", true, "广告跟踪及个性化")}{toggleRow("分享练琴录音", false, "与黑白键分享练琴录音，帮助优化练习体验") }<p className="mt-5 text-[12px] leading-6 text-[#aaa]">仅保存你的偏好，不会在此页面采集或上传录音。</p></div>;
 
-  if (title === "黑白键课堂") return (
-    <div>
-      <div className="flex h-48 items-center justify-center overflow-hidden bg-[#67db23]"><img src={aiIcon} alt="黑白键练琴小猫" className="h-44 w-44 object-contain" /></div>
-      <div className="px-4 py-7">
-        <section aria-labelledby="create-class-title" className={`mb-7 border-b-2 pb-7 ${outline}`}>
-          <h2 id="create-class-title" className="text-[24px] font-bold">创建课堂</h2>
-          <p className="mt-4 text-[15px] leading-7 text-[#999]">创建你的专属练琴课堂，邀请学生加入，统一安排练习并查看学习进度。</p>
-          {!createClassOpen ? (
-            <button type="button" onClick={() => setCreateClassOpen(true)} className={`${action} mt-5 flex items-center justify-center text-center`}>
-              创建课堂
-            </button>
-          ) : (
-            <form className="mt-5" onSubmit={(event) => { event.preventDefault(); setClassroomMessage(`已填写「${classroomName.trim()}」。创建课堂服务尚未接入，暂未创建真实课堂。`); }}>
-              <label className="block text-[17px] font-bold">课堂名称<input autoFocus required maxLength={40} value={classroomName} onChange={(event) => { setClassroomName(event.target.value); setClassroomMessage(""); }} placeholder="例如：周六钢琴基础班" className={field} /></label>
-              <div className="mt-4 flex gap-3">
-                <button type="button" onClick={() => { setCreateClassOpen(false); setClassroomMessage(""); }} className={`${action} flex-1 text-[#999]`}>取消</button>
-                <button type="submit" disabled={!classroomName.trim()} className="h-12 flex-1 cursor-pointer rounded-[14px] bg-[#67db23] text-[16px] font-bold text-white disabled:cursor-default disabled:bg-[#e5e5e5] disabled:text-[#aaa]">确认创建</button>
-              </div>
-              <p role="status" className="mt-3 text-[13px] leading-6 text-[#999]">{classroomMessage}</p>
-            </form>
-          )}
-        </section>
-        <h2 className="text-[24px] font-bold">加入课堂</h2><p className="mt-4 text-[15px] leading-7 text-[#999]">请输入老师发给你的课堂代码。加入课堂后，老师可以了解你的练琴进度、布置练习并帮助管理学习计划。</p>
-        <div className="mt-5 grid grid-cols-6 gap-2" role="group" aria-label="六位课堂代码">
-          {Array.from({ length: 6 }, (_, index) => <input key={index} ref={(element) => { codeInputs.current[index] = element; }} aria-label={`课堂代码第${index + 1}位`} value={classCode[index] || ""} maxLength={1} autoCapitalize="characters" autoComplete="off" onChange={(event) => {
-            const character = event.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(-1);
-            setClassCode((previous) => previous.padEnd(6, " ").slice(0, index) + (character || " ") + previous.padEnd(6, " ").slice(index + 1));
-            setMessage("");
-            if (character && index < 5) codeInputs.current[index + 1]?.focus();
-          }} onKeyDown={(event) => {
-            if (event.key === "Backspace" && !classCode[index]?.trim() && index > 0) codeInputs.current[index - 1]?.focus();
-          }} onPaste={(event) => {
-            event.preventDefault();
-            const pasted = event.clipboardData.getData("text").replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
-            setClassCode(pasted); setMessage(""); codeInputs.current[Math.min(pasted.length, 5)]?.focus();
-          }} className={`${field} h-14 px-0 text-center text-[22px]`} />)}
-        </div>
-        <button type="button" disabled={!/^[A-Z0-9]{6}$/.test(classCode)} onClick={() => setMessage("课堂服务尚未接入，暂时无法验证代码。")} className="mt-5 h-12 w-full cursor-pointer rounded-[14px] bg-[#67db23] text-[17px] font-bold text-white disabled:cursor-default disabled:bg-[#e5e5e5] disabled:text-[#aaa]">提交</button>{notice}
-      </div>
-    </div>
-  );
+  if (title === "黑白键课堂") return <ClassroomSettings key={identity?.userId || "guest"} identity={identity} history={history} image={aiIcon} outline={outline} field={field} action={action} onScores={onScores} />;
 
   if (title === "挑选套餐") return (
     <div className="px-5 py-4"><h2 className="mb-4 text-[15px] font-medium text-[#aaa]">可选套餐</h2>
@@ -993,58 +955,85 @@ function OfficialScoresPage({ isDark }: { isDark: boolean }) {
   </div>;
 }
 
-function MusicAssistantPage({ isDark, streak, practiceCount }: { isDark: boolean; streak: number; practiceCount: number }) {
-  const [speaking, setSpeaking] = useState(false);
+function AnalysisFact({ fact }: { fact: AggregateFact }) {
+  return <section className="mt-3 border-t border-[#ddd] pt-3">
+    <strong>{fact.label}</strong><p className="mt-2">{fact.statement}</p>
+    <p>汇总值：{fact.displayValue ?? "未知"}</p><p>适用范围：{fact.scope}</p>
+    <p>事实状态：{{ verified_fact: "已核对事实", provisional_pattern: "初步规律", pending_review: "待复核", unavailable: "数据不可用" }[fact.claimState]} · 程序评定可信程度：{{ high: "高", medium: "中", low: "低", unknown: "未知" }[fact.confidence]}</p>
+    {fact.limitations.length > 0 && <p className="mt-2">局限：{fact.limitations.join("；")}</p>}
+    <details className="mt-2"><summary className="cursor-pointer font-bold">证据来源</summary><p className="mt-2">事实标识：{fact.factId}</p><ul>{fact.evidenceRefs.map((reference, index) => <li key={index} className="mt-1 break-words">{reference}</li>)}</ul></details>
+  </section>;
+}
+function AnalysisFactReferences({ factIds, facts }: { factIds: string[]; facts: AggregateFact[] }) {
+  return <details className="mt-2"><summary className="cursor-pointer font-bold">查看依据</summary>{factIds.map((factId, index) => {
+    const fact = facts.find((item) => item.factId === factId);
+    return fact ? <AnalysisFact key={`${factId}-${index}`} fact={fact} /> : <p key={`${factId}-${index}`} className="mt-2">引用事实 {factId} 尚未找到，请复核此结论。</p>;
+  })}</details>;
+}
+function AnalysisObservations({ title, observations, facts }: { title: string; observations: AggregateObservation[]; facts: AggregateFact[] }) {
+  return <details className="mt-4 text-left"><summary className="cursor-pointer text-[15px] font-bold">{title} · {observations.length} 项</summary>{!observations.length ? <p className="mt-2">当前没有足够证据列出此类结论。</p> : observations.map((observation, index) => <section key={index} className="mt-3 border-t border-[#ddd] pt-3"><strong>{observation.title}</strong><p className="mt-2">{observation.description}</p><AnalysisFactReferences factIds={observation.factIds} facts={facts} /></section>)}</details>;
+}
+function PracticeAnalysisView({ result }: { result: PracticeAnalysisResult }) {
+  const report = result.output;
+  return <div className="mt-4 break-words text-[13px] leading-6 text-[#999]">
+    <p className="text-left">{result.scope.description} · 本次包含 {result.scope.recordCount} 条记录{result.scope.hasMore ? "；存在未包含的历史记录。" : "。"}{result.cached ? " 本次读取已保存的分析。" : ""}</p>
+    <p className="mt-2 text-left">分析范围：{{ complete: "已完成当前证据范围的分析", partial: "部分证据可分析", investment_only: "仅能分析练习投入", pending_review: "演奏证据待复核", no_usable_data: "暂无可用数据" }[report.status]}{result.generationStatus === "completed" ? " · 分析文本已生成" : " · 文字分析暂未生成，可稍后重试"}</p>
+    <details className="mt-4 text-left"><summary className="cursor-pointer text-[15px] font-bold">程序汇总事实 · {result.facts.length} 项</summary><p className="mt-2">以下数值、范围和可信程度来自记录汇总，分析结论引用这些事实。</p>{result.facts.map((fact) => <AnalysisFact key={fact.factId} fact={fact} />)}</details>
+    <AnalysisObservations title="记录观察" observations={report.observations} facts={result.facts} /><AnalysisObservations title="弱项" observations={report.weaknesses} facts={result.facts} /><AnalysisObservations title="强项" observations={report.strengths} facts={result.facts} /><AnalysisObservations title="进步" observations={report.progress} facts={result.facts} /><AnalysisObservations title="待复核" observations={report.pendingReview} facts={result.facts} />
+    <details className="mt-4 text-left"><summary className="cursor-pointer text-[15px] font-bold">练习建议 · {report.suggestions.length} 项</summary>{report.suggestions.map((item, index) => <section key={index} className="mt-3 border-t border-[#ddd] pt-3"><strong>{item.title}</strong><p className="mt-2">{item.action}</p><p>复测方式：{item.successCheck}</p><AnalysisFactReferences factIds={item.factIds} facts={result.facts} /></section>)}</details>
+    <details className="mt-4 text-left"><summary className="cursor-pointer text-[15px] font-bold">分析局限</summary><ul>{report.limitations.map((item, index) => <li key={index} className="mt-2">{item}</li>)}</ul></details>
+  </div>;
+}
+function MusicAssistantPage({ isDark, history, owner, requests }: { isDark: boolean; history: PracticeHistoryState; owner: string | null; requests: Map<string, string> }) {
   const [analysis, setAnalysis] = useState("");
-  const utterance = useRef<SpeechSynthesisUtterance | null>(null);
+  const [result, setResult] = useState<PracticeAnalysisResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [startNewAnalysis, setStartNewAnalysis] = useState(false);
+  const generation = useRef(0), currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const allowed = shouldAllowPracticeAnalysis(history, owner);
+  useEffect(() => { generation.current++; setAnalysis(""); setResult(null); setBusy(false); setStartNewAnalysis(false); return () => { generation.current++; }; }, [owner]);
 
-  useEffect(() => () => {
-    if (utterance.current) {
-      utterance.current.onstart = null;
-      utterance.current.onend = null;
-      utterance.current.onerror = null;
-      window.speechSynthesis?.cancel();
-    }
-  }, []);
-
-  function analyzePractice() {
-    const result = practiceCount === 0
-      ? "还没有找到你的练琴打卡记录。今天先练习十分钟，完成第一次打卡吧！"
-      : streak > 0
-        ? `你已经连续练琴 ${streak} 天啦！建议今天先慢练，再完整演奏一遍，保持这个好习惯。`
-        : `最近一段连续练琴记录是 ${practiceCount} 天。重新开始不必着急，今天从十分钟慢练开始吧！`;
-    setAnalysis(result);
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    setSpeaking(false);
-    const speech = new SpeechSynthesisUtterance(result);
-    speech.lang = "zh-CN";
-    speech.rate = 0.95;
-    speech.onstart = () => setSpeaking(true);
-    speech.onend = () => setSpeaking(false);
-    speech.onerror = () => setSpeaking(false);
-    utterance.current = speech;
-    window.speechSynthesis.speak(speech);
+  async function analyzePractice() {
+    if (!allowed || busy) return;
+    const records = ownedPracticeRecords(history, owner);
+    if (owner === "guest") { setAnalysis("请先登录并保存、同步账户练习记录，再生成分析。本机访客记录会继续保留在本机。"); return; }
+    if (!owner || account.current?.userId !== owner) { setAnalysis("账户状态已改变，请重新读取练习记录。"); return; }
+    const synced = records.filter((record) => record.sync === "synced").slice(0, 200);
+    if (!synced.length) { setAnalysis("当前记录尚未同步，请先同步到账户再分析。"); return; }
+    const ids = synced.map((record) => record.eventId).sort();
+    const requestId = analysisRequestID(requests, owner, ids, createUUID, startNewAnalysis || (result?.generationStatus === "fallback" && result.retryAllowed === true));
+    setStartNewAnalysis(false);
+    const request = generation.current;
+    const current = () => request === generation.current && currentOwner.current === owner && account.current?.userId === owner;
+    setBusy(true); setResult(null); setAnalysis(`正在分析 ${synced.length} 条真实账户记录…${records.length > synced.length ? `另有 ${records.length - synced.length} 条本机记录尚未包含。` : ""}`);
+    try {
+      const response = await account.analyzePractice(ids, requestId);
+      if (current()) { setResult(response); setAnalysis(response.output.summary); }
+    } catch (error) { if (current()) { const changed = error instanceof CloudError && error.status === 409 && error.message.includes("版本已变化"); setStartNewAnalysis(changed); setAnalysis(`${errorMessage(error)}${changed ? "再次点击会按当前版本发起新的分析。" : "再次点击将继续使用同次请求标识。"}`); } }
+    finally { if (current()) setBusy(false); }
   }
 
   return <section className="assistant-page flex min-h-full flex-col px-7 pb-7 pt-5">
     <div className="flex flex-1 flex-col items-center justify-center gap-7 py-8">
-      <div className={`music-assistant-orbit relative flex aspect-square w-[min(68vw,280px)] shrink-0 items-center justify-center rounded-full border-[3px] ${isDark ? "border-white/25" : "border-[#d9d9d9]"}`} data-speaking={speaking}>
+      <div className={`music-assistant-orbit relative flex aspect-square w-[min(68vw,280px)] shrink-0 items-center justify-center rounded-full border-[3px] ${isDark ? "border-white/25" : "border-[#d9d9d9]"}`} data-speaking={false}>
         <span aria-hidden="true" className="music-assistant-wave absolute -inset-[3px] rounded-full border-2 border-[#67db23]" />
         <span aria-hidden="true" className="music-assistant-wave music-assistant-wave-delayed absolute -inset-[3px] rounded-full border-2 border-[#67db23]" />
         <img src={aiIcon} alt="黑白键3D小猫" className="relative h-[85%] w-[85%] object-contain" />
       </div>
       <div className="w-full max-w-[320px] text-center">
         <h1 className="text-[23px] font-bold">黑白键AI</h1>
-        <p role="status" className={`mt-3 text-[15px] leading-7 ${isDark ? "text-[#aaa]" : "text-[#777]"}`}>{analysis || "让我陪你一起，把每一次练琴变成进步。"}</p>
-        <p className={`mt-2 text-xs ${isDark ? "text-[#888]" : "text-[#888]"}`}>{speaking ? "小猫正在说话…" : analysis ? "基于本地打卡记录的练习建议" : "你的专属练琴小伙伴"}</p>
+        <p role="status" className={`mt-3 text-[15px] leading-7 ${isDark ? "text-[#aaa]" : "text-[#777]"}`}>{analysis || (history.status === "loading" ? "正在读取练习记录…" : history.status === "error" ? history.error : allowed ? "让我陪你一起，把每一次练琴变成进步。" : "保存实际练习记录后，可在这里准备分析。")}</p>
+        <p className={`mt-2 text-xs ${isDark ? "text-[#888]" : "text-[#888]"}`}>{result ? "依据当前提供记录 · 保留未知与待复核状态" : busy ? "正在读取并分析所选账户记录" : "你的专属练琴小伙伴"}</p>
+        {result && <PracticeAnalysisView result={result} />}
+        {analysis && <PracticeHistory history={history} owner={owner} onReload={() => {}} />}
       </div>
     </div>
-    <button type="button" onClick={analyzePractice} className="min-h-[58px] w-full cursor-pointer touch-manipulation rounded-[18px] border-2 border-b-[6px] border-[#49a619] bg-[#67db23] px-4 text-[17px] font-bold text-[#173b09] transition-[transform,border-width] duration-75 active:translate-y-[4px] active:border-b-2 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#67db23] motion-reduce:transition-none">分析我的练琴记录</button>
+    <button type="button" disabled={!allowed || busy} onClick={() => void analyzePractice()} className="min-h-[58px] w-full cursor-pointer touch-manipulation rounded-[18px] border-2 border-b-[6px] border-[#49a619] bg-[#67db23] px-4 text-[17px] font-bold text-[#173b09] transition-[transform,border-width] duration-75 enabled:active:translate-y-[4px] enabled:active:border-b-2 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#67db23] motion-reduce:transition-none disabled:cursor-default disabled:border-[#ddd] disabled:bg-[#e5e5e5] disabled:text-[#aaa]">{busy ? "正在分析练习记录…" : startNewAnalysis ? "重新分析当前记录" : result?.generationStatus === "fallback" ? result.retryAllowed ? "重试文字分析" : "继续查看同次分析状态" : "分析我的练琴记录"}</button>
   </section>;
 }
 
-function AccountPage({ isDark, streak, practiceCount, avatarSrc, courseImage, onAction }: { isDark: boolean; streak: number; practiceCount: number; avatarSrc: string; courseImage: string; onAction: (action: string) => void }) {
+function AccountPage({ isDark, streak, practiceCount, statisticsKnown, avatarSrc, courseImage, identity, onAction }: { isDark: boolean; streak: number; practiceCount: number; statisticsKnown: boolean; avatarSrc: string; courseImage: string; identity: AccountIdentity | null; onAction: (action: string) => void }) {
   const outline = isDark ? "border-white/15" : "border-[#e5e5e5]";
   const button = `flex h-12 cursor-pointer items-center justify-center gap-2 rounded-[15px] border-2 border-b-[5px] text-[17px] font-bold focus-visible:outline-2 focus-visible:outline-current ${outline} ${pressFeedback}`;
   return <>
@@ -1052,7 +1041,7 @@ function AccountPage({ isDark, streak, practiceCount, avatarSrc, courseImage, on
       <img src={avatarSrc} alt="黑白键小猫头像" className="h-[205px] w-[205px] object-contain" />
     </div>
     <div className="px-5 pb-8 pt-5">
-      <p className="text-[14px] font-bold text-[#aaa]">@HEIBAIKEY · 本机档案</p>
+      <p className="text-[14px] font-bold text-[#aaa]">{identity ? `@${identity.username} · 已登录账户` : "未登录 · 本机档案"}</p>
       <div className="my-4 grid grid-cols-3 gap-4">
         <button type="button" onClick={() => onAction("课程")} className="cursor-pointer text-left"><div className="flex h-8 items-center gap-2"><img src={courseImage} alt="" className="h-7 w-7 object-contain" /><span className="text-[19px] font-bold">0</span></div><span className="text-[15px] font-medium text-[#aaa]">课程</span></button>
         {["关注", "关注者"].map((label) => <button key={label} type="button" onClick={() => onAction(label)} className="cursor-pointer text-left"><div className="flex h-8 items-center text-[19px] font-bold">0</div><span className="text-[15px] font-medium text-[#aaa]">{label}</span></button>)}
@@ -1065,10 +1054,10 @@ function AccountPage({ isDark, streak, practiceCount, avatarSrc, courseImage, on
       </section>
       <section className="mt-8"><h2 className="mb-4 text-[15px] font-medium text-[#aaa]">概览</h2>
         <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-[17px] font-bold">
-          <button type="button" onClick={() => onAction("连胜")} className="flex cursor-pointer items-center gap-2 text-left"><StreakNote active={streak > 0} isDark={isDark} className="h-7 w-7" /><span className={streak > 0 ? "" : "text-[#aaa]"}>{streak} 天</span></button>
+          <button type="button" onClick={() => onAction("连胜")} className="flex cursor-pointer items-center gap-2 text-left"><StreakNote active={streak > 0} isDark={isDark} className="h-7 w-7" /><span className={streak > 0 ? "" : "text-[#aaa]"}>{statisticsKnown ? streak : "—"} 天</span></button>
           <div className="flex items-center gap-2"><img src={isDark ? experienceDarkIcon : experienceLightIcon} alt="" className="h-7 w-7 object-contain" /><span>0 经验</span></div>
           <div className="flex items-center gap-2"><img src={isDark ? leaderboardDarkIcon : leaderboardLightIcon} alt="" className="h-7 w-7 object-contain" /><span>未上榜</span></div>
-          <div className="flex items-center gap-2"><img src={isDark ? checkinDarkIcon : checkinLightIcon} alt="" className="h-7 w-7 object-contain" /><span>{practiceCount} 天打卡</span></div>
+          <div className="flex items-center gap-2"><img src={isDark ? checkinDarkIcon : checkinLightIcon} alt="" className="h-7 w-7 object-contain" /><span>{statisticsKnown ? practiceCount : "—"} 天打卡</span></div>
         </div>
       </section>
       <section className="mt-8">
@@ -1085,6 +1074,9 @@ function AccountPage({ isDark, streak, practiceCount, avatarSrc, courseImage, on
 }
 
 export default function App() {
+  const analysisRequests = useRef(new Map<string, string>());
+  const { identity, history, reload: reloadHistory } = usePracticeHistory();
+  const historyOwner = history.status === "ready" ? identity?.userId || "guest" : null;
   const [selectedCourse, setSelectedCourse] = useState<string | null>(() => {
     try {
       const saved = localStorage.getItem("music-selected-course");
@@ -1224,22 +1216,11 @@ export default function App() {
     setHistoryOpen(true);
   }
   const [today, setToday] = useState(currentPracticeDay);
-  const [practice] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("sheet-music-streak") || "null");
-      if (saved && Number.isInteger(saved.day) && Number.isInteger(saved.count) && saved.count > 0) {
-        return { day: saved.day as number, count: saved.count as number };
-      }
-    } catch {}
-    return { day: -1, count: 0 };
-  });
-  const streak = practice.day === today || practice.day === today - 1 ? practice.count : 0;
-  const historyPractice = practice;
+  const summary = practiceSummary(history, historyOwner, today);
+  const streak = summary.streak;
   const historyStreak = streak;
   const monthStart = Date.UTC(year, month, 1) / 86400000;
-  const monthlyPracticeDays = historyPractice.count > 0
-    ? Math.max(0, Math.min(historyPractice.day, today, monthStart + monthDays - 1) - Math.max(historyPractice.day - historyPractice.count + 1, monthStart) + 1)
-    : 0;
+  const monthlyPracticeDays = [...summary.days].filter((day) => day >= monthStart && day < monthStart + monthDays).length;
   const elapsedMonthDays = Math.max(0, Math.min(monthDays, today - monthStart + 1));
   const missedPracticeDays = elapsedMonthDays - monthlyPracticeDays;
 
@@ -1247,12 +1228,6 @@ export default function App() {
     const timer = window.setInterval(() => setToday(currentPracticeDay()), 30000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("sheet-music-streak", JSON.stringify(practice));
-    } catch {}
-  }, [practice]);
 
   const [isDark, setIsDark] = useState(() => {
     try {
@@ -1276,7 +1251,7 @@ export default function App() {
         <header className={`relative z-20 flex shrink-0 items-center justify-between px-4 pt-[max(59px,env(safe-area-inset-top))] ${activeTab === "account" ? `border-b pb-3 ${accountScrolled ? isDark ? "border-white/10 bg-[#141414]" : "border-[#e5e5e5] bg-white" : isDark ? "border-transparent bg-[#252525]" : "border-transparent bg-[#e9e9e9]"}` : ""}`}>
           {activeTab === "account" ? (
             <>
-              <span className="flex h-11 min-w-0 items-center truncate pl-2 text-[23px] font-bold">{displayName || "名字"}</span>
+              <span className="flex h-11 min-w-0 items-center truncate pl-2 text-[23px] font-bold">{identity?.username || displayName || "名字"}</span>
               <div className="flex shrink-0 items-center gap-1">
                 <button type="button" aria-label="装扮" onClick={() => accountAction("装扮")} className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current">
                   <img src={isDark ? outfitDarkIcon : outfitLightIcon} alt="" className="h-8 w-8 object-contain" />
@@ -1303,12 +1278,12 @@ export default function App() {
           <button
             type="button"
             onClick={openHistory}
-            aria-label={`连续练琴 ${streak} 天，查看练习记录`}
+            aria-label={summary.known ? `连续练琴 ${streak} 天，查看练习记录` : "练习记录尚未读取，查看练习记录"}
             title="查看练习记录"
             className={`flex h-11 min-w-16 cursor-pointer items-center justify-center gap-1.5 rounded-full px-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current ${streak > 0 ? isDark ? "text-[#d4d4d4]" : "text-[#666666]" : "text-[#8a8a8a]"} ${isDark ? "active:bg-white/15" : "active:bg-black/10"}`}
           >
             <StreakNote active={streak > 0} isDark={isDark} className="h-7 w-[25px] shrink-0" />
-            <span aria-live="polite" className="text-[17px] font-medium tabular-nums">{streak}</span>
+            <span aria-live="polite" className="text-[17px] font-medium tabular-nums">{summary.known ? streak : "—"}</span>
           </button>
             </>
           )}
@@ -1316,8 +1291,8 @@ export default function App() {
         <main data-page={activeTab} ref={mainScroll} onScroll={(event) => { if (activeTab === "account") setAccountScrolled(event.currentTarget.scrollTop > 5); }} className={`min-h-0 flex-1 overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${activeTab === "official" ? "overflow-hidden" : "overflow-y-auto"}`} aria-label={tabs.find((tab) => tab.id === activeTab)?.label}>
           {activeTab === "official" && <OfficialScoresPage isDark={isDark} />}
           {activeTab === "library" && <MyScoresPage isDark={isDark} />}
-          {activeTab === "ai" && <MusicAssistantPage isDark={isDark} streak={streak} practiceCount={practice.count} />}
-          {activeTab === "account" && <AccountPage isDark={isDark} streak={streak} practiceCount={practice.count} avatarSrc={savedAvatar === "portrait" ? accountLightIcon : aiIcon} courseImage={selectedCourseImage} onAction={accountAction} />}
+          {activeTab === "ai" && <MusicAssistantPage isDark={isDark} history={history} owner={historyOwner} requests={analysisRequests.current} />}
+          {activeTab === "account" && <AccountPage isDark={isDark} streak={streak} practiceCount={summary.count} statisticsKnown={summary.known} identity={identity} avatarSrc={savedAvatar === "portrait" ? accountLightIcon : aiIcon} courseImage={selectedCourseImage} onAction={accountAction} />}
         </main>
         <footer className={`z-20 shrink-0 pb-[env(safe-area-inset-bottom)] transition-colors duration-200 ${isDark ? "bg-[#141414]" : "bg-white"}`}>
           <nav aria-label="底部导航" className={`grid grid-cols-5 border-t px-3 pt-3 ${isDark ? "border-white/10" : "border-black/[0.08]"}`}>
@@ -1394,9 +1369,9 @@ export default function App() {
             </header>
             <div className="relative mt-1 flex h-10 items-center justify-center border-b-[3px] border-[#8acb62] text-[17px] font-bold text-[#25351e] after:absolute after:inset-x-0 after:-bottom-[3px] after:h-[4px] after:rounded-full after:bg-[#8acb62]">个人连胜</div>
             <div className="px-5 py-3">
-              <section aria-label={`${historyStreak}天连胜啦！`} className="flex h-[clamp(90px,15dvh,130px)] items-center justify-between gap-3">
+              <section aria-label={summary.known ? `${historyStreak}天连胜啦！` : "练习记录尚未读取"} className="flex h-[clamp(90px,15dvh,130px)] items-center justify-between gap-3">
                 <div className="flex flex-col items-start">
-                  {historyStreak === 0 ? <svg role="img" aria-label="0" viewBox="0 0 110 160" className="h-[clamp(60px,9dvh,86px)] w-auto">
+                  {!summary.known ? <span className="text-[clamp(60px,9dvh,86px)] font-extrabold leading-none">—</span> : historyStreak === 0 ? <svg role="img" aria-label="0" viewBox="0 0 110 160" className="h-[clamp(60px,9dvh,86px)] w-auto">
                     <ellipse cx="55" cy="80" rx="49" ry="76" fill="#b3e38d" />
                     <ellipse cx="55" cy="80" rx="32" ry="58" fill="white" />
                     <ellipse cx="55" cy="80" rx="14" ry="38" fill="#b3e38d" />
@@ -1436,11 +1411,11 @@ export default function App() {
               <div className="grid shrink-0 grid-cols-2 gap-3">
               <div className={`flex items-start gap-2 rounded-[20px] border-2 px-3 py-3 ${isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-1 shrink-0"><circle cx="12" cy="12" r="12" fill="#67db23" /><path d="m7 12 3 3 7-7" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                <div><span className="text-[22px] font-bold leading-7 tabular-nums">{monthlyPracticeDays}</span><p className="text-[15px] text-[#aaaaaa]">打卡天数</p></div>
+                <div><span className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? monthlyPracticeDays : "—"}</span><p className="text-[15px] text-[#aaaaaa]">打卡天数</p></div>
               </div>
               <div className={`flex items-start gap-2 rounded-[20px] border-2 px-3 py-3 ${isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-1 shrink-0"><circle cx="12" cy="12" r="12" fill="#adadb7" /><path d="M7 12h10" stroke="white" strokeWidth="2.5" strokeLinecap="round" /></svg>
-                <div><span className="text-[22px] font-bold leading-7 tabular-nums">{missedPracticeDays}</span><p className="whitespace-nowrap text-[15px] text-[#aaaaaa]">未打卡天数</p></div>
+                <div><span className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? missedPracticeDays : "—"}</span><p className="whitespace-nowrap text-[15px] text-[#aaaaaa]">未打卡天数</p></div>
               </div>
               </div>
               <section aria-label={`${year}年${month + 1}月练琴日历`} className={`mt-3 flex min-h-0 flex-1 flex-col rounded-[20px] border-2 px-3 py-3 ${isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
@@ -1452,7 +1427,7 @@ export default function App() {
                   {Array.from({ length: monthDays }, (_, index) => {
                     const day = index + 1;
                     const dayNumber = Date.UTC(year, month, day) / 86400000;
-                    const practiced = historyPractice.count > 0 && dayNumber <= historyPractice.day && dayNumber > historyPractice.day - historyPractice.count && dayNumber <= today;
+                    const practiced = summary.days.has(dayNumber);
                     const isToday = dayNumber === today;
                     return (
                       <div key={day} aria-label={`${month + 1}月${day}日${isToday ? "，今天" : ""}，${practiced ? "已练琴" : "无练琴记录"}`} aria-current={isToday ? "date" : undefined} className="flex min-h-0 items-center justify-center">
@@ -1466,6 +1441,7 @@ export default function App() {
               </div>
             </div>
           </div>
+          <div className="mx-auto w-full px-4 pb-7 sm:max-w-[440px]"><PracticeHistory history={history} owner={historyOwner} onReload={() => void reloadHistory()} /></div>
         </dialog>
         <dialog
           ref={settingsDialog}
@@ -1484,7 +1460,7 @@ export default function App() {
               </div>
             </header>
             {settingsDetail === "课程" ? <CoursesPage isDark={isDark} selectedCourse={selectedCourse} onCourseChange={setSelectedCourse} onContinue={() => setSettingsOpen(false)} /> : settingsDetail ? (
-              <SettingsContent key={settingsDetail} title={settingsDetail} isDark={isDark} toggleTheme={() => setIsDark((previous) => !previous)} name={displayName} onNameChange={setDisplayName} />
+              <SettingsContent key={settingsDetail} title={settingsDetail} isDark={isDark} toggleTheme={() => setIsDark((previous) => !previous)} name={displayName} onNameChange={setDisplayName} identity={identity} history={history} onReload={() => void reloadHistory()} onScores={() => { setSettingsOpen(false); setActiveTab("library"); }} />
             ) : (
               <div className="px-4">
                 {[
