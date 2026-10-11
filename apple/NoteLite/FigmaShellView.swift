@@ -109,6 +109,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                   for (const type of ['pointerdown', 'click']) {
                     document.addEventListener(type, (event) => {
                       if (event.target?.closest?.('button')?.getAttribute('aria-label') === '导入曲谱') post('[NoteLite dialog] import ' + type + ' captured');
+                      if (event.target?.closest?.('button')?.textContent?.trim() === '下载当前曲谱') post('[NoteLite dialog] export ' + type + ' captured');
                     }, true);
                   }
                   window.addEventListener('error', () => post('[NoteLite dialog] JavaScript error observed'));
@@ -435,6 +436,9 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             }
             return ["base64": data.base64EncodedString(), "kind": kind]
         case "files/export":
+            #if DEBUG
+            FigmaUITestDiagnostics.record("[NoteLite dialog] export files-export received")
+            #endif
             guard exportContinuation == nil else { throw CloudOMRError(code: "busy", message: "结果保存窗口已经打开。") }
             let kind = try string(payload, "kind")
             let score = try integer(payload, "score", default: 0)
@@ -443,6 +447,9 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             let ext = kind == "midi" ? "mid" : kind == "musicxml" ? "musicxml" : kind == "log" ? "txt" : kind == "omr" ? "omr" : "bin"
             return try await saveFile(data, filename: (payload["filename"] as? String) ?? "score-\(score + 1).\(ext)", requestID: requestID)
         case "files/save":
+            #if DEBUG
+            FigmaUITestDiagnostics.record("[NoteLite dialog] export files-save received")
+            #endif
             let base64 = try string(payload, "base64")
             guard base64.count <= 24 * 1024 * 1024, let data = Data(base64Encoded: base64),
                   !data.isEmpty, data.count <= 16 * 1024 * 1024 else {
@@ -499,6 +506,9 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     private func saveFile(_ data: Data, filename: String, requestID: String) async throws -> [String: Any] {
+        #if DEBUG
+        FigmaUITestDiagnostics.record("[NoteLite dialog] export save requested")
+        #endif
         guard exportContinuation == nil, importContinuation == nil, filePanel == nil, previewURL == nil, audioPreview == nil else {
             throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。")
         }
@@ -546,6 +556,15 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     func exportFinished(_ result: Result<URL, Error>) {
+        #if DEBUG
+        switch result {
+        case .success: FigmaUITestDiagnostics.record("[NoteLite dialog] export finished success")
+        case .failure(let error):
+            FigmaUITestDiagnostics.record(error is CancellationError
+                ? "[NoteLite dialog] export finished cancelled"
+                : "[NoteLite dialog] export finished failed")
+        }
+        #endif
         let continuation = exportContinuation
         exportContinuation = nil
         exportRequestID = nil

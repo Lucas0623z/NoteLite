@@ -142,9 +142,12 @@ final class FigmaShellUITests: XCTestCase {
 
         // Cancel is a real native picker path. Reopening immediately proves the
         // previous export released its continuation without waiting for JS timeout.
-        let download = button("下载当前曲谱", in: app)
+        var download = button("下载当前曲谱", in: app)
         for attempt in 1...2 {
             XCTAssertTrue(download.waitForExistence(timeout: 10))
+            _ = try waitForNativeInteractionGeometry("下载当前曲谱", in: app,
+                                                     checkpoint: "Figma-core-before-native-export-\(attempt)")
+            download = button("下载当前曲谱", in: app)
             download.tap()
             let englishCancel = app.buttons.matching(identifier: "Cancel").firstMatch
             let chineseCancel = app.buttons.matching(identifier: "取消").firstMatch

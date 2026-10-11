@@ -12,6 +12,9 @@ import AppKit
 @MainActor
 final class FigmaNativeFilePanel: NSObject {
     private var completion: ((Result<[URL], Error>) -> Void)?
+    #if DEBUG
+    private var diagnosticExport = false
+    #endif
     #if os(iOS)
     private var picker: UIDocumentPickerViewController?
     #else
@@ -50,6 +53,9 @@ final class FigmaNativeFilePanel: NSObject {
     static func save(_ source: URL, in webView: WKWebView,
                      completion: @escaping (Result<[URL], Error>) -> Void) throws -> FigmaNativeFilePanel {
         let result = FigmaNativeFilePanel(completion: completion)
+        #if DEBUG
+        result.diagnosticExport = true
+        #endif
         #if os(iOS)
         let picker = UIDocumentPickerViewController(forExporting: [source], asCopy: true)
         try result.present(picker, in: webView)
@@ -116,8 +122,18 @@ final class FigmaNativeFilePanel: NSObject {
         self.picker = picker
         picker.delegate = self
         picker.presentationController?.delegate = self
+        #if DEBUG
+        if diagnosticExport {
+            FigmaUITestDiagnostics.record("[NoteLite dialog] export picker presentation requested")
+        }
+        #endif
         presenter.present(picker, animated: true) { [weak self, weak picker] in
             picker?.presentationController?.delegate = self
+            #if DEBUG
+            if self?.diagnosticExport == true {
+                FigmaUITestDiagnostics.record("[NoteLite dialog] export picker presentation completed")
+            }
+            #endif
         }
     }
     #endif
