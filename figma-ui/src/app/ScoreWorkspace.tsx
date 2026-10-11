@@ -6,6 +6,7 @@ import { RemoteScoreLoader } from "./remote-score";
 import { createNotationInteraction, graphicalNoteBindings, inspectNoteDraft, noteKeyId, notationSources, prepareNotation, previewNoteEdits, restoreNotationSources, summarizeRuleErrors, type NoteKey } from "./notationInteraction";
 import { checkScoreRules, compareScoreRules, parseScoreXML, type ScoreRuleComparison, type ScoreRuleReport } from "./scoreRules";
 import { editScoreDocument, readScoreDocument, type ScoreDocumentPatch } from "./scoreDocumentEdit";
+import { ScoreStatus, type ScoreStatusVersion } from "./score-status";
 
 type NoteInfo = { index: number; key: NoteKey; measure: string; part: string; step: string; octave: string; alter: string; duration: string; rest: boolean; source?: CloudNote };
 type Props = { name: string; format: string; file?: Blob; practice?: boolean; job?: CloudJob; recordIdentity?: string; practiceSource?: PracticeSource; orientationNotice?: string; onJob?: (job: CloudJob) => Promise<void>; onClose: () => void; onSave: (file: Blob) => Promise<void> };
@@ -20,7 +21,8 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const [alter, setAlter] = useState("0");
   const [measure, setMeasure] = useState("");
   const [zoom, setZoom] = useState(1);
-  const [status, setStatus] = useState("正在载入曲谱…");
+  const [status, setStatusText] = useState("正在载入曲谱…");
+  const [scoreStatus] = useState(() => new ScoreStatus(setStatusText));
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState("");
   const [originalFile, setOriginalFile] = useState<Blob | undefined>(file);
@@ -44,6 +46,9 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const selectedKey = useRef<NoteKey | null>(null);
   const latestNotes = useRef<NoteInfo[]>([]);
   const playhead = useRef<NoteKey[]>([]);
+  const statusVersion = useMemo<ScoreStatusVersion>(() => ({ jobId: job?.id, score: scoreIndex, revision, xml }), [job?.id, scoreIndex, revision, xml]);
+  useLayoutEffect(() => scoreStatus.select(statusVersion), [scoreStatus, statusVersion]);
+  function setStatus(message: string, version?: ScoreStatusVersion) { scoreStatus.report(message, version); }
   const remoteReady = job?.state === "succeeded";
   const xmlFile = (!!job && !!remoteReady && !originalView) || (!job && ["XML", "MUSICXML"].includes(format));
   const notation = !originalView && (xmlFile || (!job && format === "MXL"));
@@ -60,13 +65,13 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   useEffect(() => setLastCheck(null), [xml]);
   useEffect(() => setLastCheck(null), [current, step, octave, alter, duration, noteType, dot, rest]);
   const [remoteLoader] = useState(() => new RemoteScoreLoader(cloud, {
-    loading: () => { setRemoteLoading(true); setConflict(true); setStatus("正在载入最新曲谱…"); },
-    loaded: ({ job: latest, listing, musicxml }, saved) => {
+    loading: () => { scoreStatus.beginOperation(); setRemoteLoading(true); setConflict(true); setStatus("正在载入最新曲谱…"); },
+    loaded: ({ job: latest, score, listing, musicxml }, saved) => {
       const mapped = listing.notes.map((note, index) => ({ index, key: { partId: note.partId, measureIndex: note.measureIndex, noteIndex: note.noteIndex }, measure: note.measure, part: note.partId, step: note.pitch?.step || "C", octave: String(note.pitch?.octave ?? 4), alter: String(note.pitch?.alter ?? 0), duration: String(note.duration), rest: note.rest, source: note }));
       setXml(musicxml); setXmlDraft(musicxml); setRevision(listing.revision); setNotes(mapped);
       setSelected((previous) => { const matching = selectedKey.current && mapped.findIndex((note) => noteKeyId(note.key) === noteKeyId(selectedKey.current!)); return matching !== null && matching >= 0 ? matching : Math.max(0, Math.min(previous, mapped.length - 1)); });
       setRemoteLoading(false); setConflict(false); setReloadNotice("");
-      setStatus(saved ? `${saved.kind === "xml" ? "完整曲谱" : "校对"}已保存 · 当前版本 ${listing.revision} · MusicXML 与 MIDI 已更新` : `曲谱已载入 · 校对版本 ${listing.revision}${latest.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}`);
+      setStatus(saved ? `${saved.kind === "xml" ? "完整曲谱" : "校对"}已保存 · 当前版本 ${listing.revision} · MusicXML 与 MIDI 已更新` : `曲谱已载入 · 校对版本 ${listing.revision}${latest.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}`, { jobId: latest.id, score, revision: listing.revision, xml: musicxml });
     },
     failed: (error, saved) => {
       setRemoteLoading(false); setConflict(true);
@@ -93,11 +98,12 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
     setUrl(objectUrl);
     let live = true;
     if (!job && xmlFile) originalFile.text().then((text) => { if (live) { setXml(text); setXmlDraft(text); } });
-    else if (!job) setStatus(notation ? "正在排版曲谱…" : "原稿已载入 · 连接识谱服务并重新导入后可校对音符");
+    else if (!job && !notation) setStatus("原稿已载入 · 连接识谱服务并重新导入后可校对音符");
     return () => { live = false; URL.revokeObjectURL(objectUrl); };
   }, [originalFile, xmlFile, notation]);
 
   async function showOriginal() {
+    scoreStatus.beginOperation();
     if (originalView) { setOriginalView(false); return; }
     setBusy(true);
     try {
@@ -144,7 +150,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
     const host = createScoreRenderHost(container);
     let observer: ResizeObserver | undefined;
     let localInteraction: ReturnType<typeof createNotationInteraction> | null = null;
-    setStatus("正在排版曲谱…");
+    const layoutStatus = scoreStatus.beginLayout(statusVersion);
     import("opensheetmusicdisplay").then(async (module) => {
       if (!host.isActive()) return;
       const OpenSheetMusicDisplay = resolveOSMDConstructor(module);
@@ -167,7 +173,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
         localInteraction.refresh(); localInteraction.setSelection(selectedKey.current); localInteraction.setPlayhead(playhead.current);
       }
       setSheetReady(true);
-      setStatus(job ? `曲谱已载入 · 校对版本 ${revision}${job.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}` : xmlFile ? "MusicXML 已载入 · 可从右侧选择音符校对" : "压缩曲谱已载入 · 上传至识谱服务后可校对并导出 MIDI");
+      layoutStatus.ready(job ? `曲谱已载入 · 校对版本 ${revision}${job.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}` : xmlFile ? "MusicXML 已载入 · 可从右侧选择音符校对" : "压缩曲谱已载入 · 上传至识谱服务后可校对并导出 MIDI");
       const paper = container.parentElement!;
       let width = paper.clientWidth;
       observer = new ResizeObserver(() => {
@@ -187,13 +193,14 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
       observer?.disconnect();
       host.dispose();
       console.error("MusicXML layout failed", error);
-      if (active) { setSheetReady(false); setStatus(`曲谱排版失败：${error instanceof Error ? error.message : String(error)}`); }
+      if (active) { setSheetReady(false); layoutStatus.failed(`曲谱排版失败：${error instanceof Error ? error.message : String(error)}`); }
     });
     return () => { localInteraction?.dispose(); if (interaction.current === localInteraction) interaction.current = null; host.dispose(); observer?.disconnect(); };
-  }, [xml, notation, file, xmlFile, zoom, revision]);
+  }, [xml, notation, file, xmlFile, zoom, revision, scoreStatus, statusVersion]);
 
   async function publishEdit(edits: NoteEdit[]) {
     if (!job) return;
+    scoreStatus.beginOperation();
     try { const candidate = new XMLSerializer().serializeToString(previewNoteEdits(parseScoreXML(xml), edits)); if (!canSave(candidate)) return; }
     catch (error) { setStatus(errorMessage(error)); return; }
     setBusy(true);
@@ -206,6 +213,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   }
 
   async function saveXML(text = xmlDraft) {
+    scoreStatus.beginOperation();
     const document = new DOMParser().parseFromString(text, "application/xml");
     if (document.querySelector("parsererror") || document.documentElement.localName !== "score-partwise") { setStatus("请选择有效的 MusicXML，当前版本不会被覆盖。"); return; }
     if (!canSave(text)) return;
@@ -216,7 +224,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
         try { await onJob?.(updated); } catch { setStatus("完整曲谱已保存到云端，本机曲谱列表更新未完成。重新打开曲谱后可同步。"); }
       } else {
         await onSave(new Blob([text], { type: "application/vnd.recordare.musicxml+xml" }));
-        setXml(text); setXmlDraft(text); setStatus("曲谱信息已保存到本机。");
+        setXml(text); setXmlDraft(text); setStatus("曲谱信息已保存到本机。", { ...statusVersion, xml: text });
       }
     }
     catch (error) { setStatus(errorMessage(error)); if (error instanceof CloudError && (error.status === 409 || error.code === "write_status_unknown")) { setConflict(true); setReloadNotice(errorMessage(error)); } }
@@ -231,6 +239,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   }
 
   async function exportFile(kind: "musicxml" | "midi" | "original" | "omr") {
+    scoreStatus.beginOperation();
     setBusy(true);
     try {
       if (job) { const stem = job.scores[scoreIndex]?.name || name.replace(/\.[^.]+$/, ""); await cloud.export(job.id, scoreIndex, kind, kind === "original" ? job.filename : `${stem}.${{ musicxml: "musicxml", midi: "mid", omr: "omr", original: "" }[kind]}`); }
@@ -246,12 +255,13 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
       await publishEdit([noteDraft.edit]); return;
     }
     if (current.rest) return;
+    scoreStatus.beginOperation();
     const updated = noteDraft.candidate;
     if (!canSave(updated)) return;
     setBusy(true);
     try {
       await onSave(new Blob([updated], { type: "application/vnd.recordare.musicxml+xml" }));
-      setXml(updated); setStatus("校对已保存到本机。");
+      setXml(updated); setStatus("校对已保存到本机。", { ...statusVersion, xml: updated });
     } catch { setStatus("保存失败，请检查本地存储权限。"); }
     finally { setBusy(false); }
   }

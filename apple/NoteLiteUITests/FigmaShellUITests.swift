@@ -550,22 +550,22 @@ final class FigmaShellUITests: XCTestCase {
     @MainActor
     private func dismissIOSKeyboardIfPresent(_ app: XCUIApplication) -> Bool {
         #if os(iOS)
-        // The real tempo-edit failure has a focused numeric input and a native
-        // Done accessory above the keyboard. Dismiss it with the actual button
-        // before scrolling the long metadata page back to its navigation.
+        // Actual iPhone captures expose a Done accessory; the iPad capture
+        // exposes Hide keyboard inside the keyboard. Tap a reachable native
+        // dismissal control before saving or returning to the page header.
         if app.keyboards.firstMatch.exists {
-            let englishDone = app.buttons.matching(identifier: "Done").firstMatch
-            let chineseDone = app.buttons.matching(identifier: "完成").firstMatch
-            if englishDone.isHittable {
-                englishDone.tap()
-            } else if chineseDone.isHittable {
-                chineseDone.tap()
-            } else {
+            let accessories = ["Done", "完成"].flatMap {
+                app.buttons.matching(identifier: $0).allElementsBoundByIndex
+            }
+            let hideKeyboard = app.keyboards.firstMatch.buttons
+                .matching(identifier: "Hide keyboard").allElementsBoundByIndex
+            guard let dismissal = (accessories + hideKeyboard).first(where: { $0.isHittable }) else {
                 attachHierarchy(app, name: "Figma-return-navigation-keyboard-dismiss-missing")
                 capture(app, name: "Figma-return-navigation-keyboard-dismiss-missing")
                 XCTFail("The visible native keyboard must have a reachable dismissal control")
                 return false
             }
+            dismissal.tap()
             let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 !app.keyboards.firstMatch.exists
             }, object: app)
@@ -575,7 +575,7 @@ final class FigmaShellUITests: XCTestCase {
                 capture(app, name: "Figma-return-navigation-keyboard-still-visible")
             }
             XCTAssertEqual(result, .completed,
-                           "The real native Done control must dismiss the keyboard before navigation")
+                           "The real native dismissal control must hide the keyboard before saving or navigation")
             guard result == .completed else { return false }
         }
         #endif

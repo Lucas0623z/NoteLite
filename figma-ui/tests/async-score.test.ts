@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { CloudJob, NoteListing } from "../src/app/cloud.ts";
 import { startJobPolling } from "../src/app/job-polling.ts";
 import { RemoteScoreLoader, type RemoteSnapshot, type SavedScore } from "../src/app/remote-score.ts";
+import { ScoreStatus, type ScoreStatusVersion } from "../src/app/score-status.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const secondId = "22222222-2222-4222-8222-222222222222";
@@ -191,4 +192,64 @@ test("reactivating after an effect cleanup permits a fresh read and ignores the 
   const previous = loader.load(job(1), 0); loader.deactivate(); loader.activate();
   assert.equal((await loader.load(job(2), 0)).kind, "loaded"); old.reject(new Error("unmounted request"));
   assert.equal((await previous).kind, "superseded"); assert.equal(loaded.length, 1); assert.equal(failed.length, 0);
+});
+
+test("async layout cannot erase persisted feedback, cloud revision or uncertainty, and render failures remain visible", async () => {
+  let visible = "";
+  const status = new ScoreStatus((message) => { visible = message; });
+  const initial: ScoreStatusVersion = { score: 0, revision: 0, xml: "original" };
+  const saved = { ...initial, xml: "tempo-96" };
+  status.select(initial);
+  status.beginLayout(initial).ready("MusicXML 已载入");
+  const persisted = deferred<void>();
+  status.beginOperation();
+  const save = persisted.promise.then(() => status.report("曲谱信息已保存到本机。", saved));
+  assert.equal(visible, "MusicXML 已载入", "a pending persistence must not announce a successful save");
+  persisted.resolve(); await save;
+  assert.equal(visible, "曲谱信息已保存到本机。");
+  const layoutLoaded = deferred<void>();
+  const layout = status.beginLayout(saved);
+  const render = layoutLoaded.promise.then(() => layout.ready("MusicXML 已载入"));
+  assert.equal(visible, "曲谱信息已保存到本机。", "starting the changed XML's render must retain the actual save result");
+  layoutLoaded.resolve(); await render;
+  assert.equal(visible, "曲谱信息已保存到本机。", "a later successful render must also retain it");
+
+  const badRender = deferred<void>();
+  const failedLayout = status.beginLayout(saved);
+  const renderFailed = badRender.promise.catch(() => failedLayout.failed("曲谱排版失败：无法绘制"));
+  badRender.reject(new Error("cannot render")); await renderFailed;
+  status.report("文件已导出。");
+  assert.equal(visible, "曲谱排版失败：无法绘制", "a successful independent operation cannot hide the current render failure");
+  const retry = status.beginLayout(saved);
+  assert.equal(visible, "曲谱排版失败：无法绘制", "a retry must actually succeed before clearing that failure");
+  retry.ready("MusicXML 已载入");
+  assert.equal(visible, "文件已导出。");
+
+  const committed = { jobId: id, score: 0, revision: 2, xml: "revision-2" };
+  const remoteRead = deferred<string>();
+  const loader = new RemoteScoreLoader({ job: async () => job(2), notes: async () => notes(2), score: () => remoteRead.promise }, {
+    loading: () => { status.beginOperation(); status.report("正在载入最新曲谱…"); },
+    loaded: ({ musicxml, listing }, write) => status.report(`${write?.kind === "xml" ? "完整曲谱已保存" : "曲谱已载入"} · 当前版本 ${listing.revision}`, { ...committed, xml: musicxml }),
+    failed: () => assert.fail("the committed write and snapshot should be confirmed"),
+  });
+  const cloudSave = loader.save(async () => job(2), 0, "xml");
+  await Promise.resolve(); await Promise.resolve();
+  remoteRead.resolve("revision-2"); await cloudSave;
+  const cloudLayout = status.beginLayout(committed);
+  cloudLayout.ready("曲谱已载入 · 校对版本 2");
+  assert.equal(visible, "完整曲谱已保存 · 当前版本 2");
+  for (const warning of ["保存结果未知，请重新载入。", "曲谱已在另一设备修改，请重新载入。"] as const) {
+    status.beginOperation(); status.report(warning);
+    const resized = status.beginLayout(committed);
+    await Promise.resolve(); resized.ready("曲谱已载入 · 校对版本 2");
+    assert.equal(visible, warning, "an asynchronous zoom/reflow must not replace a write warning");
+  }
+  const oldLayout = status.beginLayout(committed);
+  const newer = { ...committed, revision: 3, xml: "revision-3" };
+  status.select(newer);
+  const newLayout = status.beginLayout(newer);
+  newLayout.ready("曲谱已载入 · 校对版本 3");
+  await Promise.resolve(); oldLayout.ready("曲谱已载入 · 校对版本 2");
+  oldLayout.failed("旧版本排版失败");
+  assert.equal(visible, "曲谱已载入 · 校对版本 3", "switching versions clears old feedback and rejects both late outcomes from the old render");
 });
