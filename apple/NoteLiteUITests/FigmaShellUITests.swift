@@ -351,9 +351,9 @@ final class FigmaShellUITests: XCTestCase {
     }
 
     #if os(iOS)
-    /// Keep system geometry acceptance separate from the real persistence and
-    /// file-panel flow. A windowed iPad can reject public orientation requests;
-    /// that is still a strict failure here, rather than hiding other results.
+    /// Keep real system direction acceptance separate from the persistence and
+    /// file-panel flow. Every navigation tap needs the same stable native tree
+    /// as those flows; opening the wrong route cannot test its orientation.
     @MainActor
     func testNativeScoreAndPracticeDirectionRestore() throws {
         continueAfterFailure = false
@@ -364,25 +364,35 @@ final class FigmaShellUITests: XCTestCase {
         app.launch()
         let libraryTab = button("我的曲谱", in: app)
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 45))
-        libraryTab.tap()
+        _ = try waitForNativeInteractionGeometry("我的曲谱", in: app,
+                                                 checkpoint: "Figma-direction-before-library-tap")
+        button("我的曲谱", in: app).tap()
         ensureSampleInLibrary(app)
         let viewScore = button("查看曲谱", in: app)
         XCTAssertTrue(viewScore.waitForExistence(timeout: 15))
-        viewScore.tap()
+        _ = try waitForNativeInteractionGeometry("查看曲谱", in: app,
+                                                 checkpoint: "Figma-direction-before-view-score-tap")
+        button("查看曲谱", in: app).tap()
         assertScoreRendered(app)
         assertDirection(app, landscape: true, name: "Figma-score-automatic-landscape")
         let close = button("‹ 我的曲谱", in: app)
         XCTAssertTrue(close.waitForExistence(timeout: 10))
-        close.tap()
+        _ = try waitForNativeInteractionGeometry("‹ 我的曲谱", in: app,
+                                                 checkpoint: "Figma-direction-before-score-close-tap")
+        button("‹ 我的曲谱", in: app).tap()
         XCTAssertTrue(viewScore.waitForExistence(timeout: 10))
         assertDirection(app, landscape: false, name: "Figma-library-score-restored-portrait")
 
         let practice = button("开始练习", in: app)
         XCTAssertTrue(practice.waitForExistence(timeout: 10))
-        practice.tap()
+        _ = try waitForNativeInteractionGeometry("开始练习", in: app,
+                                                 checkpoint: "Figma-direction-before-practice-tap")
+        button("开始练习", in: app).tap()
         XCTAssertTrue(text("练琴时刻", in: app).waitForExistence(timeout: 20))
         assertDirection(app, landscape: true, name: "Figma-practice-automatic-landscape")
-        close.tap()
+        _ = try waitForNativeInteractionGeometry("‹ 我的曲谱", in: app,
+                                                 checkpoint: "Figma-direction-before-practice-close-tap")
+        button("‹ 我的曲谱", in: app).tap()
         XCTAssertTrue(viewScore.waitForExistence(timeout: 10))
         assertDirection(app, landscape: false, name: "Figma-library-practice-restored-portrait")
     }
