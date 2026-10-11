@@ -6,7 +6,11 @@ import { INSTRUMENT_PROFILES, resolveProfile } from '../../practice-web/src/inst
 const source = new URL('../../practice-web/src/instruments.js', import.meta.url);
 const target = new URL('../NoteLite/NoteWiseProfiles.json', import.meta.url);
 const names = ['harpsichord','english-horn','bass','organ','accordion','harmonica','piccolo','recorder','guitar','sax','erhu','guzheng','pipa','guqin','suona','strings','winds','other'];
-const value = { schemaVersion: 1, source: 'practice-web/src/instruments.js', sourceSha256: createHash('sha256').update(await readFile(source)).digest('hex'), profiles: [...INSTRUMENT_PROFILES, ...names.map(resolveProfile)] };
+// Git checkouts use platform-specific line endings unless explicitly pinned.
+// Hash the canonical LF source to keep the same verified profile artifact on
+// Windows authoring workspaces and Apple build runners.
+const canonicalSource = (await readFile(source, 'utf8')).replace(/\r\n/g, '\n');
+const value = { schemaVersion: 1, source: 'practice-web/src/instruments.js', sourceSha256: createHash('sha256').update(canonicalSource).digest('hex'), profiles: [...INSTRUMENT_PROFILES, ...names.map(resolveProfile)] };
 const exact = JSON.stringify(value, null, 2) + '\n';
 if (process.argv.includes('--write')) await writeFile(target, exact);
 else if (await readFile(target, 'utf8') !== exact) throw new Error('Native NoteWise profiles differ from the shared resolver. Run this script with --write.');

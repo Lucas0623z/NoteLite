@@ -8,3 +8,6 @@ app/res/practice/app.js* -text linguist-generated=true
 app/res/practice/THIRD-PARTY.txt -text -whitespace linguist-generated=true
 app/dev/scripts/PracticeStudio text eol=lf
 app/dev/scripts/PracticeStudio.bat text eol=crlf
+# Native instrument resource and its canonical source are identical on all hosts.
+practice-web/src/instruments.js text eol=lf
+apple/NoteLite/NoteWiseProfiles.json text eol=lf

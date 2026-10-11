@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "source": "practice-web/src/instruments.js",
-  "sourceSha256": "85df7bede8b15253a9031eb199c525a90ea4b5d866805850b0247a862ba2097d",
+  "sourceSha256": "62451dd2a38f3bc79459440c41988ac42f507429fe9d18998e9dd2ca27c03bbc",
   "profiles": [
     {
       "id": "piano",
