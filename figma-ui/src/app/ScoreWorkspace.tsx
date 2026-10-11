@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import PracticeSession from "./PracticeSession";
 import { resolveOSMDConstructor } from "./osmd";
 import { cancelNativeFileRequests, cloud, CloudError, downloadBlob, errorMessage, isNativeCloud, type CloudJob, type CloudNote, type NoteEdit } from "./cloud";
+import { RemoteScoreLoader } from "./remote-score";
 
 type NoteInfo = { index: number; measure: string; part: string; step: string; octave: string; alter: string; duration: string; rest: boolean; source?: CloudNote };
 type Props = { name: string; format: string; file?: Blob; practice?: boolean; job?: CloudJob; orientationNotice?: string; onJob?: (job: CloudJob) => Promise<void>; onClose: () => void; onSave: (file: Blob) => Promise<void> };
@@ -28,11 +29,12 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const [rest, setRest] = useState(false);
   const [draftOwner, setDraftOwner] = useState<NoteInfo | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [reloadNotice, setReloadNotice] = useState("");
+  const [remoteLoading, setRemoteLoading] = useState(false);
   const [originalView, setOriginalView] = useState(false);
   const [xmlDraft, setXmlDraft] = useState("");
   const [sheetReady, setSheetReady] = useState(false);
   const replacement = useRef<HTMLInputElement>(null);
-  const generation = useRef(0);
   const sheet = useRef<HTMLDivElement>(null);
   const remoteReady = job?.state === "succeeded";
   const xmlFile = (!!job && !!remoteReady && !originalView) || (!job && ["XML", "MUSICXML"].includes(format));
@@ -40,34 +42,33 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const current = notes[selected];
   const draftReady = !!current && draftOwner === current;
   const filtered = notes.filter((note) => !measure || note.measure === measure);
-
-  useEffect(() => () => { generation.current++; cancelNativeFileRequests(); }, []);
-
-  async function loadRemote(target: CloudJob, index: number, ticket = ++generation.current) {
-    setStatus("正在载入最新曲谱…");
-    try {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const before = await cloud.job(target.id);
-        const listing = await cloud.notes(target.id, index);
-        const text = await cloud.score(target.id, index);
-        const after = await cloud.job(target.id);
-        if (before.revision !== listing.revision || after.revision !== listing.revision) continue;
-        if (generation.current !== ticket) return;
-        setXml(text); setXmlDraft(text); setRevision(listing.revision); setConflict(false);
-        setNotes(listing.notes.map((note, index) => ({ index, measure: note.measure, part: note.partId, step: note.pitch?.step || "C", octave: String(note.pitch?.octave ?? 4), alter: String(note.pitch?.alter ?? 0), duration: String(note.duration), rest: note.rest, source: note })));
-        setSelected((previous) => Math.max(0, Math.min(previous, listing.notes.length - 1)));
-        setStatus(`曲谱已载入 · 校对版本 ${listing.revision}${after.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}`); return;
-      }
-      throw new CloudError("曲谱正在更新，请重新载入最新版本。", 409);
-    } catch (error) { if (generation.current === ticket) { setStatus(errorMessage(error)); if (error instanceof CloudError && error.status === 409) setConflict(true); } }
-  }
+  const [remoteLoader] = useState(() => new RemoteScoreLoader(cloud, {
+    loading: () => { setRemoteLoading(true); setConflict(true); setStatus("正在载入最新曲谱…"); },
+    loaded: ({ job: latest, listing, musicxml }, saved) => {
+      const mapped = listing.notes.map((note, index) => ({ index, measure: note.measure, part: note.partId, step: note.pitch?.step || "C", octave: String(note.pitch?.octave ?? 4), alter: String(note.pitch?.alter ?? 0), duration: String(note.duration), rest: note.rest, source: note }));
+      setXml(musicxml); setXmlDraft(musicxml); setRevision(listing.revision); setNotes(mapped);
+      setSelected((previous) => Math.max(0, Math.min(previous, mapped.length - 1)));
+      setRemoteLoading(false); setConflict(false); setReloadNotice("");
+      setStatus(saved ? `${saved.kind === "xml" ? "完整曲谱" : "校对"}已保存 · 当前版本 ${listing.revision} · MusicXML 与 MIDI 已更新` : `曲谱已载入 · 校对版本 ${listing.revision}${latest.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}`);
+    },
+    failed: (error, saved) => {
+      setRemoteLoading(false); setConflict(true);
+      setReloadNotice(`${saved ? "已保存到云端，最新谱面未载入，请重新载入。" : "最新曲谱未载入，请重新载入。"}${errorMessage(error)}`);
+    },
+  }));
+  useEffect(() => {
+    remoteLoader.activate();
+    return () => { remoteLoader.deactivate(); cancelNativeFileRequests(); };
+  }, [remoteLoader]);
+  async function loadRemote(target: CloudJob, index: number) { return remoteLoader.load(target, index); }
 
   useEffect(() => {
     if (!job) return;
     if (!remoteReady) { setStatus(job.state === "failed" ? job.error || "识谱未完成，请检查原稿后重新上传。" : job.state === "queued" ? "曲谱已上传，正在等待识谱…" : "正在识谱，完成后自动载入可校对的乐谱…"); return; }
-    const ticket = ++generation.current; void loadRemote(job, scoreIndex, ticket);
-    return () => { generation.current++; };
-  }, [job?.id, job?.state, job?.revision, scoreIndex]);
+    if (remoteLoader.isInstalled(job, scoreIndex)) return;
+    void loadRemote(job, scoreIndex);
+    return () => remoteLoader.invalidate();
+  }, [job?.id, job?.state, job?.revision, scoreIndex, remoteLoader]);
 
   useEffect(() => {
     if (!originalFile) { if (!job) setStatus("没有可预览的曲谱文件。"); return; }
@@ -154,8 +155,11 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   async function publishEdit(edits: NoteEdit[]) {
     if (!job) return;
     setBusy(true);
-    try { const updated = await cloud.patch(job.id, scoreIndex, revision, edits); await onJob?.(updated); await loadRemote(updated, scoreIndex); setStatus(`校对已保存 · 版本 ${updated.revision} · MusicXML 与 MIDI 已更新`); }
-    catch (error) { setStatus(errorMessage(error)); if (error instanceof CloudError && (error.status === 409 || error.code === "write_status_unknown")) setConflict(true); }
+    try {
+      const { job: updated } = await remoteLoader.save(() => cloud.patch(job.id, scoreIndex, revision, edits), scoreIndex, "notes");
+      try { await onJob?.(updated); } catch { setStatus("校对已保存到云端，本机曲谱列表更新未完成。重新打开曲谱后可同步。"); }
+    }
+    catch (error) { setStatus(errorMessage(error)); if (error instanceof CloudError && (error.status === 409 || error.code === "write_status_unknown")) { setConflict(true); setReloadNotice(errorMessage(error)); } }
     finally { setBusy(false); }
   }
 
@@ -164,8 +168,11 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
     const document = new DOMParser().parseFromString(text, "application/xml");
     if (document.querySelector("parsererror") || document.documentElement.localName !== "score-partwise") { setStatus("请选择有效的 MusicXML，当前版本不会被覆盖。"); return; }
     setBusy(true);
-    try { const updated = await cloud.put(job.id, scoreIndex, revision, text); await onJob?.(updated); await loadRemote(updated, scoreIndex); setStatus(`完整曲谱已保存 · 版本 ${updated.revision} · MusicXML 与 MIDI 已更新`); }
-    catch (error) { setStatus(errorMessage(error)); if (error instanceof CloudError && (error.status === 409 || error.code === "write_status_unknown")) setConflict(true); }
+    try {
+      const { job: updated } = await remoteLoader.save(() => cloud.put(job.id, scoreIndex, revision, text), scoreIndex, "xml");
+      try { await onJob?.(updated); } catch { setStatus("完整曲谱已保存到云端，本机曲谱列表更新未完成。重新打开曲谱后可同步。"); }
+    }
+    catch (error) { setStatus(errorMessage(error)); if (error instanceof CloudError && (error.status === 409 || error.code === "write_status_unknown")) { setConflict(true); setReloadNotice(errorMessage(error)); } }
     finally { setBusy(false); }
   }
 
@@ -240,8 +247,8 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
       </aside>
       <main className="score-preview">
         <div className="score-preview-heading"><div><p className="score-eyebrow">乐谱预览</p><h2>{(job?.scores[scoreIndex]?.name || name).replace(/\.[^.]+$/, "")}</h2></div><span className="score-format">{notes.length ? `${notes.length} 个音符 / 休止符` : "原稿"}</span></div>
-        <p role="status" className="score-status">{status}</p>
-        {conflict && job && <button type="button" className="score-tool" disabled={busy} onClick={() => void loadRemote(job, scoreIndex)}>重新载入最新版本</button>}
+        <p role="status" className="score-status">{reloadNotice || status}</p>
+        {reloadNotice && job && <button type="button" className="score-tool" disabled={busy || remoteLoading} onClick={() => void loadRemote(job, scoreIndex)}>重新载入最新版本</button>}
         <div className="score-paper">
           {notation ? <div ref={sheet} role={sheetReady ? "img" : undefined} aria-label={sheetReady ? "MusicXML 谱面" : undefined} /> : format === "PDF" && url ? <iframe src={url} title={`${name}乐谱原稿`} /> : originalFile?.type.startsWith("image/") && url ? <img src={url} alt={`${name}乐谱原稿`} /> : <p>{job && !remoteReady ? "正在等待识谱结果。" : "此文件暂不支持预览。"}</p>}
         </div>
@@ -256,9 +263,9 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
           {current && <section className="score-edit"><h3>{current.part} · 第 {current.measure} 小节</h3><p className="score-description">音符 {selected + 1} · 原始时值 {current.duration}{current.source ? ` · 每拍 ${current.source.divisions} 单位` : ""}</p>
             {job && <label className="score-field">音符种类<select aria-label="音符或休止符" disabled={busy || conflict} value={rest ? "rest" : "note"} onChange={(event) => setRest(event.currentTarget.value === "rest")}><option value="note">音符</option><option value="rest">休止符</option></select></label>}
             {rest ? <p className="score-description">{job ? "休止符可修改时值，或切换为音符。" : "休止符暂不支持修改音高。"}</p> : <div className="score-pitch-fields">
-              <label className="score-field">音名<select value={step} onChange={(event) => setStep(event.currentTarget.value)}>{["C", "D", "E", "F", "G", "A", "B"].map((value) => <option key={value}>{value}</option>)}</select></label>
-              <label className="score-field">升降<select value={alter} onChange={(event) => setAlter(event.currentTarget.value)}><option value="0">还原</option><option value="1">升半音</option><option value="-1">降半音</option><option value="2">重升</option><option value="-2">重降</option></select></label>
-              <label className="score-field">八度<select value={octave} onChange={(event) => setOctave(event.currentTarget.value)}>{Array.from({ length: 10 }, (_, value) => <option key={value}>{value}</option>)}</select></label>
+              <label className="score-field">音名<select disabled={busy || conflict} value={step} onChange={(event) => setStep(event.currentTarget.value)}>{["C", "D", "E", "F", "G", "A", "B"].map((value) => <option key={value}>{value}</option>)}</select></label>
+              <label className="score-field">升降<select disabled={busy || conflict} value={alter} onChange={(event) => setAlter(event.currentTarget.value)}><option value="0">还原</option><option value="1">升半音</option><option value="-1">降半音</option><option value="2">重升</option><option value="-2">重降</option></select></label>
+              <label className="score-field">八度<select disabled={busy || conflict} value={octave} onChange={(event) => setOctave(event.currentTarget.value)}>{Array.from({ length: 10 }, (_, value) => <option key={value}>{value}</option>)}</select></label>
             </div>}
             {job && <div className="score-pitch-fields"><label className="score-field">时值<input aria-label="音符时值" type="number" min="0" step="any" disabled={busy || conflict} value={duration} onChange={(event) => setDuration(event.currentTarget.value)} /></label><label className="score-field">记谱时值<select aria-label="记谱时值" disabled={busy || conflict} value={noteType} onChange={(event) => setNoteType(event.currentTarget.value)}>{["", "maxima", "long", "breve", "whole", "half", "quarter", "eighth", "16th", "32nd", "64th", "128th", "256th", "512th", "1024th"].map((type) => <option key={type} value={type}>{type || "未指定"}</option>)}</select></label><label className="score-field">附点<select aria-label="附点数量" disabled={busy || conflict} value={dot} onChange={(event) => setDot(event.currentTarget.value)}>{[0, 1, 2, 3, 4].map((value) => <option key={value}>{value}</option>)}</select></label></div>}
             {(!rest || job) && <button type="button" className="score-tool score-tool-primary" disabled={busy || conflict || !draftReady || (step === current.step && octave === current.octave && alter === current.alter && (!job || duration === current.duration && noteType === current.source?.type && Number(dot) === current.source?.dot && rest === current.rest))} onClick={() => void savePitch()}>{busy ? "正在保存…" : "保存校对"}</button>}

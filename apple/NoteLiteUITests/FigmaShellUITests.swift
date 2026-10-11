@@ -10,49 +10,57 @@ import AppKit
 final class FigmaShellUITests: XCTestCase {
     #if os(macOS)
     @MainActor
-    func testMacFigmaLandscapeAndPortraitContentWindows() throws {
+    func testMacFigmaLandscapeContentWindow() throws {
+        try assertMacWindow(CGSize(width: 1440, height: 900))
+    }
+
+    @MainActor
+    func testMacFigmaPortraitContentWindow() throws {
+        try assertMacWindow(CGSize(width: 900, height: 1440))
+    }
+
+    @MainActor
+    private func assertMacWindow(_ size: CGSize) throws {
         continueAfterFailure = false
         executionTimeAllowance = 180
         let app = XCUIApplication()
-        for size in [CGSize(width: 1440, height: 900), CGSize(width: 900, height: 1440)] {
-            app.launchArguments = ["--uitesting-figma", "--uitesting-window-size=\(Int(size.width))x\(Int(size.height))"]
-            app.launch()
-            XCTAssertTrue(button("我的曲谱", in: app).waitForExistence(timeout: 45),
-                          "The real bundled product must load at each native Mac window size")
-            let web = app.webViews.firstMatch
-            let actualSize = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                abs(web.frame.width - size.width) <= 1 && abs(web.frame.height - size.height) <= 1
-            }, object: web)
-            let resizeResult = XCTWaiter.wait(for: [actualSize], timeout: 15)
-            let window = app.windows.firstMatch.frame
-            let displays = NSScreen.screens.map { screen -> [String: Any] in
-                ["frame": rectValue(screen.frame), "visibleFrame": rectValue(screen.visibleFrame),
-                 "scale": screen.backingScaleFactor]
-            }
-            let canFitOnDisplay = NSScreen.screens.contains { screen in
-                window.width <= screen.visibleFrame.width && window.height <= screen.visibleFrame.height
-            }
-            let metrics: [String: Any] = [
-                "requestedContent": ["width": size.width, "height": size.height],
-                "actualWindow": rectValue(window), "actualWebView": rectValue(web.frame),
-                "windowDecorationHeight": window.height - web.frame.height,
-                "displayCanContainWholeWindow": canFitOnDisplay, "displays": displays,
-                "screenshotLimitation": canFitOnDisplay ? "Actual native window capture" : "Actual native capture; runner display cannot contain the full tall window"
-            ]
-            let data = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
-            let attachment = XCTAttachment(string: String(decoding: data, as: UTF8.self))
-            attachment.name = "Figma-mac-\(Int(size.width))x\(Int(size.height))-window-metrics"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-            capture(app, name: "Figma-mac-\(Int(size.width))x\(Int(size.height))-actual-window")
-            XCTAssertEqual(resizeResult, .completed,
-                           "Requested native content dimensions must actually reach WKWebView")
-            XCTAssertEqual(window.width, web.frame.width, accuracy: 1)
-            XCTAssertGreaterThanOrEqual(window.height, web.frame.height,
-                                        "Window decoration may add height but must not shrink page content")
-            XCTAssertTrue(app.navigationBars.allElementsBoundByIndex.isEmpty)
-            app.terminate()
+        app.launchArguments = ["--uitesting-figma", "--uitesting-window-size=\(Int(size.width))x\(Int(size.height))"]
+        app.launch()
+        XCTAssertTrue(button("我的曲谱", in: app).waitForExistence(timeout: 45),
+                      "The real bundled product must load at each native Mac window size")
+        let web = app.webViews.firstMatch
+        let actualSize = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            abs(web.frame.width - size.width) <= 1 && abs(web.frame.height - size.height) <= 1
+        }, object: web)
+        let resizeResult = XCTWaiter.wait(for: [actualSize], timeout: 15)
+        let window = app.windows.firstMatch.frame
+        let displays = NSScreen.screens.map { screen -> [String: Any] in
+            ["frame": rectValue(screen.frame), "visibleFrame": rectValue(screen.visibleFrame),
+             "scale": screen.backingScaleFactor]
         }
+        let canFitOnDisplay = NSScreen.screens.contains { screen in
+            window.width <= screen.visibleFrame.width && window.height <= screen.visibleFrame.height
+        }
+        let metrics: [String: Any] = [
+            "requestedContent": ["width": size.width, "height": size.height],
+            "actualWindow": rectValue(window), "actualWebView": rectValue(web.frame),
+            "windowDecorationHeight": window.height - web.frame.height,
+            "displayCanContainWholeWindow": canFitOnDisplay, "displays": displays,
+            "screenshotLimitation": canFitOnDisplay ? "Actual native window capture" : "Actual native capture; runner display cannot contain the full tall window"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
+        let attachment = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        attachment.name = "Figma-mac-\(Int(size.width))x\(Int(size.height))-window-metrics"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        capture(app, name: "Figma-mac-\(Int(size.width))x\(Int(size.height))-actual-window")
+        XCTAssertEqual(resizeResult, .completed,
+                       "Requested native content dimensions must actually reach WKWebView")
+        XCTAssertEqual(window.width, web.frame.width, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(window.height, web.frame.height,
+                                    "Window decoration may add height but must not shrink page content")
+        XCTAssertTrue(app.navigationBars.allElementsBoundByIndex.isEmpty)
+        app.terminate()
     }
 
     private func rectValue(_ rect: CGRect) -> [String: CGFloat] {
@@ -215,10 +223,36 @@ final class FigmaShellUITests: XCTestCase {
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
         XCTAssertTrue(text("4 个音符 / 休止符", in: app).exists)
+        let scoreHierarchy = XCTAttachment(string: app.debugDescription)
+        scoreHierarchy.name = "Figma-rendered-score-actual-hierarchy"
+        scoreHierarchy.lifetime = .keepAlways
+        add(scoreHierarchy)
+        let controls = app.webViews.buttons.allElementsBoundByIndex +
+            app.webViews.checkBoxes.allElementsBoundByIndex + app.webViews.toggles.allElementsBoundByIndex
+        let names = Set(controls.flatMap { element in
+            [element.label, element.identifier, element.value as? String ?? ""].map(normalizedName)
+        })
         for (index, pitch) in ["C4", "D4", "E4", "F4"].enumerated() {
-            let note = app.webViews.buttons.matching(identifier: "第 1 小节 · \(pitch) #\(index + 1)").firstMatch
-            XCTAssertTrue(note.exists, "The XML must provide an actual \(pitch) note for editing")
+            let expected = normalizedName("第 1 小节 · \(pitch) #\(index + 1)")
+            // WebKit can expose aria-pressed note controls as toggles or
+            // checkboxes rather than ordinary buttons.
+            // Match the same complete note name/index, allowing only whitespace
+            // differences between AXTitle and aria-label. Read strings before
+            // matching so numeric OSMD values cannot crash the harness.
+            let present = names.contains(expected)
+            if !present {
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.name = "Figma-note-\(pitch)-missing-actual-hierarchy"
+                hierarchy.lifetime = .keepAlways
+                add(hierarchy)
+                capture(app, name: "Figma-note-\(pitch)-actual-view")
+            }
+            XCTAssertTrue(present, "The XML must provide an actual \(pitch) note for editing")
         }
+    }
+
+    private func normalizedName(_ value: String) -> String {
+        value.components(separatedBy: .whitespacesAndNewlines).joined()
     }
 
     @MainActor

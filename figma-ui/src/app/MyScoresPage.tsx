@@ -4,6 +4,7 @@ import pressed from "../imports/my-scores-upload-pressed.png";
 import ScoreWorkspace from "./ScoreWorkspace";
 import { cloud, CloudError, createUUID, errorMessage, isNativeCloud, nativeRequest, type CloudJob } from "./cloud";
 import { completedJobNotice, uploadedJobNotice, type ScoreNotice } from "./job-notice";
+import { startJobPolling } from "./job-polling";
 
 type Score = { id: string; name: string; format: string; file?: Blob; sample?: boolean; job?: CloudJob; removed?: boolean };
 type Panel = "import" | "rename" | "delete" | "view" | "practice" | "settings" | null;
@@ -16,18 +17,51 @@ function traceDialog(event: DialogEvent, dialog: HTMLDialogElement | null, panel
 }
 const sampleScore = `<score-partwise version="4.0"><work><work-title>示例练习</work-title></work><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>${["C", "D", "E", "F"].map((step) => `<note><pitch><step>${step}</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>`).join("")}</measure></part></score-partwise>`;
 
-async function scoreStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+async function openScoreDB(): Promise<IDBDatabase> {
+  return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open("heibaikey-scores", 1);
     request.onupgradeneeded = () => request.result.createObjectStore("scores", { keyPath: "id" });
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+async function scoreStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  const db = await openScoreDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("scores", mode);
     const request = action(transaction.objectStore("scores"));
     transaction.oncomplete = () => { db.close(); resolve(request.result); };
     transaction.onerror = transaction.onabort = () => { db.close(); reject(transaction.error); };
+  });
+}
+
+function scoreFromJob(job: CloudJob, previous?: Score): Score {
+  return { ...previous, id: job.id, name: previous?.name || job.filename, format: previous?.format || job.filename.split(".").pop()?.toUpperCase() || "", job };
+}
+
+async function persistPolledJobs(jobs: CloudJob[], signal: AbortSignal): Promise<Score[]> {
+  const db = await openScoreDB();
+  if (signal.aborted) { db.close(); return []; }
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("scores", "readwrite");
+    const store = transaction.objectStore("scores");
+    const request = store.getAll();
+    const updated: Score[] = [];
+    const abort = () => { try { transaction.abort(); } catch { /* Already completed. */ } };
+    signal.addEventListener("abort", abort, { once: true });
+    request.onsuccess = () => {
+      const latest = new Map((request.result as Score[]).map((score) => [score.id, score]));
+      for (const job of jobs) {
+        const previous = latest.get(job.id);
+        // Preserve current names/files and local removals, including changes made
+        // while this round was waiting for its other network responses.
+        if (!previous || previous.removed || (previous.job?.revision ?? 0) > job.revision) continue;
+        const score = scoreFromJob(job, previous); store.put(score); updated.push(score);
+      }
+    };
+    const finish = () => { signal.removeEventListener("abort", abort); db.close(); };
+    transaction.oncomplete = () => { finish(); resolve(updated); };
+    transaction.onerror = transaction.onabort = () => { finish(); reject(transaction.error || new DOMException("Polling cancelled", "AbortError")); };
   });
 }
 
@@ -59,6 +93,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   const pendingFile = useRef<File | null>(null);
   const workspaceOpen = panel === "view" || panel === "practice";
   const importing = importPage || scores.length === 0;
+  const waitingKey = JSON.stringify(scores.filter((score) => score.job?.state === "queued" || score.job?.state === "running").map((score) => score.id).sort());
 
   async function enterLandscape() {
     setOrientationNotice("");
@@ -125,19 +160,24 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   }, []);
 
   useEffect(() => {
-    const waiting = scores.filter((score) => score.job?.state === "queued" || score.job?.state === "running");
-    if (!waiting.length) return;
-    let live = true;
-    const timer = window.setTimeout(async () => {
-      for (const score of waiting) {
-        try { const job = await cloud.job(score.id); if (live) await acceptJob(job, score); }
-        catch (error) { if (live) setNotice((current) => current.jobId === score.id ? { ...current, text: errorMessage(error) } : current); }
-      }
-      // Saving a fresh score object schedules the next bounded poll.
-      if (live) setScores((previous) => [...previous]);
-    }, 3000);
-    return () => { live = false; window.clearTimeout(timer); };
-  }, [scores]);
+    const ids = JSON.parse(waitingKey) as string[];
+    return startJobPolling({
+      ids, read: (id) => cloud.job(id),
+      commit: async (values, signal) => {
+        const saved = await persistPolledJobs(values.map(({ value }) => value), signal);
+        if (signal.aborted) return;
+        const updates = new Map(saved.map((score) => [score.id, score.job!]));
+        const merge = (score: Score) => {
+          const job = updates.get(score.id);
+          return job && (score.job?.revision ?? 0) <= job.revision ? { ...score, job } : score;
+        };
+        setScores((previous) => previous.map(merge));
+        setSelected((current) => current ? merge(current) : current);
+        setNotice((current) => saved.reduce((notice, score) => completedJobNotice(notice, score.job!), current));
+      },
+      failed: (id, error) => setNotice((current) => current.jobId && (id ? current.jobId === id : ids.includes(current.jobId)) ? { ...current, text: errorMessage(error) } : current),
+    });
+  }, [waitingKey]);
 
   useEffect(() => {
     traceDialog("effect", dialog.current, panel);
@@ -173,7 +213,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   async function acceptJob(job: CloudJob, existing?: Score) {
     const previous = existing || scores.find((item) => item.id === job.id);
     if (previous?.removed) return;
-    const imported: Score = { ...previous, id: job.id, name: previous?.name || job.filename, format: previous?.format || job.filename.split(".").pop()?.toUpperCase() || "", job };
+    const imported = scoreFromJob(job, previous);
     await save(imported);
     setNotice((current) => completedJobNotice(current, job));
     setSelected((current) => current?.id === imported.id ? imported : current);

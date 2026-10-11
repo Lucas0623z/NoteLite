@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/cloud.test.ts tests/osmd.test.ts",
+    "test": "node --experimental-strip-types --test tests/cloud.test.ts tests/osmd.test.ts tests/async-score.test.ts",
     "preview": "vite preview",
     "format": "oxfmt"
   },

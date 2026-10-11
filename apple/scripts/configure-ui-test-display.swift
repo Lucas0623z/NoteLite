@@ -3,7 +3,7 @@ import CoreGraphics
 
 // CI environment only. Public display APIs enumerate actual supported modes;
 // no virtual display is invented and production window/page code is unchanged.
-// https://developer.apple.com/documentation/coregraphics/cgdisplaysetdisplaymode(_:_:_:)
+// https://developer.apple.com/documentation/coregraphics/cgconfigureoption
 let display = CGMainDisplayID()
 let options = [kCGDisplayShowDuplicateLowResolutionModes as String: true] as CFDictionary
 let modes = (CGDisplayCopyAllDisplayModes(display, options) as? [CGDisplayMode]) ?? []
@@ -21,7 +21,20 @@ var result: [String: Any] = ["displayId": display, "supportedModes": modes.map(d
 if let original { result["original"] = details(original) }
 if let selected {
     result["selected"] = details(selected)
-    result["configurationResult"] = CGDisplaySetDisplayMode(display, selected, nil).rawValue
+    // CGDisplaySetDisplayMode reverts when this short-lived helper exits.
+    // Keep this disposable CI runner's supported mode for its login session.
+    var configuration: CGDisplayConfigRef?
+    let begin = CGBeginDisplayConfiguration(&configuration)
+    result["beginResult"] = begin.rawValue
+    if begin == .success {
+        let configure = CGConfigureDisplayWithDisplayMode(configuration, display, selected, nil)
+        result["configureResult"] = configure.rawValue
+        if configure == .success {
+            result["configurationResult"] = CGCompleteDisplayConfiguration(configuration, .forSession).rawValue
+        } else {
+            result["cancelResult"] = CGCancelDisplayConfiguration(configuration).rawValue
+        }
+    }
 }
 if let actual = CGDisplayCopyDisplayMode(display) { result["actual"] = details(actual) }
 let bounds = CGDisplayBounds(display)
