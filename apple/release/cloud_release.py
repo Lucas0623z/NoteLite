@@ -269,11 +269,19 @@ def verify_resources(app):
 
 
 def code_signature(app, private, expected_profile, expected_fingerprint):
-    release.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture=True)
+    def checked(args, stage):
+        try:
+            return release.run(args, capture=True)
+        except release.ReleaseError as error:
+            # A static stage identifies the failing check without printing
+            # command arguments, certificate identities, or captured output.
+            raise release.ReleaseError("Actual app signature " + stage + ": " + str(error)) from None
+
+    checked(["codesign", "--verify", "--deep", "--strict", str(app)], "strict verification")
     description = subprocess.run(["codesign", "-d", "--verbose=4", str(app)], capture_output=True, text=True)
     release.require(description.returncode == 0 and re.search(r"^TeamIdentifier=" + TEAM + r"$", description.stderr + description.stdout, re.M),
                     "Actual code signature belongs to another team.")
-    entitlements = plistlib.loads(release.run(["codesign", "-d", "--entitlements", ":-", str(app)], capture=True).encode())
+    entitlements = plistlib.loads(checked(["codesign", "-d", "--entitlements", ":-", str(app)], "entitlement extraction").encode())
     profile = plistlib.loads(release.run(["security", "cms", "-D", "-i", str(release.contained_file(app, "embedded.mobileprovision"))], capture=True).encode())
     certificates = release.validate_profile(profile, BUNDLE, TEAM)
     release.require(profile["UUID"] == expected_profile and expected_fingerprint in certificates,
@@ -282,7 +290,9 @@ def code_signature(app, private, expected_profile, expected_fingerprint):
                     and entitlements.get("com.apple.developer.team-identifier") == TEAM
                     and not entitlements.get("get-task-allow", False), "Actual signed app entitlements do not match distribution identity.")
     certificate_prefix = private / ("archive-signer-" if app.parent.name == "Applications" else "ipa-signer-")
-    release.run(["codesign", "-d", "--extract-certificates", str(certificate_prefix), str(app)], capture=True)
+    # This option has an optional value. A separate prefix is interpreted as
+    # another code path by getopt_long, rather than the certificate output.
+    checked(["codesign", "-d", "--extract-certificates=" + str(certificate_prefix), str(app)], "certificate extraction")
     certificate = Path(str(certificate_prefix) + "0")
     release.require(certificate.is_file() and hashlib.sha1(certificate.read_bytes()).hexdigest().upper() == expected_fingerprint,
                     "Actual app was signed with another certificate.")

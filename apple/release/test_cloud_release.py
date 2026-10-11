@@ -1,9 +1,11 @@
-"""Release gates: no real credentials, Xcode, model inference or Apple uploads."""
+"""Release gates: no private signing credentials, model inference or Apple uploads."""
 import datetime as dt
 import hashlib
 import os
 from pathlib import Path
 import plistlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -267,8 +269,12 @@ class PackagingGateTests(unittest.TestCase):
         def command(args, capture=False):
             if args[0] == "security": return plistlib.dumps(profile).decode()
             if "--entitlements" in args: return plistlib.dumps(entitlements).decode()
-            if "--extract-certificates" in args:
-                Path(args[args.index("--extract-certificates") + 1] + "0").write_bytes(certificate)
+            options = [arg for arg in args if arg.startswith("--extract-certificates=")]
+            if options:
+                self.assertEqual(len(options), 1)
+                self.assertEqual(len(args), 4)
+                self.assertEqual(args[-1], str(self.app))
+                Path(options[0].split("=", 1)[1] + "0").write_bytes(certificate)
             return ""
 
         with patch.object(cloud.release, "run", side_effect=command), patch.object(cloud.subprocess, "run", return_value=description):
@@ -276,6 +282,37 @@ class PackagingGateTests(unittest.TestCase):
             with self.assertRaises(cloud.release.ReleaseError): cloud.code_signature(self.app, private, profile_uuid, "B" * 40)
             entitlements["get-task-allow"] = True
             with self.assertRaises(cloud.release.ReleaseError): cloud.code_signature(self.app, private, profile_uuid, fingerprint)
+
+    def test_signature_failure_identifies_static_stage_without_command_output(self):
+        diagnostic = "private command output must never be published"
+        result = subprocess.CompletedProcess([], 1, stdout=diagnostic, stderr=diagnostic)
+        with patch.object(cloud.release.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(cloud.release.ReleaseError, r"^Actual app signature strict verification: codesign failed \(exit 1\)\.$") as caught:
+                cloud.code_signature(self.app, self.root, "unused", "unused")
+        self.assertNotIn(diagnostic, str(caught.exception))
+
+    @unittest.skipUnless(sys.platform == "darwin", "Requires the real macOS codesign executable")
+    def test_real_macos_certificate_extraction_rejects_split_optional_prefix(self):
+        # The installed Xcode application is public Apple-signed code; this needs no
+        # developer identity, profile, private key, or network request.
+        binary = "/usr/bin/codesign"
+        application = Path(os.environ["DEVELOPER_DIR"]).parents[1]
+        self.assertEqual(application.suffix, ".app")
+        self.assertTrue(application.is_dir())
+        prefix = self.root / "real-system-signer-"
+        broken = subprocess.run([binary, "-d", "--extract-certificates", str(prefix), str(application)],
+                                cwd=self.root, capture_output=True, text=True)
+        self.assertNotEqual(broken.returncode, 0, "The separate prefix must be treated as a nonexistent code path")
+        fixed = subprocess.run([binary, "-d", "--extract-certificates=" + str(prefix), str(application)],
+                               cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(fixed.returncode, 0, "Actual macOS must accept the combined optional argument")
+        certificate = Path(str(prefix) + "0")
+        self.assertTrue(certificate.is_file() and certificate.stat().st_size > 0,
+                        "The actual leaf certificate must be extracted at the requested prefix")
+        parsed = subprocess.run(["openssl", "x509", "-inform", "DER", "-in", str(certificate), "-noout"],
+                                capture_output=True, text=True)
+        self.assertEqual(parsed.returncode, 0, "The extracted leaf must be an actual DER certificate")
+        self.assertFalse((self.root / "codesign0").exists(), "The default output prefix must not be used")
 
 
 if __name__ == "__main__":
