@@ -735,6 +735,7 @@ final class FigmaShellUITests: XCTestCase {
         XCTAssertTrue(library.waitForExistence(timeout: 45))
         _ = try waitForNativeInteractionGeometry("我的曲谱", in: relaunched,
                                                  expectedWindowSize: previous.window.size,
+                                                 expectedPresentedWindowSize: previous.presentedWindow.size,
                                                  checkpoint: "\(checkpoint)-before-library-tap")
         // Each destination receives one ordinary element tap. A failed tap is
         // never retried, replaced with coordinates, or replaced with JS.
@@ -745,6 +746,7 @@ final class FigmaShellUITests: XCTestCase {
         XCTAssertEqual(relaunched.webViews.buttons.matching(identifier: "查看曲谱").count, 1)
         _ = try waitForNativeInteractionGeometry("查看曲谱", in: relaunched,
                                                  expectedWindowSize: previous.window.size,
+                                                 expectedPresentedWindowSize: previous.presentedWindow.size,
                                                  checkpoint: "\(checkpoint)-before-view-score-tap")
         view.tap()
         attachHierarchy(relaunched, name: "\(checkpoint)-after-single-view-score-tap-hierarchy")
@@ -757,24 +759,90 @@ final class FigmaShellUITests: XCTestCase {
         let window: CGRect
         let webView: CGRect
         let target: CGRect
+        let presentedWindow: CGRect
+        let presentedWebView: CGRect
+        let presentedTarget: CGRect
+        let computedCoordinateCenter: CGPoint
+        let windowCoordinateOrigin: CGPoint
+        let windowCoordinateX: CGPoint
+        let windowCoordinateY: CGPoint
+
+        var expectedCoordinateCenter: CGPoint {
+            let horizontal = (presentedTarget.midX - presentedWindow.minX) / presentedWindow.width
+            let vertical = (presentedTarget.midY - presentedWindow.minY) / presentedWindow.height
+            return CGPoint(
+                x: windowCoordinateOrigin.x + horizontal * (windowCoordinateX.x - windowCoordinateOrigin.x) +
+                    vertical * (windowCoordinateY.x - windowCoordinateOrigin.x),
+                y: windowCoordinateOrigin.y + horizontal * (windowCoordinateX.y - windowCoordinateOrigin.y) +
+                    vertical * (windowCoordinateY.y - windowCoordinateOrigin.y))
+        }
 
         var isConsistent: Bool {
             // An AX Application node can have no own rectangle (the actual
             // macOS artifact does not expose one). Its real Window owns the
             // native surface; keep the root frame as diagnostic metadata only.
-            let rectangles = [window, webView, target]
+            let rectangles = [window, webView, target, presentedWindow, presentedWebView, presentedTarget]
             guard rectangles.allSatisfy({ rect in
                 !rect.isNull && !rect.isEmpty && !rect.isInfinite &&
                     [rect.minX, rect.minY, rect.width, rect.height].allSatisfy(\.isFinite)
             }) else { return false }
-            return window.insetBy(dx: -1, dy: -1).contains(target) &&
+            guard window.insetBy(dx: -1, dy: -1).contains(target) &&
                 webView.insetBy(dx: -1, dy: -1).contains(target) &&
-                window.width + 1 >= webView.width && window.height + 1 >= webView.height
+                window.width + 1 >= webView.width && window.height + 1 >= webView.height &&
+                presentedWindow.insetBy(dx: -1, dy: -1).contains(presentedTarget) &&
+                presentedWebView.insetBy(dx: -1, dy: -1).contains(presentedTarget) &&
+                presentedWindow.width + 1 >= presentedWebView.width &&
+                presentedWindow.height + 1 >= presentedWebView.height else { return false }
+
+            // iPadOS 26 compatibility mode may scale and center a landscape
+            // scene in a portrait display. Its raw snapshot and the public
+            // element.frame / screenPoint APIs expose different rectangles in
+            // the actual CI evidence. Validate both complete trees and their
+            // uniform presentation transform; never apply it to the real tap.
+            let scaleX = presentedWindow.width / window.width
+            let scaleY = presentedWindow.height / window.height
+            guard abs(scaleX - scaleY) <= max(0.001, scaleX * 0.001) else { return false }
+            func matchesPresentation(_ logical: CGRect, _ presented: CGRect) -> Bool {
+                let expected = CGRect(
+                    x: presentedWindow.minX + (logical.minX - window.minX) * scaleX,
+                    y: presentedWindow.minY + (logical.minY - window.minY) * scaleY,
+                    width: logical.width * scaleX, height: logical.height * scaleY)
+                return abs(expected.minX - presented.minX) <= 1 &&
+                    abs(expected.minY - presented.minY) <= 1 &&
+                    abs(expected.width - presented.width) <= 1 &&
+                    abs(expected.height - presented.height) <= 1
+            }
+            // screenPoint can use the display's fixed axes while frame uses
+            // the current interface axes. Read that relation from the public
+            // window coordinates, rather than assuming a rotation or changing
+            // the coordinate used by an ordinary element tap.
+            let points = [computedCoordinateCenter, windowCoordinateOrigin,
+                          windowCoordinateX, windowCoordinateY]
+            guard points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else { return false }
+            let dx = CGVector(dx: windowCoordinateX.x - windowCoordinateOrigin.x,
+                              dy: windowCoordinateX.y - windowCoordinateOrigin.y)
+            let dy = CGVector(dx: windowCoordinateY.x - windowCoordinateOrigin.x,
+                              dy: windowCoordinateY.y - windowCoordinateOrigin.y)
+            let lengthX = (dx.dx * dx.dx + dx.dy * dx.dy).squareRoot()
+            let lengthY = (dy.dx * dy.dx + dy.dy * dy.dy).squareRoot()
+            guard abs(lengthX - presentedWindow.width) <= 1,
+                  abs(lengthY - presentedWindow.height) <= 1,
+                  abs(dx.dx * dy.dx + dx.dy * dy.dy) <= max(1, lengthX * lengthY * 0.001) else { return false }
+            return matchesPresentation(webView, presentedWebView) &&
+                matchesPresentation(target, presentedTarget) &&
+                abs(computedCoordinateCenter.x - expectedCoordinateCenter.x) <= 1 &&
+                abs(computedCoordinateCenter.y - expectedCoordinateCenter.y) <= 1
         }
 
         func matchesWindowSize(_ size: CGSize?) -> Bool {
             guard let size else { return true }
             return abs(window.width - size.width) <= 1 && abs(window.height - size.height) <= 1
+        }
+
+        func matchesPresentedWindowSize(_ size: CGSize?) -> Bool {
+            guard let size else { return true }
+            return abs(presentedWindow.width - size.width) <= 1 &&
+                abs(presentedWindow.height - size.height) <= 1
         }
     }
 
@@ -791,8 +859,9 @@ final class FigmaShellUITests: XCTestCase {
     @MainActor
     private func nativeInteractionGeometry(_ label: String,
                                            in app: XCUIApplication) throws -> NativeInteractionGeometry? {
-        // All frames come from the same fresh public snapshot, so an old
-        // landscape WebKit node cannot be combined with a new portrait window.
+        // Bracket the real, presented element frames with identical raw public
+        // snapshots. A logical scene transition or a still-animating system
+        // presentation must not be combined with a different window or target.
         let snapshot = try app.snapshot()
         guard let window = firstSnapshot(in: snapshot, matching: { $0.elementType == .window }),
               let web = firstSnapshot(in: window, matching: { $0.elementType == .webView }),
@@ -804,13 +873,38 @@ final class FigmaShellUITests: XCTestCase {
                   $0.elementType == .button &&
                       ($0.identifier == label || $0.label == label || $0.title == label)
               }) else { return nil }
+        let presentedWindow = app.windows.firstMatch
+        let presentedWebView = presentedWindow.webViews.firstMatch
+        let presentedTarget = button(label, in: app)
+        guard presentedWindow.exists, presentedWebView.exists, presentedTarget.exists else { return nil }
+        let windowFrame = presentedWindow.frame
+        let webViewFrame = presentedWebView.frame
+        let targetFrame = presentedTarget.frame
+        let point = presentedTarget.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint
+        let origin = presentedWindow.coordinate(withNormalizedOffset: .zero).screenPoint
+        let x = presentedWindow.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0)).screenPoint
+        let y = presentedWindow.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 1)).screenPoint
+        let after = try app.snapshot()
+        guard let afterWindow = firstSnapshot(in: after, matching: { $0.elementType == .window }),
+              let afterWeb = firstSnapshot(in: afterWindow, matching: { $0.elementType == .webView }),
+              let afterTarget = firstSnapshot(in: afterWeb, matching: {
+                  $0.elementType == .button &&
+                      ($0.identifier == label || $0.label == label || $0.title == label)
+              }),
+              [snapshot.frame, window.frame, web.frame, target.frame] ==
+                [after.frame, afterWindow.frame, afterWeb.frame, afterTarget.frame] else { return nil }
         return NativeInteractionGeometry(application: snapshot.frame, window: window.frame,
-                                         webView: web.frame, target: target.frame)
+                                         webView: web.frame, target: target.frame,
+                                         presentedWindow: windowFrame, presentedWebView: webViewFrame,
+                                         presentedTarget: targetFrame, computedCoordinateCenter: point,
+                                         windowCoordinateOrigin: origin, windowCoordinateX: x,
+                                         windowCoordinateY: y)
     }
 
     @MainActor
     private func waitForNativeInteractionGeometry(_ label: String, in app: XCUIApplication,
                                                  expectedWindowSize: CGSize? = nil,
+                                                 expectedPresentedWindowSize: CGSize? = nil,
                                                  checkpoint: String) throws -> NativeInteractionGeometry {
         var previous: NativeInteractionGeometry?
         var accepted: NativeInteractionGeometry?
@@ -820,6 +914,7 @@ final class FigmaShellUITests: XCTestCase {
             guard let self, app.state == .runningForeground,
                   let geometry = try? self.nativeInteractionGeometry(label, in: app),
                   geometry.isConsistent, geometry.matchesWindowSize(expectedWindowSize),
+                  geometry.matchesPresentedWindowSize(expectedPresentedWindowSize),
                   self.button(label, in: app).isHittable else {
                 previous = nil
                 consecutiveSamples = 0
@@ -847,10 +942,10 @@ final class FigmaShellUITests: XCTestCase {
                           userInfo: [NSLocalizedDescriptionKey: "No stable native geometry for \(checkpoint)"])
         }
         let point = button(label, in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint
-        XCTAssertEqual(point.x, geometry.target.midX, accuracy: 1,
-                       "XCTest's computed horizontal coordinate must agree with the fresh native target frame")
-        XCTAssertEqual(point.y, geometry.target.midY, accuracy: 1,
-                       "XCTest's computed vertical coordinate must agree with the fresh native target frame")
+        XCTAssertEqual(point.x, geometry.expectedCoordinateCenter.x, accuracy: 1,
+                       "XCTest's horizontal coordinate must agree with the target in the public window coordinate basis")
+        XCTAssertEqual(point.y, geometry.expectedCoordinateCenter.y, accuracy: 1,
+                       "XCTest's vertical coordinate must agree with the target in the public window coordinate basis")
         let metrics: [String: Any] = [
             "checkpoint": checkpoint,
             "launchID": app.launchEnvironment["NOTELITE_UI_LAUNCH_ID"] ?? "initial-process",
@@ -859,9 +954,17 @@ final class FigmaShellUITests: XCTestCase {
             "windowFrame": frameValues(geometry.window),
             "webViewFrame": frameValues(geometry.webView),
             "targetFrame": frameValues(geometry.target),
+            "presentedWindowFrame": frameValues(geometry.presentedWindow),
+            "presentedWebViewFrame": frameValues(geometry.presentedWebView),
+            "presentedTargetFrame": frameValues(geometry.presentedTarget),
+            "presentationScale": geometry.presentedWindow.width / geometry.window.width,
+            "windowCoordinateOrigin": ["x": geometry.windowCoordinateOrigin.x, "y": geometry.windowCoordinateOrigin.y],
+            "windowCoordinateX": ["x": geometry.windowCoordinateX.x, "y": geometry.windowCoordinateX.y],
+            "windowCoordinateY": ["x": geometry.windowCoordinateY.x, "y": geometry.windowCoordinateY.y],
+            "expectedCoordinateCenter": ["x": geometry.expectedCoordinateCenter.x, "y": geometry.expectedCoordinateCenter.y],
             "computedCoordinateCenter": ["x": point.x, "y": point.y],
             "stableSamples": consecutiveSamples,
-            "geometrySource": "One public app.snapshot() per sample; no cached element frames",
+            "geometrySource": "Identical public raw snapshots bracket actual element.frame and screenPoint; logical and presented frames must both agree and stabilize",
             "touchScope": "Pre-touch accessibility geometry only; actual native touch and xcresult event records are separate evidence"
         ]
         let data = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])

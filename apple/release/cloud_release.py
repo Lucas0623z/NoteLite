@@ -248,10 +248,11 @@ def verify_resources(app):
             except resource_gate.GateError as error:
                 raise release.ReleaseError(str(error)) from None
         reports[name] = actual
-    for name in ("MODEL-LOCK.json", "THIRD-PARTY.txt", "BASIC-PITCH-LICENSE"):
+    for name in ("MODEL-LOCK.json", "DIVIDE-NO-NAN-PATCH.json", "THIRD-PARTY.txt", "BASIC-PITCH-LICENSE"):
         original = release.contained_file(ROOT / "apple/NoteWiseModels", name)
         actual = release.contained_file(app, name)
         release.require(release.digest(original) == release.digest(actual), "NoteWise model lock or license differs from its source.")
+        reports[name] = {"bytes": actual.stat().st_size, "sha256": release.digest(actual)}
     original_profiles = release.contained_file(ROOT / "apple/NoteLite", "NoteWiseProfiles.json")
     actual_profiles = release.contained_file(app, "NoteWiseProfiles.json")
     release.require(release.digest(original_profiles) == release.digest(actual_profiles),

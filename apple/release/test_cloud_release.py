@@ -141,7 +141,7 @@ class PackagingGateTests(unittest.TestCase):
             for name, data in values.items():
                 for path in (source / name, self.app / folder / name):
                     path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(data)
-        for name in ("MODEL-LOCK.json", "THIRD-PARTY.txt", "BASIC-PITCH-LICENSE"):
+        for name in ("MODEL-LOCK.json", "DIVIDE-NO-NAN-PATCH.json", "THIRD-PARTY.txt", "BASIC-PITCH-LICENSE"):
             path = self.root / "apple/NoteWiseModels" / name; path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("synthetic locked model notice fixture")
             (self.app / name).write_bytes(path.read_bytes())
@@ -184,6 +184,18 @@ class PackagingGateTests(unittest.TestCase):
         with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
         installed.write_bytes(original)
         self.assertEqual(cloud.verify_resources(self.app)["NoteWiseProfiles.json"]["sha256"], hashlib.sha256(original).hexdigest())
+
+    def test_model_divide_no_nan_provenance_is_required_and_must_match_exact_source(self):
+        installed = self.app / "DIVIDE-NO-NAN-PATCH.json"
+        original = installed.read_bytes()
+        actual = cloud.verify_resources(self.app)["DIVIDE-NO-NAN-PATCH.json"]
+        self.assertEqual(actual, {"bytes": len(original), "sha256": hashlib.sha256(original).hexdigest()})
+        installed.write_bytes(original + b" altered graph provenance")
+        with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+        installed.unlink()
+        with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+        installed.write_bytes(original)
+        self.assertEqual(cloud.verify_resources(self.app)["DIVIDE-NO-NAN-PATCH.json"], actual)
 
     def test_zip_traversal_symlink_case_collision_and_size_rejected_before_extraction(self):
         for kind in ("traversal", "symlink", "collision", "size"):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the bundled official model; --fetch restores only the locked assets."""
+"""Verify locked upstream weights and the reproducible zero-safe graph repair."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -8,6 +8,15 @@ import json
 from pathlib import Path
 import urllib.request
 import zipfile
+import importlib.util
+
+
+def patch_module():
+    path = Path(__file__).with_name("patch-notewise-coreml.py")
+    spec = importlib.util.spec_from_file_location("notewise_coreml_patch", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def prepare(fetch: bool = False) -> dict:
@@ -21,7 +30,7 @@ def prepare(fetch: bool = False) -> dict:
         if len(data) != source["size"] or hashlib.sha256(data).hexdigest() != source["sha256"]:
             raise ValueError("Official model source wheel failed its locked checksum")
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            for item in lock["files"]:
+            for item in lock["upstreamFiles"]:
                 relative = Path(item["path"])
                 target = (root / relative).resolve()
                 if not target.is_relative_to(root.resolve()):
@@ -33,6 +42,7 @@ def prepare(fetch: bool = False) -> dict:
                     raise ValueError("Source model asset failed its locked checksum")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(content)
+        patch_module().apply(root)
     for item in lock["files"]:
         target = (root / item["path"]).resolve()
         if not target.is_relative_to(root.resolve()) or not target.is_file():
@@ -44,8 +54,20 @@ def prepare(fetch: bool = False) -> dict:
     expected = {x["path"] for x in lock["files"] if x["path"].startswith("NoteWiseBasicPitch.mlpackage/")}
     if actual != expected:
         raise ValueError("Unexpected or missing file in the bundled model package")
+    patch = patch_module()
+    metadata = patch.load_patch(root)
+    original = patch.transform((root / patch.MODEL).read_bytes(), metadata, restore=True)
+    source = next(x for x in lock["upstreamFiles"] if x["path"] == patch.MODEL)
+    if len(original) != source["size"] or hashlib.sha256(original).hexdigest() != source["sha256"]:
+        raise ValueError("Graph repair cannot restore exact official model")
+    for item in lock["localPatches"][0]["provenanceFiles"]:
+        data = (root.parent / item["path"]).read_bytes()
+        if len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
+            raise ValueError("Graph repair provenance checksum mismatch")
     return {"status": "passed", "version": lock["version"], "filesVerified": len(lock["files"]),
             "bytesVerified": sum(x["size"] for x in lock["files"]), "networkUsed": fetch,
+            "upstreamModelExactlyRestored": True, "weightsChanged": False,
+            "localGraphPatch": metadata["patchId"],
             "nativeInferenceTested": False}
 
 

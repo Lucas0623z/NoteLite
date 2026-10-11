@@ -90,8 +90,23 @@ final class FigmaOrientationPolicy {
                 // geometry error rather than inventing a successful rotation.
                 scene.requestGeometryUpdate(.iOS(interfaceOrientations: requested)) { [weak self, weak window] error in
                     Task { @MainActor [weak self, weak window] in
-                        self?.fail(mode, error: error, ticket: ticket, window: window,
-                                   priorLock: priorLock, priorOrientation: priorOrientation)
+                        guard let self, generation == ticket, failedGeneration != ticket else { return }
+                        // Updating supported orientations can already apply
+                        // the requested rotation before a concurrent geometry
+                        // action returns BSActionErrorDomain. Keep the lock
+                        // only when the real scene and window have reached the
+                        // target; otherwise retain the original failure path.
+                        if let window, window.windowScene === scene,
+                           Self.matches(requested, scene: scene, window: window) {
+                            #if DEBUG
+                            let nativeError = error as NSError
+                            FigmaUITestDiagnostics.record("[NoteLite geometry] geometry-error-after-target-applied mode=\(mode) domain=\(nativeError.domain) code=\(nativeError.code)")
+                            #endif
+                            updateController(in: window)
+                            return
+                        }
+                        fail(mode, error: error, ticket: ticket, window: window,
+                             priorLock: priorLock, priorOrientation: priorOrientation)
                     }
                 }
 

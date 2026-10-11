@@ -85,6 +85,7 @@ jobs:
           pnpm --dir figma-ui build
           node apple/scripts/prepare-notewise-profiles.mjs
           python3 apple/scripts/prepare-notewise-model.py
+          python3 -m unittest discover -s apple/scripts -p test_notewise_model_patch.py
           python3 apple/scripts/prepare-release-features.py --check
           python3 apple/scripts/prepare-figma-ui.py
       - name: Generate Xcode project
@@ -140,6 +141,9 @@ jobs:
             test -d "$resources/NoteWiseBasicPitch.mlmodelc"
             test -s "$resources/BASIC-PITCH-LICENSE"
             test -s "$resources/MODEL-LOCK.json"
+            for notice in MODEL-LOCK.json DIVIDE-NO-NAN-PATCH.json BASIC-PITCH-LICENSE THIRD-PARTY.txt; do
+              cmp "NoteWiseModels/$notice" "$resources/$notice"
+            done
             test -d "$resources/FigmaUI/assets"
             diff -r FigmaUI "$resources/FigmaUI"
           done
@@ -267,6 +271,7 @@ jobs:
           python3 apple/scripts/prepare-figma-ui.py
           node apple/scripts/prepare-notewise-profiles.mjs
           python3 apple/scripts/prepare-notewise-model.py
+          python3 -m unittest discover -s apple/scripts -p test_notewise_model_patch.py
           python3 apple/scripts/prepare-release-features.py --check
       - name: Generate Xcode project
         working-directory: apple
@@ -301,7 +306,36 @@ jobs:
             -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 360 \
-            NOTELITE_SIM_SWIFT_PATH= NOTELITE_LIVE_ACCOUNT_ACCEPTANCE=1 CODE_SIGNING_ALLOWED=NO
+            NOTELITE_SIM_SWIFT_PATH= NOTELITE_LIVE_ACCOUNT_ACCEPTANCE=1 \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY=-
+      - name: Verify the actual simulator host signature and private Keychain identity
+        if: always() && steps.simulator.outputs.device_id != ''
+        env:
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p apple/Screenshots/native-diagnostics
+          app_bundle=$(xcrun simctl get_app_container "$DEVICE_ID" com.lucas0623z.yinban app)
+          codesign --verify --strict "$app_bundle"
+          codesign -d --entitlements :- "$app_bundle" \
+            > apple/Screenshots/native-diagnostics/simulator-host-entitlements.plist
+          python3 - <<'PY'
+          import json, plistlib
+          from pathlib import Path
+          directory = Path('apple/Screenshots/native-diagnostics')
+          entitlements = plistlib.loads((directory / 'simulator-host-entitlements.plist').read_bytes())
+          identifier = 'G74YSFJX76.com.lucas0623z.yinban'
+          assert entitlements.get('application-identifier') == identifier, 'Simulator host lacks its normal application Keychain identity.'
+          groups = entitlements.get('keychain-access-groups', [])
+          assert isinstance(groups, list) and all(value == identifier for value in groups), 'Unexpected simulator Keychain sharing group.'
+          assert not entitlements.get('com.apple.security.application-groups'), 'Unexpected simulator application sharing group.'
+          (directory / 'simulator-host-signature.json').write_text(json.dumps({
+              'signatureVerified': True, 'applicationIdentifier': identifier,
+              'applicationPrivateKeychainIdentityVerified': True,
+              'keychainSharingExpanded': False, 'distributionCertificateUsed': False,
+              'actualKeychainLifecycle': 'Requires the separate live native XCTest result.'
+          }, indent=2) + '\n')
+          PY
       - name: Export simulator Figma event diagnostics
         if: always()
         continue-on-error: true

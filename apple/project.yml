@@ -33,6 +33,8 @@ targets:
         buildPhase: resources
       - path: NoteWiseModels/MODEL-LOCK.json
         buildPhase: resources
+      - path: NoteWiseModels/DIVIDE-NO-NAN-PATCH.json
+        buildPhase: resources
       - path: ../app/res/practice
         type: folder
         buildPhase: resources
@@ -64,6 +66,7 @@ targets:
       - sdk: AVKit.framework
       - sdk: CryptoKit.framework
       - sdk: CoreML.framework
+      - sdk: Accelerate.framework
       - sdk: ImageIO.framework
   NoteLiteMac:
     type: application
@@ -84,6 +87,8 @@ targets:
       - path: NoteWiseModels/BASIC-PITCH-LICENSE
         buildPhase: resources
       - path: NoteWiseModels/MODEL-LOCK.json
+        buildPhase: resources
+      - path: NoteWiseModels/DIVIDE-NO-NAN-PATCH.json
         buildPhase: resources
       - path: ../app/res/practice
         type: folder
@@ -119,6 +124,7 @@ targets:
       - sdk: AVKit.framework
       - sdk: CryptoKit.framework
       - sdk: CoreML.framework
+      - sdk: Accelerate.framework
       - sdk: ImageIO.framework
   NoteLiteTests:
     type: bundle.unit-test

@@ -201,6 +201,7 @@ for name, original in (
     ('NoteWiseProfiles.json', repo / 'apple/NoteLite/NoteWiseProfiles.json'),
     ('BASIC-PITCH-LICENSE', repo / 'apple/NoteWiseModels/BASIC-PITCH-LICENSE'),
     ('MODEL-LOCK.json', repo / 'apple/NoteWiseModels/MODEL-LOCK.json'),
+    ('DIVIDE-NO-NAN-PATCH.json', repo / 'apple/NoteWiseModels/DIVIDE-NO-NAN-PATCH.json'),
     ('THIRD-PARTY.txt', repo / 'apple/NoteWiseModels/THIRD-PARTY.txt'),
 ):
     installed = app / name

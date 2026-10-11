@@ -1,8 +1,18 @@
 NoteWise uses Spotify Basic Pitch 0.4.0's ICASSP 2022 CoreML model for optional local post-recording polyphonic transcription.
 Copyright 2022 Spotify AB. Licensed under Apache License, Version 2.0.
-The original model bytes and upstream license are preserved. BASIC-PITCH-LICENSE contains the full license.
+The original learned weights and upstream license are preserved. BASIC-PITCH-LICENSE contains the full license.
 Upstream: https://github.com/spotify/basic-pitch/tree/v0.4.0
 The package hashes and model input/output contract are recorded in MODEL-LOCK.json.
+
+Local model graph modification (2026 NoteLite contributors): tf-divide-no-nan-coreml5-v1.
+The upstream CoreML conversion replaced TensorFlow divide_no_nan with an unguarded real_div.
+This repair restores exactly zero output when its denominator is exactly zero; all nonzero
+division, learned weights, neural activation thresholds and other original operations remain unchanged.
+No epsilon or amplitude threshold is introduced. The locked original operation and exact
+reversible patch are documented in DIVIDE-NO-NAN-PATCH.json and apple/scripts/patch-notewise-coreml.py.
+Original TF source: https://github.com/spotify/basic-pitch/blob/v0.4.0/basic_pitch/layers/signal.py#L157-L168
+The original official model SHA256 is retained, and the patch can reconstruct its exact bytes offline.
+The local graph repair is licensed under Apache License, Version 2.0.
 
 NoteWiseBasicPitchDecoder.swift adapts the upstream note_creation.py decoding rules and constants for Swift.
 The Swift port is a modified work. Copyright 2026 NoteLite contributors.

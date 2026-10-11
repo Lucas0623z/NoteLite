@@ -146,10 +146,77 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
         XCTAssertGreaterThan(diagnostics.audioPeakAbsolute, 0)
         XCTAssertGreaterThan(diagnostics.audioRMS, 0)
         XCTAssertFalse(diagnostics.digitalSilenceConstraintApplied, "Digital-zero filtering cannot make the noise regression pass")
-        XCTAssertEqual(diagnostics.decodedNotesBeforeAudioConstraint, 0, "Non-musical dither must not produce raw musical events")
+        // Upstream normalizes any nonzero noise. The actual e1ac regression
+        // recorded six raw candidates, not six heard musical events. Preserve
+        // their count; only independent PCM evidence can qualify a performance.
+        XCTAssertEqual(diagnostics.signalQualifiedNotes, 0)
+        XCTAssertEqual(diagnostics.unresolvedCandidates, 0)
+        XCTAssertEqual(diagnostics.broadbandCandidatesRejected, diagnostics.decodedNotesBeforeAudioConstraint)
         XCTAssertTrue(actual.notes.isEmpty, "Quiet non-musical noise must not manufacture performance notes")
         XCTAssertTrue(actual.uncertaintyIntervals.isEmpty)
         XCTAssertEqual(actual.durationMs, 6000, accuracy: 1)
+    }
+
+    func testActualBundledCoreMLSoftChordAndReattackSurviveAcousticQualification() async throws {
+        let recording = try syntheticRecording(signal: .softMusic)
+        defer { try? FileManager.default.removeItem(at: recording) }
+        let transcriber = NoteWisePolyphonicTranscriber()
+        let actual = try await transcriber.transcribe(recordingURL: recording)
+        let diagnostics = try attachDiagnostics(transcriber, name: "NoteWise-actual-CoreML-soft-music-diagnostics")
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0)
+        XCTAssertFalse(diagnostics.digitalSilenceConstraintApplied)
+        XCTAssertGreaterThan(diagnostics.audioNonzeroSampleCount, 0)
+        XCTAssertGreaterThan(diagnostics.signalQualifiedNotes, 0)
+        // Same musical fixture at 1/100 amplitude (-40 dB). A loudness cutoff
+        // would discard it; spectral ratios must retain all original attacks.
+        for (pitch, onset) in [(60, 1000.0), (64, 1000), (67, 1000), (62, 3000), (60, 4500)] {
+            XCTAssertTrue(actual.notes.contains { $0.midi == pitch && abs($0.onsetMs - onset) < 150 },
+                "Soft actual MIDI \(pitch) near \(onset) ms must remain detectable: \(actual.notes)")
+        }
+        XCTAssertTrue(actual.notes.allSatisfy { $0.centsEvidence == "coarse-basic-pitch-contour" })
+        let attachment = XCTAttachment(data: try JSONEncoder().encode(actual), uniformTypeIdentifier: "public.json")
+        attachment.name = "NoteWise-actual-CoreML-soft-chord-and-reattack"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testActualBundledCoreMLLoudBroadbandNoiseHasNoPerformanceNotes() async throws {
+        let recording = try syntheticRecording(signal: .loudNoise)
+        defer { try? FileManager.default.removeItem(at: recording) }
+        let transcriber = NoteWisePolyphonicTranscriber()
+        let actual = try await transcriber.transcribe(recordingURL: recording)
+        let diagnostics = try attachDiagnostics(transcriber, name: "NoteWise-actual-CoreML-loud-noise-diagnostics")
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0)
+        XCTAssertFalse(diagnostics.digitalSilenceConstraintApplied)
+        XCTAssertGreaterThan(diagnostics.audioNonzeroSampleCount, 0)
+        XCTAssertEqual(diagnostics.signalQualifiedNotes, 0)
+        XCTAssertEqual(diagnostics.unresolvedCandidates, 0)
+        XCTAssertEqual(diagnostics.broadbandCandidatesRejected, diagnostics.decodedNotesBeforeAudioConstraint)
+        XCTAssertTrue(actual.notes.isEmpty, "Increasing broadband-noise amplitude must not make it musical")
+        XCTAssertTrue(actual.uncertaintyIntervals.isEmpty)
+    }
+
+    func testAcousticEvidenceIsGainInvariantAndRejectsWrongPitchCandidates() throws {
+        let sampleRate = NoteWiseBasicPitchDecoder.sampleRate
+        let tone = (0..<sampleRate).map { Float(sin(2 * Double.pi * 440 * Double($0) / Double(sampleRate))) }
+        let correct = NoteWiseRecordedNote(id: "synthetic-correct", midi: 69, modelMIDI: 69,
+            onsetMs: 200, offsetMs: 800, durationMs: 600, confidence: 0.8, cents: 0,
+            centsEvidence: "coarse-basic-pitch-contour", releaseReliable: true)
+        let wrong = NoteWiseRecordedNote(id: "synthetic-wrong", midi: 70, modelMIDI: 70,
+            onsetMs: 200, offsetMs: 800, durationMs: 600, confidence: 0.99, cents: 0,
+            centsEvidence: "coarse-basic-pitch-contour", releaseReliable: true)
+        let raw = NoteWiseRecordedTranscription(notes: [correct, wrong], uncertaintyIntervals: [],
+            sampleRate: sampleRate, sampleCount: tone.count, durationMs: 1000, tuning: 440,
+            modelVersion: "0.4.0", detectorVersion: "basic-pitch-coreml-0.4.0",
+            supportedPitchRange: ["minimumMIDI": 21, "maximumMIDI": 108], warnings: [])
+        for gain in [Float(1), 0.01, 0.000001] {
+            let actual = try NoteWiseAcousticEvidence(audio: tone.map { $0 * gain }).qualify(raw)
+            XCTAssertEqual(actual.notes.map(\.id), [correct.id])
+            XCTAssertEqual(actual.unresolvedCandidates, 1)
+            XCTAssertEqual(actual.uncertainty.count, 1, "Unsupported tonal candidates must remain pending")
+        }
+        XCTAssertThrowsError(try NoteWiseAcousticEvidence(audio: tone).qualify(raw,
+            checkCancellation: { throw CancellationError() })) { XCTAssertTrue($0 is CancellationError) }
     }
 
     private func attachDiagnostics(_ transcriber: NoteWisePolyphonicTranscriber,
@@ -162,7 +229,7 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
         return diagnostics
     }
 
-    private enum SyntheticSignal { case music, digitalSilence, quietDither }
+    private enum SyntheticSignal { case music, softMusic, digitalSilence, quietDither, loudNoise }
 
     private func syntheticRecording(signal: SyntheticSignal) throws -> URL {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("notewise-synthetic-\(UUID().uuidString).wav")
@@ -178,15 +245,15 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
         for index in 0..<Int(buffer.frameLength) {
             let time = Double(index) / 44100
             var value: Double = 0
-            if signal == .quietDither {
+            if signal == .quietDither || signal == .loudNoise {
                 // Seeded triangular 16-bit quantization-scale noise, without a
                 // deterministic musical tone. No microphone or private recording.
                 noiseState = noiseState &* 1664525 &+ 1013904223
                 let left = Int(noiseState >> 16)
                 noiseState = noiseState &* 1664525 &+ 1013904223
                 let right = Int(noiseState >> 16)
-                value = Double(left - right) / 65536 * (2.0 / 32768)
-            } else if signal == .music {
+                value = Double(left - right) / 65536 * (signal == .loudNoise ? 0.5 : 2.0 / 32768)
+            } else if signal == .music || signal == .softMusic {
                 for (start, duration, pitches) in attacks {
                     let elapsed = time - start
                     guard elapsed >= 0 && elapsed < duration else { continue }
@@ -196,6 +263,7 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
                         value += envelope * (sin(angle) + 0.25 * sin(2 * angle) + 0.1 * sin(3 * angle)) * 0.16
                     }
                 }
+                if signal == .softMusic { value *= 0.01 }
             }
             samples[index] = Float(min(1, max(-1, value)))
         }

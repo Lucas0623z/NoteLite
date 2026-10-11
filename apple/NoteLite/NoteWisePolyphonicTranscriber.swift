@@ -26,6 +26,11 @@ struct NoteWiseTranscriptionDiagnostics: Codable, Sendable {
     let maximumContourActivation: Float
     let decodedNotesBeforeAudioConstraint: Int
     let digitalSilenceConstraintApplied: Bool
+    let signalQualifiedNotes: Int
+    let broadbandCandidatesRejected: Int
+    let unresolvedCandidates: Int
+    let spectralFramesExamined: Int
+    let maximumSpectralConcentration: Double
 }
 
 /// The shipped CoreML model, PCM conversion and decoder all run on one native
@@ -38,9 +43,10 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
     private var model: MLModel?
     private let diagnosticLock = NSLock()
     private var diagnosticValue: NoteWiseTranscriptionDiagnostics?
-    // The pinned model produced strong note priors on digital zero with .all
-    // on both iOS CI devices. Use CPU execution and require strict native
-    // silence/noise/music regressions; retain explicit backend comparisons.
+    // Backend selection alone did not fix the observed upstream division bug.
+    // The bundled graph restores TF zero-safe semantics; actual PCM separately
+    // qualifies neural candidates. CPU is the reproducible default, with .all
+    // retained for genuine same-input numerical regression comparisons.
     init(bundle: Bundle = .main, computeUnits: MLComputeUnits = .cpuOnly) {
         self.bundle = bundle
         self.computeUnits = computeUnits
@@ -90,12 +96,16 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
                             minimumMIDI: minimumMIDI, maximumMIDI: maximumMIDI,
                             checkCancellation: { try cancellation.check() })
                         let digitalSilence = nonzeroSamples == 0
-                        let result = digitalSilence ? NoteWiseRecordedTranscription(notes: [], uncertaintyIntervals: [],
+                        let acoustic = try NoteWiseAcousticEvidence(audio: audio).qualify(decoded,
+                            checkCancellation: { try cancellation.check() })
+                        let result = NoteWiseRecordedTranscription(notes: digitalSilence ? [] : acoustic.notes,
+                            uncertaintyIntervals: digitalSilence ? [] : acoustic.uncertainty,
                             sampleRate: decoded.sampleRate, sampleCount: decoded.sampleCount,
                             durationMs: decoded.durationMs, tuning: decoded.tuning,
                             modelVersion: decoded.modelVersion, detectorVersion: decoded.detectorVersion,
                             supportedPitchRange: decoded.supportedPitchRange,
-                            warnings: decoded.warnings + ["录音为数字静音，没有可听见的音乐事件。"]) : decoded
+                            warnings: decoded.warnings + (digitalSilence ? ["录音为数字静音，没有可听见的音乐事件。"] :
+                                (acoustic.unresolvedCandidates > 0 ? ["部分模型候选缺少稳定音高的录音证据，已标为待复核。"] : [])))
                         let requestedUnits: String
                         switch computeUnits {
                         case .all: requestedUnits = "all"
@@ -112,7 +122,12 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
                             maximumOnsetActivation: values.onsets.max() ?? 0,
                             maximumContourActivation: values.contour.max() ?? 0,
                             decodedNotesBeforeAudioConstraint: decoded.notes.count,
-                            digitalSilenceConstraintApplied: digitalSilence))
+                            digitalSilenceConstraintApplied: digitalSilence,
+                            signalQualifiedNotes: acoustic.notes.count,
+                            broadbandCandidatesRejected: acoustic.broadbandCandidatesRejected,
+                            unresolvedCandidates: acoustic.unresolvedCandidates,
+                            spectralFramesExamined: acoustic.spectralFramesExamined,
+                            maximumSpectralConcentration: acoustic.maximumSpectralConcentration))
                         try cancellation.check()
                         continuation.resume(returning: result)
                     } catch { continuation.resume(throwing: error) }
