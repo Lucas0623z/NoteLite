@@ -345,6 +345,90 @@ class PracticeAnalysisTests(unittest.TestCase):
         self.assertEqual(second["generationStatus"], "completed")
         self.assertEqual(len(provider.calls), 2)
 
+    def test_19_precise_value_requires_its_cited_fact_not_another_input_fact(self):
+        event = self.event({"status": "analysed", "source": "client-reported", "errors": [{"type": "wrong", "noteId": "n" + str(index)} for index in range(4)]}, mode="follow")
+        def wrong_citation(out, data):
+            return {**out, "observations": [{"title": "当前样本的计时", "description": "当前样本记录时长为30秒。", "factIds": ["wrong-client-count"]}]}
+        provider = Provider(wrong_citation)
+        self.server.practice_analysis = module.PracticeAnalysis(self.store, provider)
+        body = self.body([event])
+        result = self.request(body)[1]
+        self.assertEqual(result["generationStatus"], "fallback")
+        self.assertTrue(result["retryAllowed"])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM practice_analysis_v2_cache").fetchone()[0], 0)
+        self.assertEqual(self.request(body)[1]["generationStatus"], "fallback")
+        self.assertEqual(len(provider.calls), 1)
+        # Both the exact value and its actual cited fact are now present.
+        provider.change = lambda out, data: {**out, "observations": [{"title": "计时已有记录", "description": "记录时长为30秒。", "factIds": ["practice-investment"]}]}
+        self.assertEqual(self.request(self.body([event]))[1]["generationStatus"], "completed")
+        # Summary/limitations may describe the whole selected fact snapshot.
+        prepared = self.analyzer.input(self.identities[0]["userId"], [event])["modelInput"]
+        legal = valid_output(prepared)
+        legal["summary"] = "当前样本记录时长为30秒，包含4项客户端错误标记。"
+        module.validate_output(legal, prepared)
+
+    def test_20_timer_only_summary_cannot_silently_upgrade_to_strength_or_progress(self):
+        event = self.event()
+        provider = Provider(lambda out, data: {**out, "summary": "你的音准已成为稳定强项，演奏能力持续进步。"})
+        self.server.practice_analysis = module.PracticeAnalysis(self.store, provider)
+        body = self.body([event])
+        result = self.request(body)[1]
+        self.assertEqual(result["generationStatus"], "fallback")
+        self.assertEqual(result["summarySource"], "program")
+        self.assertIn("文字分析暂未生成", result["output"]["summary"])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM practice_analysis_v2_cache").fetchone()[0], 0)
+        provider.change = None
+        repaired = self.request(self.body([event]))[1]
+        self.assertEqual(repaired["generationStatus"], "completed")
+        self.assertEqual(repaired["summarySource"], "program")
+        self.assertEqual(repaired["output"]["summary"], module.LIMITED_SUMMARIES["investment_only"])
+
+
+class OutputClaimBoundaryTests(unittest.TestCase):
+    def test_limited_feedback_allows_negation_future_checks_and_projects_summary(self):
+        prepared = synthetic_input()
+        for text in (
+            "不能据此判断音准是否稳定或技术进步。",
+            "这是投入记录，不代表演奏质量或技术改善。",
+            "稳定强弱项与进步结论暂不可判定。",
+            "待补充演奏分析后再观察强弱项。",
+            "下一次复测时观察演奏能力是否进步。",
+        ):
+            with self.subTest(text=text):
+                legal = valid_output(prepared)
+                legal["summary"] = "练习投入已有记录，演奏尚未分析。"
+                legal["observations"][0]["description"] = text
+                legal["suggestions"] = [{"title": "补充可分析记录", "action": text, "successCheck": "后续记录包含可复核的演奏结果。", "factIds": ["synthetic-timer"]}]
+                projected = module.validate_output(legal, prepared)
+                self.assertEqual(projected["summary"], module.LIMITED_SUMMARIES["investment_only"])
+                self.assertEqual(projected["suggestions"], legal["suggestions"])
+                self.assertNotEqual(legal["summary"], projected["summary"])
+        no_data = {**prepared, "reportStatus": "no_usable_data", "facts": []}
+        self.assertEqual(module.validate_output(valid_output(no_data), no_data)["summary"], module.LIMITED_SUMMARIES["no_usable_data"])
+        invalid = {**valid_output(no_data), "summary": "你的演奏能力持续进步。"}
+        with self.assertRaises(ValueError):
+            module.validate_output(invalid, no_data)
+
+    def test_limited_observations_and_suggestions_reject_explicit_capability_upgrades(self):
+        prepared = synthetic_input()
+        for text in (
+            "你的音准已成为稳定强项。",
+            "演奏能力持续进步。",
+            "你的节奏表现一直稳定。",
+            "不能判断技巧强弱，但你的能力已经提升。",
+        ):
+            for group in ("observations", "suggestions"):
+                with self.subTest(text=text, group=group):
+                    invalid = valid_output(prepared)
+                    if group == "observations":
+                        invalid[group][0]["description"] = text
+                    else:
+                        invalid[group] = [{"title": "练习建议", "action": text, "successCheck": "保留记录。", "factIds": ["synthetic-timer"]}]
+                    with self.assertRaises(ValueError):
+                        module.validate_output(invalid, prepared)
+
 
 class ProviderTransportTests(unittest.TestCase):
     def test_json_mode_configured_prompt_complete_check_and_safe_single_call(self):

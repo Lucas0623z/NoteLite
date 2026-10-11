@@ -19,7 +19,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPSHand
 CONTRACTS = Path(__file__).parent / "contracts/practice-record-analysis"
 AGGREGATE_VERSION = "2.0-account-1"
 MAPPING_VERSION = "account-history-1"
-CLAIM_RULES_VERSION = "counts-only-no-opportunities-1"
+CLAIM_RULES_VERSION = "counts-only-scoped-text-and-investment-summary-2"
 SELECTION_VERSION = "all-selected-counts-fixed-category-order-1"
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
 MAX_INPUT_BYTES = 16 * 1024
@@ -128,12 +128,66 @@ def validate_input(value, evidence_index, schema):
     return value
 
 
-def validate_output(value, input_value, schema=None):
+LIMITED_SUMMARIES = {
+    "investment_only": "本次可回顾已记录的练习投入，现有演奏证据不足以判断技术强弱项或进步。",
+    "no_usable_data": "本次没有可用于投入或演奏反馈的事实，请补充可分析记录后再查看。",
+}
+
+
+def unsupported_capability_assertion(content):
+    """Catch explicit capability upgrades in timer-only/no-data feedback.
+
+    This is a bounded language guard, not proof of arbitrary text semantics.
+    Negations and proposed later checks are allowed within their own clause;
+    they cannot excuse a separate affirmative clause after punctuation.
+    """
+    claim = re.compile(
+        r"稳定(?:强项|弱项)|强弱项|(?:已(?:经)?|成为|属于|是|具备|形成|表现出).{0,8}(?:强项|弱项)|"
+        r"(?:音准|音高|节奏|演奏(?:能力|水平|表现|质量)?|弹奏|技巧|技术|能力|水平).{0,16}"
+        r"(?:稳定|准确|正确|优秀|良好|突出|糟糕|改善|提高|提升|进步|退步)|"
+        r"(?:已(?:经)?|持续|明显|显著|不断|取得|有了|正在).{0,8}(?:进步|提高|提升|改善)|"
+        r"(?:stable\s+(?:strength|weakness)|(?:pitch|rhythm|ability|technique).{0,20}(?:improved|improvement|accurate|stable))",
+        re.IGNORECASE,
+    )
+    qualification = re.compile(
+        r"不能|不可|无法|不足以|尚不能|暂不|未能|"
+        r"尚未(?:证明|确认|认定|判断|评估)|未(?:被)?(?:证明|确认|认定|判断|评估)|"
+        r"不(?:意味着|等于|证明|代表|说明|属于|是)|并非|"
+        r"没有(?:足够|可靠|明确|可用)?(?:依据|证据)|"
+        r"待|如果|若|后续|未来|下一次|之后|复测|是否|可能|有待|后再|"
+        r"需要(?:确认|判断|复核|核对|观察|比较|评估)|再(?:观察|比较|评估|判断)|"
+        r"以便(?:观察|比较|评估|判断)|"
+        r"\b(?:not|cannot|can't|unknown|unavailable|unverified|whether|future|later)\b",
+        re.IGNORECASE,
+    )
+    negative_tail = re.compile(r"^[^，,。；;！？!?]{0,20}(?:暂(?:时)?不(?:可|能)|不可|不能|无法|尚未|未知|暂无|尚无|未(?:获|经)?(?:证实|确认|证明|评估)|需(?:要)?(?:复核|核对|评估|确认|判断))")
+    for clause in re.split(r"[，,。；;！？!?\n]|但是|然而|不过|但|却|\bbut\b", content, flags=re.IGNORECASE):
+        for match in claim.finditer(clause):
+            if not qualification.search(clause[:match.end()]) and not negative_tail.search(clause[match.end():]):
+                return True
+    return False
+
+
+def validate_fact_text(content, referenced):
+    factual_text = " ".join(str(f[key] or "") for f in referenced for key in ("statement", "displayValue", "scope", "label"))
+    allowed_numbers = set(re.findall(r"\d+(?:\.\d+)?", factual_text))
+    unit_pattern = r"\d+(?:\.\d+)?\s*(?:%|秒|分钟|小时|次|条|项|BPM|bpm|拍)"
+    allowed_units = {re.sub(r"\s", "", v) for v in re.findall(unit_pattern, factual_text)}
+    if any(v not in allowed_numbers for v in re.findall(r"\d+(?:\.\d+)?", content)) or any(re.sub(r"\s", "", v) not in allowed_units for v in re.findall(unit_pattern, content)):
+        raise ValueError("Precise value missing from cited facts")
+    for theory in re.findall(r"(?:大|小|增|减)[二三四五六七八九十]度|最高失败率|失败概率最高|手型错误|用力错误|疲劳导致|耐力很好|已经形成习惯|技术明显改善", content):
+        if theory not in factual_text:
+            raise ValueError("Unsupported theory/ranking/cause")
+    if re.search(r"(?:听过|听完|听了|聆听了).*(?:音频|录音)|(?:录音|音频).*(?:已经听过|已听完)", content):
+        raise ValueError("Audio was not supplied")
+
+
+def validate_output(value, input_value, schema=None, *, project_summary=True):
     validate_schema(value, contracts()[1] if schema is None else schema)
     if value["status"] != input_value["reportStatus"]:
         raise ValueError("Model changed report coverage")
     facts = {fact["factId"]: fact for fact in input_value["facts"]}
-    texts = [value["summary"], *value["limitations"]]
+    texts = [(content, list(facts.values())) for content in (value["summary"], *value["limitations"])]
     for group in ("observations", "weaknesses", "strengths", "progress", "pendingReview", "suggestions"):
         for item in value[group]:
             if any(key not in facts for key in item["factIds"]):
@@ -153,24 +207,20 @@ def validate_output(value, input_value, schema=None):
                     raise ValueError("Provisional claim lost its qualification")
             elif any(f["claimState"] == "unavailable" for f in referenced):
                 raise ValueError("Suggestion without usable evidence")
-            texts.extend(item[key] for key in item if key != "factIds")
+            texts.extend((item[key], referenced) for key in item if key != "factIds")
     usable = {f["factId"] for f in facts.values() if f["kind"] in {"practice_investment", "performance_observation"} and f["claimState"] in {"verified_fact", "provisional_pattern"}}
     if usable and not any(usable.intersection(item["factIds"]) for item in value["observations"]):
         raise ValueError("Missing constructive observation")
     if any(f["claimState"] == "unavailable" for f in facts.values()) and not value["limitations"]:
         raise ValueError("Unavailable dimensions lost their limitations")
-    factual_text = " ".join(str(f[key] or "") for f in facts.values() for key in ("statement", "displayValue", "scope", "label"))
-    allowed_numbers = set(re.findall(r"\d+(?:\.\d+)?", factual_text))
-    unit_pattern = r"\d+(?:\.\d+)?\s*(?:%|秒|分钟|小时|次|条|项|BPM|bpm|拍)"
-    allowed_units = {re.sub(r"\s", "", v) for v in re.findall(unit_pattern, factual_text)}
-    for content in texts:
-        if any(v not in allowed_numbers for v in re.findall(r"\d+(?:\.\d+)?", content)) or any(re.sub(r"\s", "", v) not in allowed_units for v in re.findall(unit_pattern, content)):
-            raise ValueError("Invented or converted precise value")
-        for theory in re.findall(r"(?:大|小|增|减)[二三四五六七八九十]度|最高失败率|失败概率最高|手型错误|用力错误|疲劳导致|耐力很好|已经形成习惯|技术明显改善", content):
-            if theory not in factual_text:
-                raise ValueError("Unsupported theory/ranking/cause")
-        if re.search(r"(?:听过|听完|听了|聆听了).*(?:音频|录音)|(?:录音|音频).*(?:已经听过|已听完)", content):
-            raise ValueError("Audio was not supplied")
+    for content, referenced in texts:
+        validate_fact_text(content, referenced)
+        if input_value["reportStatus"] in LIMITED_SUMMARIES and unsupported_capability_assertion(content):
+            raise ValueError("Investment/no-data text asserted musical capability")
+    # Validate the model's text before projecting: rejected assertions must use
+    # fallback, not become a supposedly successful report by silently removing it.
+    if project_summary and input_value["reportStatus"] in LIMITED_SUMMARIES:
+        return {**value, "summary": LIMITED_SUMMARIES[input_value["reportStatus"]]}
     return value
 
 
@@ -348,11 +398,11 @@ class PracticeAnalysis:
             elif fact["claimState"] == "pending_review" and len(pending) < 4:
                 pending.append(item)
         output = {"schemaVersion": "2.0", "status": prepared["modelInput"]["reportStatus"], "summary": "文字分析暂未生成，可稍后重试。已核对的记录汇总继续保留。" if retry_allowed else "文字分析请求结果尚未确认，已保留记录汇总；同次请求不会再次调用分析服务。", "observations": observations, "weaknesses": [], "strengths": [], "progress": [], "pendingReview": pending, "suggestions": [], "limitations": prepared["modelInput"]["coverage"]["limitations"] + ["本次显示程序汇总事实，没有生成成功的文字解释。"]}
-        validate_output(output, prepared["modelInput"], self.output_schema)
+        validate_output(output, prepared["modelInput"], self.output_schema, project_summary=False)
         return self.envelope(prepared, request_id, output, "fallback", False, retry_allowed)
 
     def envelope(self, prepared, request_id, output, state, cached, retry_allowed=False):
-        return {"id": request_id, "output": output, "facts": prepared["modelInput"]["facts"], "scope": prepared["scope"], "evidenceIndex": prepared["evidenceIndex"], "metrics": prepared["metrics"], "provider": "DeepSeek", "model": self.fingerprint["model"], "generationStatus": state, "cached": cached, "retryAllowed": retry_allowed}
+        return {"id": request_id, "output": output, "facts": prepared["modelInput"]["facts"], "scope": prepared["scope"], "evidenceIndex": prepared["evidenceIndex"], "metrics": prepared["metrics"], "provider": "DeepSeek", "model": self.fingerprint["model"], "generationStatus": state, "summarySource": "program" if state != "completed" or output["status"] in LIMITED_SUMMARIES else "model", "cached": cached, "retryAllowed": retry_allowed}
 
     def analyse(self, user_id, request_id, event_ids=None):
         if not isinstance(request_id, str) or not UUID_RE.fullmatch(request_id):

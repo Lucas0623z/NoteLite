@@ -466,25 +466,66 @@ final class FigmaShellUITests: XCTestCase {
     @MainActor
     private func makeHittable(_ element: XCUIElement, in app: XCUIApplication, upward: Bool = true) {
         #if os(iOS)
-        for _ in 0..<5 where !element.isHittable {
-            if upward { app.webViews.firstMatch.swipeUp() }
-            else { app.webViews.firstMatch.swipeDown() }
-        }
+        scrollIOSControlIntoView(element, in: app, preferredUpward: upward)
         #endif
     }
 
     @MainActor
     private func makeInteractionHittable(_ element: XCUIElement, in app: XCUIApplication,
                                         upward: Bool = true) {
+        #if os(iOS)
+        scrollIOSControlIntoView(element, in: app, preferredUpward: upward)
+        #else
         for _ in 0..<12 where !element.isHittable {
-            #if os(iOS)
-            if upward { app.webViews.firstMatch.swipeUp() }
-            else { app.webViews.firstMatch.swipeDown() }
-            #else
             app.webViews.firstMatch.scroll(byDeltaX: 0, deltaY: upward ? -420 : 420)
-            #endif
         }
+        #endif
     }
+
+    #if os(iOS)
+    @MainActor
+    private func scrollIOSControlIntoView(_ element: XCUIElement, in app: XCUIApplication,
+                                         preferredUpward: Bool) {
+        let web = app.webViews.firstMatch
+        // The real iPhone failure recording shows whole-view swipes passing
+        // C4/D4 and stopping at E4/F4. Inspect each new AX frame and reverse
+        // when needed. Drag inside the target column so nested scrolling can
+        // receive the same touch a user would make, without JS or layout edits.
+        for _ in 0..<12 where !element.isHittable {
+            let webFrame = web.frame
+            let viewport = webFrame.intersection(app.frame)
+            guard !viewport.isNull, !viewport.isEmpty,
+                  viewport.width > 40, viewport.height > 60 else { break }
+            let target = element.frame
+            let hasFrame = !target.isNull && !target.isEmpty && !target.isInfinite
+            let upward: Bool
+            if hasFrame && target.minY < viewport.minY + 16 {
+                upward = false
+            } else if hasFrame && target.maxY > viewport.maxY - 16 {
+                upward = true
+            } else {
+                upward = preferredUpward
+            }
+            let x = hasFrame ? min(max(target.midX, viewport.minX + viewport.width * 0.1),
+                                   viewport.maxX - viewport.width * 0.1) : viewport.midX
+            let high = viewport.minY + viewport.height * 0.3
+            let low = viewport.minY + viewport.height * 0.7
+            let start = web.coordinate(withNormalizedOffset: CGVector(
+                dx: (x - webFrame.minX) / webFrame.width,
+                dy: ((upward ? low : high) - webFrame.minY) / webFrame.height))
+            let end = web.coordinate(withNormalizedOffset: CGVector(
+                dx: (x - webFrame.minX) / webFrame.width,
+                dy: ((upward ? high : low) - webFrame.minY) / webFrame.height))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
+        if !element.isHittable {
+            attachHierarchy(app, name: "Figma-control-scroll-exhausted-actual-hierarchy")
+            capture(app, name: "Figma-control-scroll-exhausted-actual-view")
+        }
+        // Callers still require isHittable and tap the actual element; reaching
+        // this limit never counts as successful selection or saved content.
+    }
+    #endif
 
     @MainActor
     private func selectHTMLValue(_ value: String, named label: String,
