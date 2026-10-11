@@ -23,7 +23,10 @@ struct FigmaShellView: View {
                 }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else { FigmaWebSurface(controller: controller) }
         }
+        #if os(iOS)
+        // The Figma page owns the iPhone/iPad safe-area insets itself.
         .ignoresSafeArea()
+        #endif
         .alert("确认操作", isPresented: $controller.showingJavaScriptDialog) {
             if controller.requiresConfirmation {
                 Button("取消", role: .cancel) { controller.finishJavaScriptDialog(false) }

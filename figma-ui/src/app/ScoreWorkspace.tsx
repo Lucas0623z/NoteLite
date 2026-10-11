@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import PracticeSession from "./PracticeSession";
-import { resolveOSMDConstructor } from "./osmd";
+import { createScoreRenderHost, resolveOSMDConstructor } from "./osmd";
 import { cancelNativeFileRequests, cloud, CloudError, downloadBlob, errorMessage, isNativeCloud, type CloudJob, type CloudNote, type NoteEdit } from "./cloud";
 import { RemoteScoreLoader } from "./remote-score";
 
@@ -120,36 +120,41 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
     const container = sheet.current;
     setSheetReady(false);
     if (!container || !notation || (!xml && xmlFile) || (!xml && !file)) return;
-    let live = true;
-    let display: import("opensheetmusicdisplay").OpenSheetMusicDisplay | undefined;
+    const host = createScoreRenderHost(container);
     let observer: ResizeObserver | undefined;
     setStatus("正在排版曲谱…");
     import("opensheetmusicdisplay").then(async (module) => {
-      if (!live) return;
+      if (!host.isActive()) return;
       const OpenSheetMusicDisplay = resolveOSMDConstructor(module);
-      display = new OpenSheetMusicDisplay(container, { autoResize: false, backend: "svg", drawTitle: true });
+      const display = new OpenSheetMusicDisplay(host.element, { autoResize: false, backend: "svg", drawTitle: true });
+      host.attach(display);
       const source = xmlFile ? new DOMParser().parseFromString(xml, "application/xml") : file!;
       if (source instanceof Document && (source.querySelector("parsererror") || source.documentElement.localName !== "score-partwise")) throw new Error("曲谱不是有效的 MusicXML。");
       await display.load(source);
-      if (!live) return;
+      if (!host.isActive()) { host.dispose(); return; }
       display.Zoom = zoom;
       display.render();
       setSheetReady(true);
       setStatus(job ? `曲谱已载入 · 校对版本 ${revision}${job.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}` : xmlFile ? "MusicXML 已载入 · 可从右侧选择音符校对" : "压缩曲谱已载入 · 上传至识谱服务后可校对并导出 MIDI");
-      let width = container.parentElement!.clientWidth;
+      const paper = container.parentElement!;
+      let width = paper.clientWidth;
       observer = new ResizeObserver(() => {
-        const nextWidth = container.parentElement!.clientWidth;
-        if (nextWidth !== width && live && display?.IsReadyToRender()) {
+        if (!host.isActive()) return;
+        const nextWidth = paper.clientWidth;
+        if (nextWidth !== width && display.IsReadyToRender()) {
           width = nextWidth;
           display.render();
         }
       });
-      observer.observe(container.parentElement!);
+      observer.observe(paper);
     }).catch((error) => {
+      const active = host.isActive();
+      observer?.disconnect();
+      host.dispose();
       console.error("MusicXML layout failed", error);
-      if (live) setStatus(`曲谱排版失败：${error instanceof Error ? error.message : String(error)}`);
+      if (active) { setSheetReady(false); setStatus(`曲谱排版失败：${error instanceof Error ? error.message : String(error)}`); }
     });
-    return () => { live = false; observer?.disconnect(); display?.clear(); };
+    return () => { host.dispose(); observer?.disconnect(); };
   }, [xml, notation, file, xmlFile, zoom, revision]);
 
   async function publishEdit(edits: NoteEdit[]) {

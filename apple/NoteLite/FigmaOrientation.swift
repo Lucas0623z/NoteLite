@@ -37,14 +37,22 @@ final class FigmaOrientationPolicy {
             previousOrientation = nil
         }
         window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: requested)) { [weak self] error in
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: requested)) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, generation == ticket else { return }
                 // A failed restore must still release the app's landscape lock.
                 lockedLandscape = mode == "restore" ? false : priorLock
                 previousOrientation = mode == "restore" ? nil : priorOrientation
                 window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-                onError?(error.localizedDescription)
+                let message: String
+                if mode == "restore" {
+                    message = "系统未能恢复原来的方向，请调整设备或窗口方向。"
+                } else if UIDevice.current.userInterfaceIdiom == .pad {
+                    message = "系统未能自动横屏。在窗口模式下，请切换为全屏或调整窗口为横向查看乐谱。"
+                } else {
+                    message = "系统未能自动横屏，请将设备转为横向查看乐谱。"
+                }
+                onError?(message)
             }
         }
         return ["mode": mode, "requested": true, "platform": "ios"]
