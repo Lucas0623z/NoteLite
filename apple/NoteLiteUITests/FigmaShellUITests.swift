@@ -121,16 +121,28 @@ final class FigmaShellUITests: XCTestCase {
         // Cancel is a real native picker path. Reopening immediately proves the
         // previous export released its continuation without waiting for JS timeout.
         let download = button("下载当前曲谱", in: app)
-        for _ in 0..<2 {
+        for attempt in 1...2 {
             XCTAssertTrue(download.waitForExistence(timeout: 10))
             download.tap()
             let englishCancel = app.buttons.matching(identifier: "Cancel").firstMatch
-            let cancel = englishCancel.waitForExistence(timeout: 2) ? englishCancel : app.buttons.matching(identifier: "取消").firstMatch
-            XCTAssertTrue(cancel.waitForExistence(timeout: 20), "The production export must open a native save window")
+            let chineseCancel = app.buttons.matching(identifier: "取消").firstMatch
+            // iPhone's system document browser can finish opening after two
+            // seconds. Continue checking both actual labels throughout the
+            // wait instead of choosing a locale before its controls exist.
+            let opened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                englishCancel.exists || chineseCancel.exists
+            }, object: app)
+            let openResult = XCTWaiter.wait(for: [opened], timeout: 30)
+            if openResult != .completed { attachHierarchy(app, name: "Figma-native-export-window-missing") }
+            XCTAssertEqual(openResult, .completed, "The production export must open a native save window")
+            let cancel = englishCancel.exists ? englishCancel : chineseCancel
+            capture(app, name: "Figma-native-export-window-\(attempt)")
             cancel.tap()
             let released = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: download)
             XCTAssertEqual(XCTWaiter.wait(for: [released], timeout: 10), .completed,
                            "Cancel must release the pending export and permit another export")
+            XCTAssertTrue(text("操作已取消。", in: app).waitForExistence(timeout: 10))
+            capture(app, name: "Figma-native-export-cancel-\(attempt)")
         }
         #if os(macOS)
         // Save on the third attempt, after the real two cancellations above.
@@ -167,7 +179,11 @@ final class FigmaShellUITests: XCTestCase {
         XCTAssertTrue(returnToEditing.waitForExistence(timeout: 10))
         returnToEditing.tap()
         XCTAssertTrue(text("曲谱预览与校对", in: app).waitForExistence(timeout: 10))
-        assertScoreRendered(app)
+        #if os(macOS)
+        assertScoreRendered(app, expectedFeedback: "文件已导出。")
+        #else
+        assertScoreRendered(app, expectedFeedback: "操作已取消。")
+        #endif
         close.tap()
         XCTAssertTrue(viewScore.waitForExistence(timeout: 10))
     }
@@ -230,7 +246,8 @@ final class FigmaShellUITests: XCTestCase {
     }
 
     @MainActor
-    private func assertScoreRendered(_ app: XCUIApplication) {
+    private func assertScoreRendered(_ app: XCUIApplication,
+                                     expectedFeedback: String = "MusicXML 已载入 · 可从右侧选择音符校对") {
         let rendered = app.webViews.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@ OR value == %@", "MusicXML 谱面", "MusicXML 谱面")).firstMatch
         XCTAssertTrue(rendered.waitForExistence(timeout: 60),
@@ -238,7 +255,7 @@ final class FigmaShellUITests: XCTestCase {
         // Compare the complete status directly. Indexed traversal can become
         // stale while WebKit updates an OSMD tree after returning from practice;
         // substring predicates over AXValue also throw on numeric SVG values.
-        let loaded = text("MusicXML 已载入 · 可从右侧选择音符校对", in: app)
+        let loaded = text(expectedFeedback, in: app)
         let loadedExists = loaded.waitForExistence(timeout: 20)
         if !loadedExists {
             let hierarchy = XCTAttachment(string: app.debugDescription)
@@ -247,7 +264,7 @@ final class FigmaShellUITests: XCTestCase {
             add(hierarchy)
             capture(app, name: "Figma-MusicXML-status-actual-view")
         }
-        XCTAssertTrue(loadedExists, "The score must finish real MusicXML layout")
+        XCTAssertTrue(loadedExists, "The rendered score must preserve the exact expected product feedback: \(expectedFeedback)")
         XCTAssertTrue(text("4 个音符 / 休止符", in: app).exists)
         let scoreHierarchy = XCTAttachment(string: app.debugDescription)
         scoreHierarchy.name = "Figma-rendered-score-actual-hierarchy"

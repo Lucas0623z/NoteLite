@@ -21,7 +21,7 @@ xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
 ```
 
-`apple/FigmaUI` 是生成目录，不提交 Git。XcodeGen 将它完整打包进 iOS/macOS 应用。WKWebView 只从 `notelite-ui://app` 读取这份本地资源，拒绝越界、外部符号链接及远程页面；文件导入内容不能获得原生接口。页面自己处理安全区，原生视图使用 `.ignoresSafeArea()` 与 `contentInsetAdjustmentBehavior = .never`，避免重复偏移。
+`apple/FigmaUI` 是生成目录，不提交 Git。XcodeGen 将它完整打包进 iOS/macOS 应用。WKWebView 只从 `notelite-ui://app` 读取这份本地资源，拒绝越界、外部符号链接及远程页面；文件导入内容不能获得原生接口。iPhone/iPad 的原生壳使用 `.ignoresSafeArea()` 与 `contentInsetAdjustmentBehavior = .never`，页面通过 `env(safe-area-inset-*)` 自己处理安全区，避免重复偏移。macOS 壳保留标题栏安全区，页面占满标题栏下的实际内容区，防止 WebView 延伸到标题栏下而被裁掉。
 
 `.github/workflows/apple-client.yml` 检查 runner 实际安装的稳定 Xcode，然后构建 iOS、Mac、无签名真机应用，运行保留的旧功能测试和新界面测试，保存截图。不以 Windows 浏览器截图声称 Apple 实机通过。
 
@@ -58,11 +58,11 @@ xcodebuild build -project NoteLite.xcodeproj -scheme NoteLite \
 
 ## 方向与验收边界
 
-iPhone/iPad 进入看谱或练习页面，网页经生产桥接请求本机横屏；退出时请求恢复进入前的界面方向。使用 iOS 16 的 UIWindowScene 几何 API 与 UIApplicationDelegate 的支持方向回调，没有私有 KVC 旋转。iPad 分屏或系统限制拒绝方向变更时，会返回 orientationError 事件，不能伪装旋转成功。Mac 按实际窗口宽高响应，方向请求不改变窗口。
+iPhone/iPad 进入看谱或练习页面，网页经生产桥接请求本机横屏；退出时请求恢复进入前的界面方向。使用 iOS 16 的 UIWindowScene 几何 API 与 UIApplicationDelegate 的支持方向回调，没有私有 KVC 旋转。iPad 分屏或窗口模式拒绝方向变更时，会返回 orientationError 事件并显示中文指引，不能伪装旋转成功。iPadOS 26 的窗口模式不保证接受自动旋转，应用不能通过公开 API 强制用户切换系统全屏模式。Mac 按实际窗口宽高响应，方向请求不改变窗口。
 
 Mac UI 测试另以 DEBUG 专用启动参数设置真实 AppKit 内容窗口为 1440×900 与 900×1440，核对 WKWebView 实際尺寸、窗口装饰高度和原生导航栏，保存窗口截图及 runner 屏幕尺寸。若 runner 显示器容不下整个竖向窗口，证据会明确记录，不能把截到的屏幕区域声称为完整竖向视觉验收。该参数不会修改生产窗口、CSS 或内容排版。
 
-`FigmaShellUITests` 在 Apple 模拟器运行正式“导入曲谱 → 载入示例曲谱 → 查看曲谱 → 返回”的界面流程，断言实际 MusicXML 排版成功、四个音符和应用重启后的本机读取，进入练习页检查未接入听音的提示，检查本机横屏及恢复，并保存实际屏幕截图；这些测试不运行云 OMR，也不使用假识谱。`CloudOMRTests` 使用明确标注的 URLProtocol 传输替身测试新 API、凭据与修改契约。服务器真实识谱/编辑验收另有实际 PNG/PDF 结果。
+`FigmaShellUITests` 使用两个独立用例。功能用例在 Apple 模拟器运行正式“导入曲谱 → 载入示例曲谱 → 查看曲谱 → 返回”的界面流程，断言实际 MusicXML 排版成功和四个完整音符控件，实际点击 D4 核对选中状态与音名字段 D，再切回 C4；重启后再次从本机读取示例，进入练习页检查未接入听音的提示，并保存真实屏幕截图。方向用例单独严格断言看谱及练习实际横屏、关闭恢复原方向；系统拒转时该用例继续失败，不遮住其他功能结果。这些测试不提交改音高、不运行云 OMR，也不使用假识谱。`CloudOMRTests` 使用明确标注的 URLProtocol 传输替身测试新 API、凭据与修改契约。服务器真实识谱/编辑验收另有实际 PNG/PDF 结果。
 
 本机导出会实际打开系统保存窗口并取消两次，确认可立即重新打开；Mac 第三次通过系统 Save 保存到测试临时目录，读取磁盘上的 MusicXML 并核对四个音符，结果作为附件保存。这不是带凭据的云导入取消／重试验收，后者还需实际配对的 Apple 设备验证。
 
