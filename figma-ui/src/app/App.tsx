@@ -1010,7 +1010,7 @@ function MusicAssistantPage({ isDark, history, owner, requests }: { isDark: bool
     try {
       const response = await account.analyzePractice(ids, requestId);
       if (current()) { setResult(response); setAnalysis(response.output.summary); }
-    } catch (error) { if (current()) { const changed = error instanceof CloudError && error.status === 409 && error.message.includes("版本已变化"); setStartNewAnalysis(changed); setAnalysis(`${errorMessage(error)}${changed ? "再次点击会按当前版本发起新的分析。" : "再次点击将继续使用同次请求标识。"}`); } }
+    } catch (error) { if (current()) { const changed = error instanceof CloudError && error.status === 409 && error.message.includes("版本已变化"); setStartNewAnalysis(changed); setAnalysis(changed ? "分析所依据的记录或规则已更新。再次点击会按当前版本发起新的分析。" : `${errorMessage(error)}再次点击将继续使用同次请求标识。`); } }
     finally { if (current()) setBusy(false); }
   }
 
