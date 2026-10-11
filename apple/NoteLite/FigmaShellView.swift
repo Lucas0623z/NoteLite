@@ -66,6 +66,28 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         // Preserve UI preferences locally; device credentials remain exclusively in Keychain.
         configuration.websiteDataStore = .default()
         configuration.userContentController.add(WeakCloudMessageHandler(self), name: "noteLiteCloud")
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--uitesting-figma") {
+            configuration.userContentController.add(WeakCloudMessageHandler(self), name: "noteLiteDiagnostics")
+            configuration.userContentController.addUserScript(WKUserScript(source: """
+                (() => {
+                  const post = (text) => window.webkit.messageHandlers.noteLiteDiagnostics.postMessage(text);
+                  const original = console.info.bind(console);
+                  console.info = (...args) => {
+                    original(...args);
+                    if (typeof args[0] === 'string' && args[0].startsWith('[NoteLite dialog]')) post(args[0].slice(0, 500));
+                  };
+                  for (const type of ['pointerdown', 'click']) {
+                    document.addEventListener(type, (event) => {
+                      if (event.target?.closest?.('button')?.getAttribute('aria-label') === '导入曲谱') post('[NoteLite dialog] import ' + type + ' captured');
+                    }, true);
+                  }
+                  window.addEventListener('error', () => post('[NoteLite dialog] JavaScript error observed'));
+                  window.addEventListener('unhandledrejection', () => post('[NoteLite dialog] Promise rejection observed'));
+                })();
+                """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        #endif
         if let root = Bundle.main.resourceURL?.appendingPathComponent("FigmaUI", isDirectory: true) {
             configuration.setURLSchemeHandler(FigmaResourceHandler(root: root), forURLScheme: FigmaResourceHandler.scheme)
         }
@@ -99,6 +121,19 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        #if DEBUG
+        if message.name == "noteLiteDiagnostics" {
+            guard message.frameInfo.isMainFrame,
+                  FigmaResourceHandler.isTrusted(message.frameInfo.request.url),
+                  FigmaResourceHandler.isTrusted(webView.url),
+                  let diagnostic = message.body as? String,
+                  diagnostic.hasPrefix("[NoteLite dialog]") else { return }
+            // The diagnostic protocol contains static event tags/booleans only,
+            // never filenames, account details, score XML or device credentials.
+            NSLog("%@", String(diagnostic.prefix(500)))
+            return
+        }
+        #endif
         guard message.frameInfo.isMainFrame,
               FigmaResourceHandler.isTrusted(message.frameInfo.request.url),
               FigmaResourceHandler.isTrusted(webView.url),

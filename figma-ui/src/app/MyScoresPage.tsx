@@ -6,6 +6,13 @@ import { cloud, CloudError, createUUID, errorMessage, isNativeCloud, nativeReque
 
 type Score = { id: string; name: string; format: string; file?: Blob; sample?: boolean; job?: CloudJob; removed?: boolean };
 type Panel = "import" | "rename" | "delete" | "view" | "practice" | "settings" | null;
+type DialogEvent = "mounted" | "unmounted" | "trigger-pointer-down" | "trigger-pointer-up" | "trigger-click" | "open-request" | "effect" | "show-modal-before" | "show-modal-after" | "close-before" | "close-after" | "cancel" | "close-event" | "backdrop-click" | "inside-click";
+function traceDialog(event: DialogEvent, dialog: HTMLDialogElement | null, panel: Panel) {
+  // The handler exists only in a DEBUG native shell launched for UI tests.
+  // Keep diagnostics static: no account, filename, XML or credential values.
+  const handlers = window.webkit?.messageHandlers;
+  if (handlers && Reflect.has(handlers, "noteLiteDiagnostics")) console.info(`[NoteLite dialog] event=${event} open=${!!dialog?.open} panel=${panel || "none"}`);
+}
 const sampleScore = `<score-partwise version="4.0"><work><work-title>示例练习</work-title></work><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>${["C", "D", "E", "F"].map((step) => `<note><pitch><step>${step}</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>`).join("")}</measure></part></score-partwise>`;
 
 async function scoreStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -32,7 +39,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [baseURL, setBaseURL] = useState("https://124.221.211.156");
+  const [baseURL, setBaseURL] = useState(() => isNativeCloud() ? "https://124.221.211.156" : window.location.origin);
   const [pairCode, setPairCode] = useState("");
   const [connected, setConnected] = useState(false);
   const [orientationNotice, setOrientationNotice] = useState("");
@@ -130,9 +137,23 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   }, [scores]);
 
   useEffect(() => {
-    if (panel && !dialog.current?.open) dialog.current?.showModal();
-    if (!panel && dialog.current?.open) dialog.current.close();
+    traceDialog("effect", dialog.current, panel);
+    if (panel && !dialog.current?.open) {
+      traceDialog("show-modal-before", dialog.current, panel);
+      dialog.current?.showModal();
+      traceDialog("show-modal-after", dialog.current, panel);
+    }
+    if (!panel && dialog.current?.open) {
+      traceDialog("close-before", dialog.current, panel);
+      dialog.current.close();
+      traceDialog("close-after", dialog.current, panel);
+    }
   }, [panel]);
+
+  useEffect(() => {
+    traceDialog("mounted", dialog.current, null);
+    return () => traceDialog("unmounted", dialog.current, null);
+  }, []);
 
   useEffect(() => {
     if (!importing && list.current) list.current.scrollTop = scrollPosition.current;
@@ -246,6 +267,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   }
 
   function openPanel(next: Panel, score?: Score) {
+    traceDialog("open-request", dialog.current, next);
     if (next === "view" || next === "practice") void enterLandscape();
     setSelected(score || null); setName(score?.name || ""); setMessage(""); setPanel(next);
     if (next === "settings") void cloud.configuration().then(async (configuration) => {
@@ -263,7 +285,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
       {importing ? <div className="flex min-h-0 flex-1 flex-col">
         {scores.length > 0 && <button type="button" onClick={() => setImportPage(false)} className="self-start px-4 py-3 text-sm text-[#999] focus-visible:outline-2">‹ 返回我的曲谱</button>}
         <div className="scores-page flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8">
-          <button type="button" aria-label="导入曲谱" onClick={() => openPanel("import")} className="group relative block w-full max-w-[400px] cursor-pointer touch-manipulation rounded-[18px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#67db23]">
+          <button type="button" aria-label="导入曲谱" onPointerDown={() => traceDialog("trigger-pointer-down", dialog.current, panel)} onPointerUp={() => traceDialog("trigger-pointer-up", dialog.current, panel)} onClick={() => { traceDialog("trigger-click", dialog.current, panel); openPanel("import"); }} className="group relative block w-full max-w-[400px] cursor-pointer touch-manipulation rounded-[18px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#67db23]">
             <img src={normal} alt="上传文件、图片或拍照识谱，开启你的专属陪练吧！" draggable={false} className="block h-auto w-full select-none group-active:opacity-0" />
             <img src={pressed} alt="" aria-hidden="true" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain opacity-0 group-active:opacity-100" />
           </button>
@@ -290,7 +312,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
     <input ref={files} type="file" accept="image/png,image/jpeg,.pdf,.musicxml,.mxl,.xml" className="hidden" aria-label="选择曲谱文件" onChange={(event) => { void importFile(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
     <input ref={photos} type="file" accept="image/*" className="hidden" aria-label="从相册选择曲谱" onChange={(event) => { void importFile(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
     <input ref={camera} type="file" accept="image/*" capture="environment" className="hidden" aria-label="拍照识谱" onChange={(event) => { void importFile(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
-    <dialog ref={dialog} data-workspace={panel === "view" || panel === "practice"} aria-labelledby="score-panel-title" onCancel={() => setPanel(null)} onClose={() => setPanel(null)} onClick={(event) => { if (event.target === event.currentTarget && !busy) setPanel(null); }} className={`scores-dialog fixed rounded-[20px] border-0 p-5 font-sans backdrop:bg-black/70 ${isDark ? "bg-[#191919] text-white" : "bg-white text-[#333]"}`}>
+    <dialog ref={dialog} data-workspace={panel === "view" || panel === "practice"} aria-labelledby="score-panel-title" onCancel={() => { traceDialog("cancel", dialog.current, panel); setPanel(null); }} onClose={() => { traceDialog("close-event", dialog.current, panel); setPanel(null); }} onClick={(event) => { traceDialog(event.target === event.currentTarget ? "backdrop-click" : "inside-click", dialog.current, panel); if (event.target === event.currentTarget && !busy) setPanel(null); }} className={`scores-dialog fixed rounded-[20px] border-0 p-5 font-sans backdrop:bg-black/70 ${isDark ? "bg-[#191919] text-white" : "bg-white text-[#333]"}`}>
       {(panel === "view" || panel === "practice") && selected ? <ScoreWorkspace practice={panel === "practice"} name={selected.name} format={selected.format} file={selected.file} job={selected.job} orientationNotice={orientationNotice} onJob={async (job) => { await acceptJob(job, selected); }} onClose={() => setPanel(null)} onSave={async (file) => { const updated = { ...selected, file }; await save(updated); setSelected(updated); }} /> : <>
       <h2 id="score-panel-title" className="mb-3 break-all text-lg font-bold">{title}</h2>
       {panel === "import" ? <>

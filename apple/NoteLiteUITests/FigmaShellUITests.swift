@@ -80,7 +80,15 @@ final class FigmaShellUITests: XCTestCase {
             XCTAssertTrue(importButton.waitForExistence(timeout: 10))
             importButton.tap()
         }
-        XCTAssertTrue(sample.waitForExistence(timeout: 10), "The local example must remain available without cloud credentials")
+        let sampleAvailable = sample.waitForExistence(timeout: 10)
+        capture(app, name: "Figma-import-panel-after-tap")
+        if !sampleAvailable {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Figma-import-panel-missing-actual-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTAssertTrue(sampleAvailable, "The local example must remain available without cloud credentials")
         sample.tap()
         let viewScore = button("查看曲谱", in: app)
         XCTAssertTrue(viewScore.waitForExistence(timeout: 15))
