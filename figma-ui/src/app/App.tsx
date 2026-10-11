@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import aiIcon from "../imports/image.png";
+import appLogo from "../imports/app-logo.png";
 import MyScoresPage from "./MyScoresPage";
 import AccountSettings from "./AccountSettings";
 import ClassroomSettings from "./ClassroomSettings";
+import PrivacyDetails from "./PrivacyDetails";
 import PracticeHistory, { usePracticeHistory } from "./PracticeHistory";
 import { analysisRequestID, ownedPracticeRecords, practiceSummary, shouldAllowPracticeAnalysis, type PracticeHistoryState } from "./practice-summary";
 import { account, type AccountIdentity, type AggregateFact, type AggregateObservation, type PracticeAnalysisResult } from "./account";
@@ -251,7 +253,7 @@ function TabIcon({ kind, isDark }: { kind: string; isDark: boolean }) {
   }
 
   if (kind === "ai") {
-    return <img src={aiIcon} alt="" className="h-[27px] w-[27px] object-contain" />;
+    return <img src={appLogo} alt="" className="h-[27px] w-[27px] object-contain" />;
   }
 
   if (kind === "practice") {
@@ -420,6 +422,7 @@ function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, ident
   }
 
   if (title === "隐私设置") return <div className="px-4 py-4">{toggleRow("信息收集", true, "广告跟踪及个性化")}{toggleRow("分享练琴录音", false, "与黑白键分享练琴录音，帮助优化练习体验") }<p className="mt-5 text-[12px] leading-6 text-[#aaa]">仅保存你的偏好，不会在此页面采集或上传录音。</p></div>;
+  if (title === "隐私政策") return <PrivacyDetails />;
 
   if (title === "黑白键课堂") return <ClassroomSettings key={identity?.userId || "guest"} identity={identity} history={history} image={aiIcon} outline={outline} field={field} action={action} onScores={onScores} />;
 

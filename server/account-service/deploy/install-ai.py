@@ -48,6 +48,22 @@ def source_offer():
     run(["bash", str(STAGED / "source-offer.sh")], 90)
 
 
+def checked_account_release(root, manifest):
+    required = {"account_service.py", "practice_analysis.py", "performance_analysis.py", "integrated_service.py", "omr_bridge.py"}
+    assert isinstance(manifest, dict) and required <= set(manifest), "incomplete_account_release"
+    checked = {}
+    for name, expected in manifest.items():
+        assert isinstance(name, str) and name and "\\" not in name and ":" not in name
+        assert not Path(name).is_absolute() and ".." not in Path(name).parts
+        assert isinstance(expected, str) and len(expected) == 64 and all(c in "0123456789abcdef" for c in expected)
+        source = root / name
+        assert source.is_file() and not source.is_symlink() and source.resolve().is_relative_to(root.resolve())
+        raw = source.read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == expected, "account_source_hash_mismatch"
+        checked[name] = raw
+    return checked
+
+
 try:
     assert (TARGET / ".notelite-managed").is_file()
     assert PRIVATE.is_dir() and not PRIVATE.is_symlink() and PRIVATE.stat().st_mode & 0o077 == 0
@@ -55,12 +71,9 @@ try:
     key_ready = TRANSFER / "key.ready"
     assert key_ready.is_file() and not key_ready.is_symlink() and key_ready.stat().st_mode & 0o077 == 0
     manifest = json.loads((STAGED / "accounts/manifest.json").read_text())
-    assert manifest["practice_analysis.py"] == "e7220d7af2abe927c58323d64b2c04e53bdc03a22c4e576b10165d3fa1dd0802"
+    account_sources = checked_account_release(STAGED / "accounts", manifest)
     assert {n for n in manifest if n.startswith("contracts/")} == {"contracts/practice-record-analysis/aggregate-input.schema.json","contracts/practice-record-analysis/output.schema.json"}
-    for name, expected in manifest.items():
-        source = STAGED / "accounts" / name
-        assert source.is_file() and not source.is_symlink() and source.resolve().is_relative_to((STAGED / "accounts").resolve())
-        raw = source.read_bytes(); assert hashlib.sha256(raw).hexdigest() == expected
+    for name, raw in account_sources.items():
         replace(TARGET / name, raw, 0o755 if name.endswith(".sh") else 0o644)
         parent = (TARGET / name).parent
         while parent != TARGET:
@@ -91,7 +104,7 @@ try:
     replace(PRIVATE / "deepseek-key", key_ready.read_bytes(), 0o600, True)
     replace(DROPIN, (STAGED / "accounts/deploy/notelite-accounts-ai.conf").read_bytes())
     DROPIN.parent.chmod(0o755)
-    run(["python3", "-m", "compileall", "-q", str(TARGET / "practice_analysis.py"), str(TARGET / "account_service.py")])
+    run(["python3", "-m", "compileall", "-q", *[str(TARGET / name) for name in ("account_service.py", "practice_analysis.py", "performance_analysis.py", "integrated_service.py", "omr_bridge.py")]])
     run(["systemctl", "daemon-reload"])
     run(["systemctl", "restart", "notelite-accounts.service"])
     run(["systemctl", "reload", "nginx.service"])
@@ -119,7 +132,7 @@ except BaseException:
         if old is not None:
             path.write_bytes(old[0]); path.chmod(old[1])
             if path == PRIVATE / "deepseek-key": os.chown(path, identity.pw_uid, identity.pw_gid)
-        elif path == DROPIN:
+        else:
             path.unlink(missing_ok=True)
     subprocess.run(["systemctl", "daemon-reload"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     subprocess.run(["systemctl", "restart", "notelite-accounts.service"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)

@@ -22,6 +22,10 @@ final class FigmaOrientationPolicy {
         guard let scene = window?.windowScene else {
             throw CloudOMRError(code: "orientation_unavailable", message: "当前窗口尚未准备好切换方向。")
         }
+        // iPadOS 26 consults the root controller's lock preference as well as
+        // the application mask. Keep the existing SwiftUI root and its state
+        // inside a chrome-free UIKit container that supplies that preference.
+        if let window { FigmaOrientationRootController.install(in: window) }
         let priorLock = lockedLandscape
         let priorOrientation = previousOrientation
         generation += 1
@@ -36,14 +40,18 @@ final class FigmaOrientationPolicy {
             requested = Self.mask(previousOrientation ?? .portrait)
             previousOrientation = nil
         }
-        window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: requested)) { [weak self] _ in
+        updateController(in: window)
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: requested)) { [weak self] error in
             Task { @MainActor [weak self] in
                 guard let self, generation == ticket else { return }
+                #if DEBUG
+                let nativeError = error as NSError
+                FigmaUITestDiagnostics.record("[NoteLite geometry] request-failed mode=\(mode) domain=\(nativeError.domain) code=\(nativeError.code) detail=\(nativeError.localizedDescription.prefix(250))")
+                #endif
                 // A failed restore must still release the app's landscape lock.
                 lockedLandscape = mode == "restore" ? false : priorLock
                 previousOrientation = mode == "restore" ? nil : priorOrientation
-                window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+                updateController(in: window)
                 let message: String
                 if mode == "restore" {
                     message = "系统未能恢复原来的方向，请调整设备或窗口方向。"
@@ -56,6 +64,15 @@ final class FigmaOrientationPolicy {
             }
         }
         return ["mode": mode, "requested": true, "platform": "ios"]
+    }
+
+    private func updateController(in window: UIWindow?) {
+        let root = window?.rootViewController
+        root?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        if #available(iOS 26.0, *) {
+            root?.setNeedsUpdateOfPrefersInterfaceOrientationLocked()
+        }
+        (root as? FigmaOrientationRootController)?.recordGeometry(reason: "request")
     }
 
     private static func mask(_ orientation: UIInterfaceOrientation) -> UIInterfaceOrientationMask {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { account, type AccountIdentity, type Assignment, type CatalogScore, type Classroom, type PersonalScore, type Submission } from "./account";
-import { errorMessage } from "./cloud";
+import { errorMessage, isNativeCloud, nativeRequest } from "./cloud";
 import { ownedPracticeRecords, type PracticeHistoryState } from "./practice-summary";
 
 type SharedScore = { id: string; title: string };
@@ -26,10 +26,14 @@ export default function ClassroomSettings({ identity, history, image, outline, f
   const [requirements, setRequirements] = useState(""), [dueAt, setDueAt] = useState("");
   const [selectedAssignment, setSelectedAssignment] = useState(""), [submissions, setSubmissions] = useState<Submission[]>([]);
   const [eventId, setEventId] = useState(""), [recording, setRecording] = useState<File | null>(null);
+  const [attachLocalRecording,setAttachLocalRecording]=useState(false);
   const [audioURLs, setAudioURLs] = useState<Record<string, string>>({});
   const urls = useRef<string[]>([]), codeInputs = useRef<(HTMLInputElement | null)[]>([]), fileInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const records = ownedPracticeRecords(history, identity?.userId || null).filter((record) => record.sync === "synced");
+  const selectedRecord=records.find(record=>record.eventId===eventId);
+  const localRecordingAvailable=!!selectedRecord?.analysis?.recording?.available&&isNativeCloud();
+  useEffect(()=>setAttachLocalRecording(false),[eventId,selectedAssignment,identity?.userId]);
   const teacher = selectedCourse?.role === "teacher";
   const button = `${action} disabled:cursor-default disabled:opacity-50`;
   useEffect(() => {
@@ -113,10 +117,11 @@ export default function ClassroomSettings({ identity, history, image, outline, f
           </>}
           <section className="mt-6"><h3 className="text-[19px] font-bold">课堂作业</h3>{!assignments.length && <p className="mt-3 text-[15px] text-[#999]">暂无作业。</p>}{assignments.map((assignment) => <div key={assignment.id} className={`mt-4 border-t-2 pt-4 ${outline}`}><h4 className="text-[17px] font-bold">{assignment.title}</h4><p className="mt-2 text-[13px] leading-6 text-[#999]">{assignment.requirements || "未填写额外要求"}<br />{assignment.dueAt ? `截止：${new Date(assignment.dueAt).toLocaleString()}` : "不设截止时间"}</p><button type="button" disabled={busy} className={`${button} mt-3`} onClick={() => void perform(async (current) => { setEventId(""); setRecording(null); setSubmissions([]); setSubmissionsLoaded(false); setSelectedAssignment(assignment.id); if (fileInput.current) fileInput.current.value = ""; await readSubmissions(assignment.id, current); })}>{teacher ? "查看学生提交" : "提交作业 / 查看我的提交"}</button></div>)}</section>
           {selectedAssignment && <section className={`mt-5 border-t-2 pt-4 ${outline}`}><h3 className="text-[19px] font-bold">{teacher ? "学生提交" : "我的作业提交"}</h3>
-            {!teacher && <form onSubmit={(event) => { event.preventDefault(); void perform(async (current) => { let uploadId: string | undefined; if (recording) uploadId = await account.uploadRecording(selectedAssignment, recording); if (!current()) return; await account.submit(selectedAssignment, eventId, uploadId); if (current()) { await readSubmissions(selectedAssignment, current); setRecording(null); if (fileInput.current) fileInput.current.value = ""; setMessage("作业已提交。未听音分析的记录保留未分析状态。"); } }); }}>
+            {!teacher && <form onSubmit={(event) => { event.preventDefault(); void perform(async (current) => { if(attachLocalRecording&&localRecordingAvailable){await nativeRequest("notewise/recording/submit",{takeId:eventId,eventId,assignmentId:selectedAssignment,analysisVersion:selectedRecord?.latestAnalysisVersion||selectedRecord?.analysisVersion},300000);}else{let uploadId: string | undefined; if (recording) uploadId = await account.uploadRecording(selectedAssignment, recording); if (!current()) return; await account.submit(selectedAssignment, eventId, uploadId,selectedRecord?.latestAnalysisVersion||selectedRecord?.analysisVersion);} if (current()) { await readSubmissions(selectedAssignment, current); setRecording(null);setAttachLocalRecording(false); if (fileInput.current) fileInput.current.value = ""; setMessage("作业已提交，仅分享本次选定的练习、分析版本与录音。"); } }); }}>
               <label className="mt-3 block text-[17px] font-bold">练习记录<select aria-label="作业练习记录" required disabled={busy} value={eventId} onChange={(event) => setEventId(event.currentTarget.value)} className={field}><option value="">选择自己已保存并同步的作业练习</option>{records.map((record) => <option key={record.eventId} value={record.eventId}>{record.name} · {new Date(record.startedAt).toLocaleString()} · {Math.round(record.durationSeconds)}秒</option>)}</select></label>
               <p className="mt-2 text-[12px] leading-6 text-[#999]">请先在我的曲谱练习课堂领取的曲谱。服务会核对记录与作业曲谱；试听记录不表示音准分析。</p>
-              <label className="mt-3 block text-[17px] font-bold">演奏录音（可选）<input ref={fileInput} aria-label="作业录音文件" type="file" accept=".wav,.mp3,.ogg,.m4a,audio/wav,audio/mpeg,audio/ogg,audio/mp4" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0] || null; setRecording(file); }} className={field} /></label>
+              {localRecordingAvailable&&<label className="mt-3 block text-[15px] leading-7"><input type="checkbox" checked={attachLocalRecording} disabled={busy} onChange={event=>{setAttachLocalRecording(event.currentTarget.checked);if(event.currentTarget.checked){setRecording(null);if(fileInput.current)fileInput.current.value="";}}}/> 附上这次练习在本机保存的录音</label>}
+              <label className="mt-3 block text-[17px] font-bold">演奏录音（可选）<input ref={fileInput} aria-label="作业录音文件" type="file" accept=".wav,.mp3,.ogg,.m4a,audio/wav,audio/mpeg,audio/ogg,audio/mp4" disabled={busy||attachLocalRecording} onChange={(event) => { const file = event.currentTarget.files?.[0] || null; setRecording(file); }} className={field} /></label>
               <p className="mt-2 text-[12px] leading-6 text-[#999]">仅上传你选择的真实录音文件，支持 WAV、MP3、Ogg、M4A，最多 100 MB。提交后仅本课堂教师可查看。</p>
               <button type="submit" disabled={busy || !eventId} className={`${button} mt-3`}>确认提交练习与选定录音</button>
             </form>}

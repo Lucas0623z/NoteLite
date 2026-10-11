@@ -155,7 +155,8 @@ final class CloudAccountClient {
                 allowed = method == "GET" && p[2] == "musicxml" && p[1].range(of: "^[A-Za-z0-9_-]{1,80}$", options: .regularExpression) != nil
             } else if uuid(1) {
                 switch p[0] {
-                case "scores", "history": allowed = p[2] == "musicxml" && method == "GET"
+                case "scores": allowed = p[2] == "musicxml" && method == "GET"
+                case "history": allowed = (p[2] == "musicxml" && method == "GET") || (p[2] == "analyses" && ["GET","POST"].contains(method))
                 case "submissions": allowed = ["musicxml", "audio"].contains(p[2]) && method == "GET"
                 case "uploads": allowed = p[2] == "complete" && method == "POST"
                 case "assignments": allowed = p[2] == "submissions" && ["GET", "POST"].contains(method)
@@ -167,8 +168,11 @@ final class CloudAccountClient {
                 default: break
                 }
             }
-        case 4: allowed = p[0] == "courses" && uuid(1) && p[2] == "codes" &&
-            p[3].range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil && method == "DELETE"
+        case 4:
+            allowed = (p[0] == "courses" && uuid(1) && p[2] == "codes" &&
+                p[3].range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil && method == "DELETE") ||
+                (p[0] == "history" && uuid(1) && p[2] == "analyses" &&
+                    p[3].range(of:"^[1-9][0-9]{0,8}$",options:.regularExpression) != nil && method == "GET")
         default: break
         }
         guard allowed else { throw Self.invalidRequest() }
@@ -188,6 +192,31 @@ final class CloudAccountClient {
             } else { throw Self.invalidRequest() }
         }
         return (["api", "account"] + p, query)
+    }
+
+    /// This URL is supplied exclusively by the native take registry, never a WebView path.
+    func uploadNativeRecording(_ file:URL,assignmentID:String) async throws -> String {
+        guard UUID(uuidString:assignmentID) != nil, let userID=try credential()?.userID else { throw Self.unauthenticated() }
+        let scope=try identityScope(), size=try file.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
+        guard size>0, size<=Self.maximumRecordingBytes else { throw Self.invalidRequest() }
+        let reader=try FileHandle(forReadingFrom:file); defer { try? reader.close() }
+        var hash=SHA256()
+        while let data=try reader.read(upToCount:Self.maximumChunkBytes), !data.isEmpty { hash.update(data:data) }
+        let digest=hash.finalize().map { String(format:"%02x",$0) }.joined()
+        let response=try await request(["path":"/uploads","method":"POST","response":"json","expectedUserId":userID,
+            "body":["assignmentId":assignmentID,"size":size,"mime":"audio/wav","sha256":digest]]) as? [String:Any]
+        guard let id=response?["uploadId"] as? String, UUID(uuidString:id) != nil else { throw NoteLiteError.invalidResponse }
+        var offset=try Self.integer(response?["offset"],maximum:size)
+        try reader.seek(toOffset:UInt64(offset))
+        while offset<size {
+            try Task.checkCancellation(); guard try identityScope()==scope else { throw Self.unauthenticated() }
+            guard let data=try reader.read(upToCount:min(Self.maximumChunkBytes,size-offset)), !data.isEmpty else { throw NoteLiteError.invalidResponse }
+            _ = try await request(["path":"/uploads/\(id)","method":"PUT","response":"json","expectedUserId":userID,
+                "base64":data.base64EncodedString(),"uploadOffset":offset])
+            offset += data.count
+        }
+        _ = try await request(["path":"/uploads/\(id)/complete","method":"POST","response":"json","expectedUserId":userID,"body":[String:Any]()])
+        return id
     }
 
     func request(_ input: [String: Any]) async throws -> Any {

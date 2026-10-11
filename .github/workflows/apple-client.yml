@@ -83,6 +83,8 @@ jobs:
           pnpm --dir figma-ui typecheck
           pnpm --dir figma-ui test
           pnpm --dir figma-ui build
+          node apple/scripts/prepare-notewise-profiles.mjs
+          python3 apple/scripts/prepare-notewise-model.py
           python3 apple/scripts/prepare-figma-ui.py
       - name: Generate Xcode project
         id: generate
@@ -125,7 +127,7 @@ jobs:
           set -euo pipefail
           for resources in \
             Build/Build/Products/Release-iphonesimulator/NoteLite.app \
-            Build/Build/Products/Release/音伴-你的音乐搭子.app/Contents/Resources; do
+            Build/Build/Products/Release/黑白键AI-你的陪练搭子.app/Contents/Resources; do
             for file in index.html app.js style.css demo.musicxml THIRD-PARTY.txt; do
               test -s "$resources/practice/$file"
             done
@@ -133,25 +135,53 @@ jobs:
               diff -r ../app/res/practice/icons "$resources/practice/icons"
             fi
             test -s "$resources/FigmaUI/index.html"
+            test -s "$resources/NoteWiseProfiles.json"
+            test -d "$resources/NoteWiseBasicPitch.mlmodelc"
+            test -s "$resources/BASIC-PITCH-LICENSE"
+            test -s "$resources/MODEL-LOCK.json"
             test -d "$resources/FigmaUI/assets"
             diff -r FigmaUI "$resources/FigmaUI"
           done
       - name: Package unsigned native builds
         working-directory: apple
         run: |
-          ditto -c -k --keepParent Build/Build/Products/Release/音伴-你的音乐搭子.app 音伴-macOS-unsigned.zip
+          ditto -c -k --keepParent Build/Build/Products/Release/黑白键AI-你的陪练搭子.app 黑白键AI-macOS-unsigned.zip
           ditto -c -k --keepParent Build/Build/Products/Release-iphonesimulator/NoteLite.app NoteLite-iOS-simulator.zip
       - uses: actions/upload-artifact@v4
         with:
           name: apple-native-builds
           path: |
-            apple/音伴-macOS-unsigned.zip
+            apple/黑白键AI-macOS-unsigned.zip
             apple/NoteLite-iOS-simulator.zip
             apple/NoteLite-iOS-device-unsigned.zip
-      - name: Configure supported display mode for native UI verification
+      - name: Create a native CI display large enough for both Figma window sizes
         if: ${{ !cancelled() && steps.generate.outcome == 'success' && steps.build_macos.outcome == 'success' }}
         run: |
+          set -euo pipefail
           mkdir -p apple/Screenshots/native-diagnostics
+          xcrun clang -fobjc-arc -fblocks -framework Foundation -framework AppKit -framework CoreGraphics \
+            apple/scripts/create-ui-test-display.m -o "$RUNNER_TEMP/notelite-ui-test-display"
+          "$RUNNER_TEMP/notelite-ui-test-display" "$GITHUB_WORKSPACE/apple/Screenshots/native-diagnostics/native-test-display.json" \
+            > "$RUNNER_TEMP/notelite-ui-test-display.log" 2>&1 &
+          display_pid=$!
+          echo "$display_pid" > "$RUNNER_TEMP/notelite-ui-test-display.pid"
+          ready=0
+          for attempt in $(seq 1 40); do
+            if ! kill -0 "$display_pid" 2>/dev/null; then break; fi
+            if [ -s apple/Screenshots/native-diagnostics/native-test-display.json ]; then
+              if python3 -c 'import json; from pathlib import Path; raise SystemExit(not json.loads(Path("apple/Screenshots/native-diagnostics/native-test-display.json").read_text())["ready"])'; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/notelite-ui-test-display.log"
+          if [ "$ready" != 1 ]; then
+            echo "::error::A real native display large enough for 900x1440 could not be created"
+            exit 1
+          fi
+          cat apple/Screenshots/native-diagnostics/native-test-display.json
           swift apple/scripts/configure-ui-test-display.swift > apple/Screenshots/native-diagnostics/display-modes.json
           cat apple/Screenshots/native-diagnostics/display-modes.json
       - name: Test native macOS app
@@ -172,6 +202,13 @@ jobs:
               break
             fi
           done
+      - name: Remove the temporary native CI display
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/notelite-ui-test-display.pid" ]; then
+            display_pid=$(cat "$RUNNER_TEMP/notelite-ui-test-display.pid")
+            if kill -0 "$display_pid" 2>/dev/null; then kill -TERM "$display_pid"; fi
+          fi
       - name: Export native interface screenshots
         if: always()
         working-directory: apple
@@ -227,6 +264,8 @@ jobs:
           pnpm --dir figma-ui test
           pnpm --dir figma-ui build
           python3 apple/scripts/prepare-figma-ui.py
+          node apple/scripts/prepare-notewise-profiles.mjs
+          python3 apple/scripts/prepare-notewise-model.py
       - name: Generate Xcode project
         working-directory: apple
         run: |

@@ -1,7 +1,8 @@
 /** Written note identity, never an ambiguous pitch-only lookup. Indices are zero based. */
 export type NoteKey = { partId: string; measureIndex: number; noteIndex: number };
 export const noteKey = (key: NoteKey) => `${encodeURIComponent(key.partId)}:${key.measureIndex}:${key.noteIndex}`;
-export type PlaybackNote = { key: NoteKey; start: number; end: number; midi: number; tieStart: boolean; tieStop: boolean; voiceKey: string; staff?: string };
+export type PlaybackNote = { key: NoteKey; start: number; end: number; midi: number; tieStart: boolean; tieStop: boolean; voiceKey: string; staff?: string;
+  voice?: string; writtenMidi?: number; step?: string; alter?: number; octave?: number; transpose?: number; transposeExplicit?: boolean; onsetBeat?: number; durationBeat?: number; occurrenceOrdinal?: number };
 export type PlaybackPosition = { keys: NoteKey[]; start: number };
 export type ScoreTimeline = { notes: PlaybackNote[]; positions: PlaybackPosition[]; duration: number; initialTempo: number; warnings: string[] };
 
@@ -75,7 +76,7 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
   type MeasureData = { length: number; notes: PlaybackNote[]; positions: PlaybackPosition[]; tempos: { at: number; bpm: number }[] };
   const parts = elements(root, "part"), warnings = new Set<string>(), data: MeasureData[][] = [];
   for (const part of parts) {
-    let divisions = 1, nominal: number | undefined = 4, transpose = 0;
+    let divisions = 1, nominal: number | undefined = 4, transpose = 0, transposeExplicit = false;
     const staffTranspose = new Map<string, number>(), measures: MeasureData[] = [];
     for (const [mi, measure] of elements(part, "measure").entries()) {
       let cursor = 0, previousOnset = 0, maxEnd = 0, ni = 0;
@@ -94,7 +95,7 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
           }
           for (const trans of elements(item, "transpose")) {
             const value = number(trans, "chromatic") + 12 * number(trans, "octave-change"), staff = trans.getAttribute("number");
-            if (staff) staffTranspose.set(staff, value); else { transpose = value; staffTranspose.clear(); }
+            if (staff) staffTranspose.set(staff, value); else { transpose = value; transposeExplicit = true; staffTranspose.clear(); }
           }
         } else if (item.localName === "backup" || item.localName === "forward") {
           const duration = number(item, "duration") / divisions;
@@ -130,7 +131,8 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
             const midi = 12 * (number(pitch, "octave") + 1) + semitone + number(pitch, "alter") + (staffTranspose.get(staff) ?? transpose);
             if (!Number.isInteger(midi) || midi < 0 || midi > 127) throw new Error("试听暂不支持此谱的微分音或 MIDI 音高。");
             const ties = elements(item, "tie").map(t => t.getAttribute("type"));
-            notes.push({ key, start: onset, end: onset + duration, midi, tieStart: ties.includes("start"), tieStop: ties.includes("stop"), voiceKey: JSON.stringify([key.partId, voice, midi]), staff });
+            notes.push({ key, start: onset, end: onset + duration, midi, tieStart: ties.includes("start"), tieStop: ties.includes("stop"), voiceKey: JSON.stringify([key.partId, voice, midi]), staff,
+              voice, writtenMidi: midi - (staffTranspose.get(staff) ?? transpose), step: text(pitch, "step"), alter: number(pitch, "alter"), octave: number(pitch, "octave"), transpose: staffTranspose.get(staff) ?? transpose, transposeExplicit: transposeExplicit || staffTranspose.has(staff) });
           } else if (child(item, "unpitched")) warnings.add("无固定音高音符仅显示指针，试听不发声。");
         }
       }
@@ -162,7 +164,9 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
   const quarterNotes: PlaybackNote[] = [], quarterPositions: PlaybackPosition[] = [], tempoEvents: { at: number; bpm: number }[] = [];
   let offset = 0, playedTempo = 120, previousMeasure = -1;
   const visitedEntryTempo = new Map<number, number>();
+  const occurrences = new Map<number, number>();
   for (const mi of order) {
+    const occurrenceOrdinal = (occurrences.get(mi) || 0) + 1; occurrences.set(mi, occurrenceOrdinal);
     const length = Math.max(0, ...data.map(p => p[mi]?.length || 0));
     // Backward repeats restore their actual first-entry tempo. Forward skips
     // keep the tempo already heard, so a skipped first ending cannot leak it.
@@ -174,7 +178,7 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
     quarterPositions.push({ keys: [], start: offset });
     for (const part of data) {
       const measure = part[mi]; if (!measure) continue;
-      quarterNotes.push(...measure.notes.map(n => ({ ...n, start: offset + n.start, end: offset + n.end })));
+      quarterNotes.push(...measure.notes.map(n => ({ ...n, start: offset + n.start, end: offset + n.end, occurrenceOrdinal })));
       quarterPositions.push(...measure.positions.map(p => ({ ...p, start: offset + p.start })));
     }
     offset += length;
@@ -202,7 +206,7 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
     const previous = positions[positions.length - 1], start = seconds(position.start);
     if (previous && Math.abs(previous.start - start) < 1e-7) previous.keys.push(...position.keys); else positions.push({ keys: [...position.keys], start });
   }
-  return { notes: notes.map(n => ({ ...n, start: seconds(n.start), end: seconds(n.end) })), positions, duration: seconds(offset), initialTempo: tempos.get(0) || 120, warnings: [...warnings] };
+  return { notes: notes.map(n => ({ ...n, onsetBeat: n.start, durationBeat: n.end - n.start, start: seconds(n.start), end: seconds(n.end) })), positions, duration: seconds(offset), initialTempo: tempos.get(0) || 120, warnings: [...warnings] };
 }
 
 export function positionAt(timeline: ScoreTimeline, seconds: number): NoteKey[] {

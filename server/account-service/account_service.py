@@ -35,6 +35,8 @@ COOKIE = "__Host-notelite-account"
 MAX_XML = 10 * 1024 * 1024
 MAX_BODY = MAX_XML * 2 + 4096
 MAX_CHUNK = 8 * 1024 * 1024
+MAX_ANALYSIS = 1024 * 1024
+MAX_ANALYSIS_STORAGE = 128 * MAX_ANALYSIS
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 AUDIO_TYPES = {"audio/wav", "audio/mpeg", "audio/ogg", "audio/mp4"}
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -75,6 +77,23 @@ def integer(value, name, low, high):
 def fields(value, allowed, required=()):
     if not isinstance(value, dict) or set(value) - set(allowed) or set(required) - set(value):
         raise APIError(400, "请求字段无效或缺少必要字段。")
+
+
+def analysis_json(value):
+    """Canonical UTF-8 bytes are bounded before storage and after normalization."""
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":"), allow_nan=False)
+        size = len(encoded.encode("utf8"))
+    except (TypeError, ValueError, UnicodeError, RecursionError) as error:
+        raise APIError(400, "演奏分析须为有效的 JSON 数据。") from error
+    if size > MAX_ANALYSIS:
+        raise APIError(413, "演奏分析超过 1 MiB 大小限制。")
+    return encoded
+
+
+def is_performance_v2(value):
+    return isinstance(value, dict) and value.get("schemaVersion") in (2, "2", "2.0")
 
 
 def token_hash(value):
@@ -183,6 +202,7 @@ class Store:
             CREATE INDEX IF NOT EXISTS user_scores ON scores(user_id);
             CREATE TABLE IF NOT EXISTS score_requests(user_id TEXT NOT NULL REFERENCES users(id),request_id TEXT NOT NULL,payload_hash TEXT NOT NULL,score_id TEXT NOT NULL REFERENCES scores(id),PRIMARY KEY(user_id,request_id));
             CREATE TABLE IF NOT EXISTS history(user_id TEXT NOT NULL REFERENCES users(id),event_id TEXT NOT NULL,payload TEXT NOT NULL,created REAL NOT NULL,score_xml TEXT,score_sha256 TEXT,score_revision INTEGER,PRIMARY KEY(user_id,event_id));
+            CREATE TABLE IF NOT EXISTS history_analysis_versions(user_id TEXT NOT NULL,event_id TEXT NOT NULL,version INTEGER NOT NULL,parent_version INTEGER NOT NULL,request_id TEXT NOT NULL,source_hash TEXT NOT NULL,analysis_hash TEXT NOT NULL,payload TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(user_id,event_id,version),UNIQUE(user_id,event_id,request_id),FOREIGN KEY(user_id,event_id) REFERENCES history(user_id,event_id));
             CREATE TABLE IF NOT EXISTS courses(id TEXT PRIMARY KEY,creator TEXT NOT NULL REFERENCES users(id),title TEXT NOT NULL,created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS course_scores(id TEXT PRIMARY KEY,course_id TEXT NOT NULL REFERENCES courses(id),title TEXT NOT NULL,xml TEXT NOT NULL,source_kind TEXT NOT NULL,source_id TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS codes(hash TEXT PRIMARY KEY,course_id TEXT NOT NULL REFERENCES courses(id),expires REAL NOT NULL,max_uses INTEGER NOT NULL,uses INTEGER NOT NULL DEFAULT 0,revoked INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL);
@@ -196,6 +216,10 @@ class Store:
             for column, kind in (("score_xml", "TEXT"), ("score_sha256", "TEXT"), ("score_revision", "INTEGER")):
                 if column not in columns:
                     db.execute("ALTER TABLE history ADD COLUMN " + column + " " + kind)
+            submission_columns = {r[1] for r in db.execute("PRAGMA table_info(submissions)")}
+            for column, kind in (("analysis_version", "INTEGER"), ("analysis_hash", "TEXT"), ("source_hash", "TEXT")):
+                if column not in submission_columns:
+                    db.execute("ALTER TABLE submissions ADD COLUMN " + column + " " + kind)
             db.execute("INSERT OR IGNORE INTO catalog VALUES(?,?,?,?,?,?)", ("notelite-four-notes-v1", "NoteLite 四音练习", "NoteLite", "CC0-1.0", "NoteLite 自编练习（C4 D4 E4 F4）", SAMPLE_XML))
         if os.name == "posix":
             root.chmod(0o700)
@@ -408,24 +432,27 @@ class Store:
                 raise ValueError()
         except (ValueError, TypeError, OverflowError) as error:
             raise APIError(400, "练习时间或时长不一致。") from error
-        analysis = self.analysis_payload(data.get("analysis"))
-        if data["mode"] in {"free", "playback"} and analysis["status"] != "unanalysed":
-            raise APIError(400, "自由计时和播放记录不能包含音准分析。")
-        data = {**data, "analysis": analysis}
+        original_analysis = data.get("analysis")
+        analysis_json(original_analysis)
         if "scoreRevision" in data:
             integer(data["scoreRevision"], "练习曲谱版本", 1, 2 ** 31 - 1)
-        canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            existing = db.execute("SELECT payload FROM history WHERE user_id=? AND event_id=?", (user_id, data["eventId"])).fetchone()
+            existing = db.execute("SELECT * FROM history WHERE user_id=? AND event_id=?", (user_id, data["eventId"])).fetchone()
             if existing:
-                old = json.loads(existing[0])
+                if is_performance_v2(original_analysis):
+                    self.check_history_snapshot(existing)
+                analysis = self.analysis_payload(original_analysis, existing["score_xml"], existing["score_sha256"], existing["score_revision"], data["mode"], data["eventId"])
+                self.check_analysis_mode(analysis, data["mode"])
+                data = {**data, "analysis": analysis}
+                canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                old = json.loads(existing["payload"])
                 old.pop("scoreSha256", None)
                 if "scoreRevision" not in data:
                     old.pop("scoreRevision", None)
                 if json.dumps(old, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) != canonical:
                     raise APIError(409, "练习事件标识已用于其他内容。")
-                return {"event": json.loads(existing[0]), "duplicate": True, "scoreValidated": False}
+                return {"event": self.history_meta(db, existing), "duplicate": True, "scoreValidated": False}
             if data["sourceKind"] == "personal":
                 score = self.get_score(db, user_id, data["scoreId"])
                 revision, xml = score["revision"], score["xml"]
@@ -443,17 +470,134 @@ class Store:
             if history_bytes + len(xml.encode("utf8")) > 100 * 1024 * 1024:
                 raise APIError(413, "练习曲谱快照达到当前存储限额。")
             sha = hashlib.sha256(xml.encode("utf8")).hexdigest()
-            data = {**data, "scoreRevision": revision, "scoreSha256": sha}
+            analysis = self.analysis_payload(original_analysis, xml, sha, revision, data["mode"], data["eventId"])
+            self.check_analysis_mode(analysis, data["mode"])
+            data = {**data, "analysis": analysis, "scoreRevision": revision, "scoreSha256": sha}
             canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
             db.execute("INSERT INTO history(user_id,event_id,payload,created,score_xml,score_sha256,score_revision) VALUES(?,?,?,?,?,?,?)", (user_id, data["eventId"], canonical, self.clock(), xml, sha, revision))
+            history = self.get_history(db, user_id, data["eventId"])
+            if is_performance_v2(analysis):
+                self.insert_analysis_version(db, history, analysis, 0, data["eventId"], sha)
             # Stored timing is client-reported. Never invent pitch accuracy or evaluation.
-            return {"event": data, "duplicate": False, "scoreValidated": False}
+            return {"event": self.history_meta(db, history), "duplicate": False, "scoreValidated": False}
 
     def list_history(self, user_id, limit=100, before=None):
         with self.connect() as db:
-            rows = db.execute("SELECT payload,created,event_id FROM history WHERE user_id=? ORDER BY created DESC,event_id DESC LIMIT ?", (user_id, limit)) if before is None else db.execute("SELECT payload,created,event_id FROM history WHERE user_id=? AND (created<? OR (created=? AND event_id<?)) ORDER BY created DESC,event_id DESC LIMIT ?", (user_id, before[0], before[0], before[1], limit))
+            rows = db.execute("SELECT * FROM history WHERE user_id=? ORDER BY created DESC,event_id DESC LIMIT ?", (user_id, limit)) if before is None else db.execute("SELECT * FROM history WHERE user_id=? AND (created<? OR (created=? AND event_id<?)) ORDER BY created DESC,event_id DESC LIMIT ?", (user_id, before[0], before[0], before[1], limit))
             rows = list(rows)
-            return {"events": [{**json.loads(row[0]), "receivedAt": now_stamp(row[1]), "scoreValidated": False} for row in rows], "nextCursor": f'{rows[-1][1]}:{rows[-1][2]}' if len(rows) == limit else None}
+            return {"events": [{**self.history_meta(db, row), "receivedAt": now_stamp(row["created"]), "scoreValidated": False} for row in rows], "nextCursor": f'{rows[-1]["created"]}:{rows[-1]["event_id"]}' if len(rows) == limit else None}
+
+    def get_history(self, db, user_id, event_id):
+        row = db.execute("SELECT * FROM history WHERE user_id=? AND event_id=?", (user_id, uid(event_id))).fetchone()
+        if not row:
+            raise APIError(404, "练习记录不存在。")
+        return row
+
+    def check_history_snapshot(self, row):
+        xml, digest = row["score_xml"], row["score_sha256"]
+        if not isinstance(xml, str) or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise APIError(503, "此历史记录未保存可核对的原谱快照。")
+        if not hmac.compare_digest(hashlib.sha256(xml.encode("utf8")).hexdigest(), digest):
+            raise APIError(503, "练习原谱快照完整性校验未通过。")
+        return xml, digest, row["score_revision"]
+
+    def check_analysis_mode(self, analysis, mode):
+        if mode in {"free", "playback"} and analysis.get("status") != "unanalysed":
+            raise APIError(400, "自由计时和播放记录不能包含音准分析。")
+
+    def history_meta(self, db, row):
+        result = json.loads(row["payload"])
+        latest = db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? ORDER BY version DESC LIMIT 1", (row["user_id"], row["event_id"])).fetchone()
+        if latest:
+            self.check_history_snapshot(row)
+            self.check_analysis_version(row, latest)
+            result.update({"analysis": json.loads(latest["payload"]), "analysisVersion": latest["version"],
+                           "analysisHash": latest["analysis_hash"], "snapshotValidatedByServer": True})
+        return result
+
+    def check_analysis_version(self, history, row):
+        try:
+            raw = row["payload"].encode("utf8")
+            intact = len(raw) <= MAX_ANALYSIS and hmac.compare_digest(hashlib.sha256(raw).hexdigest(), row["analysis_hash"])
+            intact = intact and hmac.compare_digest(row["source_hash"], history["score_sha256"])
+        except (TypeError, UnicodeError):
+            intact = False
+        if not intact:
+            raise APIError(503, "演奏分析版本完整性校验未通过。")
+
+    def analysis_version_meta(self, row, *, include_payload=True):
+        result = {"version": row["version"], "parentVersion": row["parent_version"],
+                  "requestId": row["request_id"], "sourceHash": row["source_hash"],
+                  "analysisHash": row["analysis_hash"], "createdAt": now_stamp(row["created"]),
+                  "snapshotValidatedByServer": True}
+        if include_payload:
+            result["analysis"] = json.loads(row["payload"])
+        return result
+
+    def insert_analysis_version(self, db, history, analysis, parent, request_id, source_hash):
+        canonical = analysis_json(analysis)
+        if parent >= 64:
+            raise APIError(413, "这条练习的分析版本达到当前存储限额。")
+        total = db.execute("SELECT coalesce(sum(length(CAST(payload AS BLOB))),0) FROM history_analysis_versions WHERE user_id=?", (history["user_id"],)).fetchone()[0]
+        if total + len(canonical.encode("utf8")) > MAX_ANALYSIS_STORAGE:
+            raise APIError(413, "演奏分析达到当前存储限额。")
+        digest = hashlib.sha256(canonical.encode("utf8")).hexdigest()
+        version = parent + 1
+        db.execute("INSERT INTO history_analysis_versions VALUES(?,?,?,?,?,?,?,?,?)", (history["user_id"], history["event_id"], version, parent, request_id, source_hash, digest, canonical, self.clock()))
+        return db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? AND version=?", (history["user_id"], history["event_id"], version)).fetchone()
+
+    def add_history_analysis(self, user_id, event_id, data):
+        fields(data, {"requestId", "parentVersion", "sourceHash", "analysis"}, {"requestId", "parentVersion", "sourceHash", "analysis"})
+        request_id = uid(data["requestId"])
+        parent = integer(data["parentVersion"], "父分析版本", 0, 2 ** 31 - 1)
+        source_hash = data["sourceHash"]
+        if not isinstance(source_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+            raise APIError(400, "原谱快照校验值无效。")
+        analysis_json(data["analysis"])
+        if not is_performance_v2(data["analysis"]):
+            raise APIError(400, "复核分析须使用 V2 演奏记录。")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            history = self.get_history(db, user_id, event_id)
+            xml, sha, revision = self.check_history_snapshot(history)
+            if not hmac.compare_digest(source_hash, sha):
+                raise APIError(409, "分析引用的原谱快照与这条练习不一致。")
+            event = json.loads(history["payload"])
+            analysis = self.analysis_payload(data["analysis"], xml, sha, revision, event["mode"], event_id)
+            self.check_analysis_mode(analysis, event["mode"])
+            canonical = analysis_json(analysis)
+            old = db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? AND request_id=?", (user_id, event_id, request_id)).fetchone()
+            if old:
+                self.check_analysis_version(history, old)
+                if old["parent_version"] != parent or old["source_hash"] != source_hash or old["payload"] != canonical:
+                    raise APIError(409, "分析请求标识已用于其他内容。")
+                return {**self.analysis_version_meta(old), "duplicate": True}
+            latest = db.execute("SELECT coalesce(max(version),0) FROM history_analysis_versions WHERE user_id=? AND event_id=?", (user_id, event_id)).fetchone()[0]
+            if parent != latest:
+                raise APIError(409, "另一台设备已保存更新的分析，请重新读取后复核。")
+            row = self.insert_analysis_version(db, history, analysis, parent, request_id, source_hash)
+            return {**self.analysis_version_meta(row), "duplicate": False}
+
+    def list_history_analyses(self, user_id, event_id):
+        with self.connect() as db:
+            history = self.get_history(db, user_id, event_id)
+            self.check_history_snapshot(history)
+            rows = list(db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? ORDER BY version DESC", (user_id, event_id)))
+            for row in rows:
+                self.check_analysis_version(history, row)
+            return {"analyses": [self.analysis_version_meta(row, include_payload=False) for row in rows],
+                    "latestVersion": rows[0]["version"] if rows else 0}
+
+    def read_history_analysis(self, user_id, event_id, version):
+        integer(version, "分析版本", 1, 2 ** 31 - 1)
+        with self.connect() as db:
+            history = self.get_history(db, user_id, event_id)
+            self.check_history_snapshot(history)
+            row = db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? AND version=?", (user_id, event_id, version)).fetchone()
+            if not row:
+                raise APIError(404, "分析版本不存在。")
+            self.check_analysis_version(history, row)
+            return self.analysis_version_meta(row)
 
     def history_xml(self, user_id, event_id):
         with self.connect() as db:
@@ -734,9 +878,23 @@ class Store:
             db.execute("UPDATE uploads SET complete=1 WHERE id=?", (upload_id,))
             return self.upload_meta(self.get_upload(db, user_id, upload_id))
 
-    def analysis_payload(self, value):
+    def analysis_payload(self, value, score_xml=None, score_sha=None, score_revision=None, mode=None, event_id=None):
         if value is None:
             return {"status": "unanalysed", "source": "none", "errors": None, "verifiedByServer": False}
+        analysis_json(value)
+        if is_performance_v2(value):
+            if not isinstance(score_xml, str) or not isinstance(score_sha, str):
+                raise APIError(503, "V2 演奏分析需要当时的原谱快照。")
+            if event_id is not None and value.get("takeId") != event_id:
+                raise APIError(422, "演奏分析的录制标识与这条练习不一致。")
+            from performance_analysis import normalize_performance
+            try:
+                normalized = normalize_performance(value, score_xml, score_sha, score_revision, mode)
+            except ValueError as error:
+                raise APIError(422, "演奏分析与原谱快照或练习模式不一致，请重新同步后检查记录。") from error
+            result = {**normalized, "verifiedByServer": False}
+            analysis_json(result)
+            return result
         fields(value, {"status", "source", "errors"}, {"status", "source", "errors"})
         if not isinstance(value["status"], str) or value["status"] not in {"uncertain", "analysed"} or value["source"] != "client-reported" or not isinstance(value["errors"], list) or len(value["errors"]) > 5000:
             raise APIError(400, "错音结果须注明客户端来源或保留未分析状态。")
@@ -755,53 +913,92 @@ class Store:
                     low = -1200 if key == "cents" else 0
                     if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val) or not low <= val <= high:
                         raise APIError(400, "错音数据无效。")
-        if len(json.dumps(value).encode("utf8")) > 1024 * 1024:
-            raise APIError(413, "错音结果超过大小限制。")
         return {**value, "verifiedByServer": False}
 
     def submit(self, user_id, assignment_id, data):
-        fields(data, {"eventId", "uploadId", "analysis"}, {"eventId"})
+        fields(data, {"eventId", "uploadId", "analysis", "analysisVersion"}, {"eventId"})
         event_id = uid(data["eventId"])
-        analysis = self.analysis_payload(data.get("analysis"))
-        canonical = json.dumps(analysis, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        if "analysisVersion" in data:
+            integer(data["analysisVersion"], "提交分析版本", 1, 2 ** 31 - 1)
+        analysis_json(data.get("analysis"))
         upload_id = uid(data["uploadId"]) if data.get("uploadId") else None
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             assignment = self.assignment(db, user_id, assignment_id, student=True)
-            event = db.execute("SELECT payload FROM history WHERE user_id=? AND event_id=?", (user_id, event_id)).fetchone()
-            if not event:
-                raise APIError(404, "练习记录不存在。")
-            event = json.loads(event[0])
-            if "analysis" not in data:
-                analysis = event.get("analysis", analysis)
-                canonical = json.dumps(analysis, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+            history = self.get_history(db, user_id, event_id)
+            event = json.loads(history["payload"])
+            old = db.execute("SELECT * FROM submissions WHERE assignment_id=? AND user_id=? AND event_id=?", (assignment_id, user_id, event_id)).fetchone()
+            requested_version = data.get("analysisVersion")
+            version_row = None
+            if requested_version is not None:
+                version_row = db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? AND version=?", (user_id, event_id, requested_version)).fetchone()
+                if not version_row:
+                    raise APIError(404, "提交分析版本不存在。")
+            elif "analysis" not in data and old:
+                # A retry after a later owner-only review remains pinned to the
+                # originally submitted version instead of implicitly sharing it.
+                if old["analysis_version"] is not None:
+                    version_row = db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? AND version=?", (user_id, event_id, old["analysis_version"])).fetchone()
+                    if not version_row:
+                        raise APIError(503, "已提交的分析版本不可用。")
+            elif "analysis" not in data or is_performance_v2(data.get("analysis")):
+                version_row = db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? ORDER BY version DESC LIMIT 1", (user_id, event_id)).fetchone()
+            if version_row:
+                self.check_history_snapshot(history)
+                self.check_analysis_version(history, version_row)
+                analysis = json.loads(version_row["payload"])
+                if "analysis" in data:
+                    supplied = self.analysis_payload(data["analysis"], history["score_xml"], history["score_sha256"], history["score_revision"], event["mode"], event_id)
+                    if analysis_json(supplied) != version_row["payload"]:
+                        raise APIError(409, "提交分析内容与指定版本不一致。")
+                canonical = version_row["payload"]
+            elif "analysis" in data:
+                analysis = self.analysis_payload(data["analysis"], history["score_xml"], history["score_sha256"], history["score_revision"], event["mode"], event_id)
+                canonical = analysis_json(analysis)
+            elif old:
+                analysis = json.loads(old["analysis"])
+                canonical = old["analysis"]
+            else:
+                analysis = event.get("analysis", self.analysis_payload(None))
+                canonical = analysis_json(analysis)
+            submitted_version = version_row["version"] if version_row else None
+            submitted_hash = version_row["analysis_hash"] if version_row else None
+            source_hash = history["score_sha256"]
             source = db.execute("SELECT * FROM course_scores WHERE id=?", (assignment["course_score_id"],)).fetchone()
             matched = event["sourceKind"] == "official" and source["source_kind"] == "official" and event["scoreId"] == source["source_id"]
             if event["sourceKind"] == "personal":
                 matched = bool(db.execute("SELECT 1 FROM course_deliveries WHERE course_id=? AND user_id=? AND course_score_id=? AND score_id=?", (assignment["course_id"], user_id, assignment["course_score_id"], event["scoreId"])).fetchone())
             if not matched:
                 raise APIError(400, "练习记录不属于这份课堂作业曲谱。")
-            if analysis["status"] != "unanalysed" and event["mode"] in {"free", "playback"}:
-                raise APIError(400, "自由计时和播放记录不能提交音准分析。")
+            self.check_analysis_mode(analysis, event["mode"])
             if upload_id:
                 upload = self.get_upload(db, user_id, upload_id)
                 if not upload["complete"] or upload["assignment_id"] != assignment_id:
                     raise APIError(400, "录音尚未完成或不属于这份作业。")
                 if db.execute("SELECT 1 FROM submissions WHERE upload_id=? AND (assignment_id<>? OR user_id<>? OR event_id<>?)", (upload_id, assignment_id, user_id, event_id)).fetchone():
                     raise APIError(409, "录音已用于其他提交。")
-            old = db.execute("SELECT * FROM submissions WHERE assignment_id=? AND user_id=? AND event_id=?", (assignment_id, user_id, event_id)).fetchone()
             if old:
-                if old["upload_id"] != upload_id or old["analysis"] != canonical:
+                if old["upload_id"] != upload_id or old["analysis"] != canonical or old["analysis_version"] != submitted_version:
                     raise APIError(409, "这条练习已提交其他内容。")
                 return {**self.submission_meta(db, old), "duplicate": True}
             submission_id = str(uuid.uuid4())
-            db.execute("INSERT INTO submissions VALUES(?,?,?,?,?,?,?)", (submission_id, assignment_id, user_id, event_id, upload_id, canonical, self.clock()))
+            db.execute("INSERT INTO submissions(id,assignment_id,user_id,event_id,upload_id,analysis,created,analysis_version,analysis_hash,source_hash) VALUES(?,?,?,?,?,?,?,?,?,?)", (submission_id, assignment_id, user_id, event_id, upload_id, canonical, self.clock(), submitted_version, submitted_hash, source_hash))
             return {**self.submission_meta(db, db.execute("SELECT * FROM submissions WHERE id=?", (submission_id,)).fetchone()), "duplicate": False}
 
     def submission_meta(self, db, row):
-        event = json.loads(db.execute("SELECT payload FROM history WHERE user_id=? AND event_id=?", (row["user_id"], row["event_id"])).fetchone()[0])
+        history = self.get_history(db, row["user_id"], row["event_id"])
+        event = json.loads(history["payload"])
+        analysis = json.loads(row["analysis"])
+        if row["analysis_version"] is not None:
+            self.check_history_snapshot(history)
+            pinned = db.execute("SELECT * FROM history_analysis_versions WHERE user_id=? AND event_id=? AND version=?", (row["user_id"], row["event_id"], row["analysis_version"])).fetchone()
+            if not pinned or row["analysis"] != pinned["payload"] or row["analysis_hash"] != pinned["analysis_hash"] or row["source_hash"] != pinned["source_hash"]:
+                raise APIError(503, "已提交的分析快照完整性校验未通过。")
+            self.check_analysis_version(history, pinned)
+            event.update({"analysis": analysis, "analysisVersion": row["analysis_version"],
+                          "analysisHash": row["analysis_hash"], "snapshotValidatedByServer": True})
         assignment = db.execute("SELECT due FROM assignments WHERE id=?", (row["assignment_id"],)).fetchone()
-        return {"id": row["id"], "assignmentId": row["assignment_id"], "student": db.execute("SELECT username FROM users WHERE id=?", (row["user_id"],)).fetchone()[0], "event": event, "audioAvailable": row["upload_id"] is not None, "analysis": json.loads(row["analysis"]), "submittedAt": now_stamp(row["created"]), "late": assignment["due"] is not None and row["created"] > assignment["due"]}
+        return {"id": row["id"], "assignmentId": row["assignment_id"], "student": db.execute("SELECT username FROM users WHERE id=?", (row["user_id"],)).fetchone()[0], "event": event, "audioAvailable": row["upload_id"] is not None, "analysis": analysis, "analysisVersion": row["analysis_version"], "analysisHash": row["analysis_hash"], "sourceHash": row["source_hash"], "submittedAt": now_stamp(row["created"]), "late": assignment["due"] is not None and row["created"] > assignment["due"]}
 
     def list_submissions(self, user_id, assignment_id):
         with self.connect() as db:
@@ -1118,6 +1315,16 @@ class Handler(BaseHTTPRequestHandler):
             xml, sha = store.history_xml(user_id, match[1])
             self.respond(200, xml, [("ETag", '"' + sha + '"')], "application/vnd.recordare.musicxml+xml; charset=utf-8")
             return
+        match = re.fullmatch(r"/history/(" + UUID + r")/analyses(?:/([1-9][0-9]{0,9}))?", route)
+        if match and not query:
+            if self.command == "GET":
+                result = store.read_history_analysis(user_id, match[1], int(match[2])) if match[2] else store.list_history_analyses(user_id, match[1])
+                self.respond(200, result)
+                return
+            if self.command == "POST" and not match[2]:
+                result = store.add_history_analysis(user_id, match[1], self.body(MAX_ANALYSIS + 4096))
+                self.respond(200 if result["duplicate"] else 201, result)
+                return
         if route == "/courses" and not query:
             if self.command == "POST":
                 self.respond(201, store.create_course(user_id, self.body(4096)))

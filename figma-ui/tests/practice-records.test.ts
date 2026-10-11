@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PracticeRecords, type PracticeRecord } from "../src/app/practice-records.ts";
+import {NoteWiseMatcher,expectedPerformance} from "../src/app/notewise.ts";
+import {scoreXML,noteXML,attributesXML} from "./xml-dom.ts";
 const alice = "11111111-1111-4111-8111-111111111111", bob = "22222222-2222-4222-8222-222222222222";
 const input = { eventId: "33333333-3333-4333-8333-333333333333", name: "自编练习", musicxml: "<score-partwise/>", scoreIdentity: "local:sample", sourceKind: "local" as const, mode: "free" as const, durationSeconds: 12, startedAt: "2026-10-11T10:00:00Z", endedAt: "2026-10-11T10:00:12Z" };
 function fixture(owner: string | null = alice) {
@@ -40,4 +42,20 @@ test("concurrent retries of one event share the request and an identical snapsho
   const f = fixture(); const first = await f.repository.save(input); await Promise.all([f.repository.sync(first), f.repository.sync(first)]);
   const second = await f.repository.save({ ...input, eventId: bob }); await f.repository.sync(second);
   assert.equal(f.scoreCalls.length, 1); assert.equal(f.historyCalls.length, 2);
+});
+test("structured live evidence is forwarded; later recording review appends a version without new practice time",async()=>{
+ const f=fixture(),xml=scoreXML(`<measure number="1">${attributesXML(1,"1")+noteXML()}</measure>`),options={mode:"follow" as const,inputKind:"midi" as const,bpm:60,tuning:440,first:1,last:1,part:"全部声部"};
+ const matcher=new NoteWiseMatcher(expectedPerformance(xml,options),options,{takeId:input.eventId,sourceScoreSha256:"a".repeat(64)});matcher.accept({eventId:"m1",type:"on",midi:60,timeMs:100,confidence:1,timingConfidence:1});const live=matcher.finish(1200);
+ f.client.addHistory=async(event:unknown)=>{f.historyCalls.push(event);return{event:{...event as object,scoreSha256:"a".repeat(64),analysisVersion:1,latestAnalysisVersion:1}} as never;};
+ const versions:unknown[]=[];Object.assign(f.client,{addHistoryAnalysis:async(_id:string,body:unknown)=>{versions.push(body);return{version:2,analysisHash:"b".repeat(64),analysis:(body as {analysis:unknown}).analysis};}});
+ const stored=await f.repository.sync(await f.repository.save({...input,musicxml:xml,mode:"follow",analysis:live}));assert.deepEqual((f.historyCalls[0] as {analysis:unknown}).analysis,live);
+ const review={...structuredClone(live),detectorVersion:"basic-pitch-coreml-0.4.0"};const revised=await f.repository.reviseAnalysis(stored,review);
+ assert.equal(f.historyCalls.length,1);assert.equal(versions.length,1);assert.equal(revised.analysisVersion,2);assert.equal(revised.durationSeconds,12);assert.equal(revised.localAnalyses?.length,1);assert.equal(revised.pendingAnalysis,undefined);
+});
+test("unknown append response retries the same version identity and account switch prevents cross-owner upload",async()=>{
+ const f=fixture();const revision={schemaVersion:2,sourceScoreSha256:"a".repeat(64),takeId:input.eventId,status:"analysed",source:"client-reported",errors:[],verifiedByServer:false} as never;
+ let fail=true;const requests:unknown[]=[];Object.assign(f.client,{addHistoryAnalysis:async(_id:string,body:unknown)=>{requests.push(structuredClone(body));if(fail)throw new Error("response lost");return{version:2,analysis:revision,analysisHash:"b".repeat(64)};}});
+ const stored={...await f.repository.save(input),sync:"synced" as const,scoreSha256:"a".repeat(64),analysisVersion:1};const pending=await f.repository.reviseAnalysis(stored,revision);assert.ok(pending.pendingAnalysis);
+ f.client.current={userId:bob};await f.repository.sync(pending);assert.equal(requests.length,1);
+ f.client.current={userId:alice};fail=false;await f.repository.retry();assert.deepEqual(requests[0],requests[1]);assert.equal(f.records.get(input.eventId)?.analysisVersion,2);assert.equal(f.historyCalls.length,0);
 });

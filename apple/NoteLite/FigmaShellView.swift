@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import CoreFoundation
 import QuickLook
 import AVKit
+import CryptoKit
 #if os(iOS)
 import UIKit
 #else
@@ -13,6 +14,7 @@ import AppKit
 /// The Figma page owns its layout and controls. No native navigation bars are added.
 struct FigmaShellView: View {
     @StateObject private var controller = FigmaShellController()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -46,6 +48,8 @@ struct FigmaShellView: View {
             }.padding(24).onAppear { preview.player.play() }
         }
         .onAppear { controller.load() }
+        .onChange(of:scenePhase) { phase in if phase != .active { controller.interruptListening() } }
+        .onDisappear { controller.interruptListening() }
     }
 
 }
@@ -75,6 +79,8 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     private var audioFile: CloudAccountAudioFile?
     private var accountClients: [String: CloudAccountClient] = [:]
     private let accountDigests = CloudAccountDigestStore()
+    private let noteWise = NoteWiseSession()
+    private let recordedTranscriber = NoteWisePolyphonicTranscriber()
     private var filePanel: FigmaNativeFilePanel?
     private var javaScriptDialogCompletion: ((Bool) -> Void)?
     private var loaded = false
@@ -118,6 +124,10 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         #endif
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        noteWise.event = { [weak self] value in self?.event(value) }
+        #if DEBUG && os(iOS)
+        FigmaUITestDiagnostics.installTouchObservation(on: webView)
+        #endif
         #if os(iOS)
         webView.isOpaque = false
         webView.backgroundColor = .clear
@@ -139,6 +149,8 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         loaded = true
         webView.load(URLRequest(url: URL(string: "notelite-ui://app/index.html")!))
     }
+
+    func interruptListening() { noteWise.interruptIfConnected("应用已进入后台或离开页面，请准备好后继续练习。") }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         #if DEBUG
@@ -197,7 +209,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         else { hasCredentials = !(try CloudDeviceTokenStore.read(origin: origin)).isEmpty }
         return ["baseURL": origin, "hasCredentials": hasCredentials,
          "hasAccountCredentials": account != nil,
-         "platform": platform, "native": true, "listeningEnabled": false]
+         "platform": platform, "native": true, "listeningEnabled": true]
     }
 
     private var platform: String {
@@ -224,11 +236,49 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
 
     private func perform(_ action: String, payload: [String: Any], requestID: String) async throws -> Any {
         switch action {
+        case "notewise/score-digest":
+            let xml = try string(payload, "musicxml")
+            guard xml.utf8.count <= 10 * 1024 * 1024 else { throw NoteLiteError.invalidResponse }
+            return ["sha256": SHA256.hash(data: Data(xml.utf8)).map { String(format: "%02x", $0) }.joined()]
+        case "notewise/start":
+            let scope = try accountClient().credential()?.userID ?? "guest"
+            return try await noteWise.start(payload, scope: origin + "|" + scope)
+        case "notewise/pause":
+            try noteWise.checkActive(try string(payload, "takeId"), scope: origin + "|" + (accountClient().credential()?.userID ?? "guest"))
+            noteWise.pause()
+            return ["paused": true]
+        case "notewise/stop":
+            try noteWise.checkActive(try string(payload, "takeId"), scope: origin + "|" + (accountClient().credential()?.userID ?? "guest"))
+            return await noteWise.stop()
+        case "notewise/recording/play":
+            guard audioPreview == nil, previewURL == nil, filePanel == nil else { throw CloudOMRError(code:"busy", message:"请先关闭当前播放器或文件窗口。") }
+            let scope = try accountClient().credential()?.userID ?? "guest"
+            let url = try noteWise.recording(string(payload, "takeId"), scope: origin + "|" + scope)
+            audioPreview = FigmaAccountAudioPreview(player: AVPlayer(url:url))
+            return ["previewOpened":true]
+        case "notewise/refine":
+            let capturedOrigin=origin
+            let scope = try accountClient().credential()?.userID ?? "guest"
+            let url = try noteWise.recording(string(payload,"takeId"),scope:origin+"|"+scope)
+            guard let tuning=payload["tuning"] as? Double,tuning.isFinite,(400...480).contains(tuning) else { throw NoteLiteError.invalidResponse }
+            let result=try await recordedTranscriber.transcribe(recordingURL:url,tuning:tuning).dictionary
+            guard capturedOrigin==origin,(try accountClient().credential()?.userID ?? "guest")==scope else { throw CloudOMRError(code:"identity_changed",message:"账户已更新，请重新读取录音。",status:409) }
+            return result
+        case "notewise/recording/submit":
+            let account=try accountClient(), scope=try account.identityScope(), user=try account.credential()!.userID
+            guard try string(payload,"takeId").lowercased()==string(payload,"eventId").lowercased() else { throw NoteLiteError.invalidResponse }
+            let file=try noteWise.recording(string(payload,"takeId"),scope:origin+"|"+user)
+            let uploadID=try await account.uploadNativeRecording(file,assignmentID:string(payload,"assignmentId"))
+            guard try account.identityScope()==scope else { throw CloudOMRError(code:"identity_changed",message:"账户已更改，请重新提交。",status:409) }
+            var submission:[String:Any]=["eventId":try string(payload,"eventId"),"uploadId":uploadID]
+            if payload["analysisVersion"] != nil { let version=try integer(payload,"analysisVersion");guard version>0 else{throw NoteLiteError.invalidResponse};submission["analysisVersion"]=version }
+            return try await account.request(["path":"/assignments/\(try string(payload,"assignmentId"))/submissions","method":"POST","response":"json","expectedUserId":user,"body":submission])
         case "configuration/get": return try configuration()
         case "configuration/set":
             let value = try ServerConfiguration(string(payload, "baseURL")).key
             for (id, task) in requests where id != requestID { task.cancel() }
             accountDigests.clear()
+            _ = await noteWise.stop()
             clearAudio()
             accountClients.removeAll()
             UserDefaults.standard.set(value, forKey: Self.originKey)
@@ -243,6 +293,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             if ["/login", "/register", "/logout"].contains(payload["path"] as? String ?? "") ||
                 ((payload["method"] as? String) == "DELETE" && (payload["path"] as? String)?.hasPrefix("/sessions/") == true) {
                 accountDigests.clear()
+                _ = await noteWise.stop()
                 clearAudio()
             }
             return result
@@ -560,7 +611,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        event(["type": "nativeReady", "platform": platform, "listeningEnabled": false])
+        event(["type": "nativeReady", "platform": platform, "listeningEnabled": true])
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
@@ -614,6 +665,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Task { _ = await noteWise.stop() }
         requests.values.forEach { $0.cancel() }
         filePanel?.cancel(); filePanel = nil
         importContinuation?.resume(throwing: CancellationError()); importContinuation = nil

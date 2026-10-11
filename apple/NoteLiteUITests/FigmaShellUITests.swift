@@ -45,12 +45,23 @@ final class FigmaShellUITests: XCTestCase {
             size.width <= screen.visibleFrame.width &&
             size.height + window.height - web.frame.height <= screen.visibleFrame.height
         }
+        // XCTest/AX uses a top-left global origin; AppKit screen rectangles
+        // use the primary screen's bottom-left origin. Convert the actual
+        // window once, rather than comparing different coordinate spaces.
+        let primaryTop = try XCTUnwrap(NSScreen.screens.first).frame.maxY
+        let cocoaWindow = CGRect(x: window.minX, y: primaryTop - window.maxY,
+                                 width: window.width, height: window.height)
+        let wholeWindowIsVisible = NSScreen.screens.contains { screen in
+            screen.visibleFrame.insetBy(dx: -1, dy: -1).contains(cocoaWindow)
+        }
         let metrics: [String: Any] = [
             "requestedContent": ["width": size.width, "height": size.height],
             "actualWindow": rectValue(window), "actualWebView": rectValue(web.frame),
+            "actualWindowInAppKitScreenCoordinates": rectValue(cocoaWindow),
             "windowDecorationHeight": window.height - web.frame.height,
             "displayCanContainWholeWindow": canFitOnDisplay, "displays": displays,
             "displayCanContainRequestedWindow": requestedCanFit,
+            "actualWindowEntirelyInsideVisibleDisplay": wholeWindowIsVisible,
             "screenshotLimitation": requestedCanFit && canFitOnDisplay ? "Actual native window capture" : "Actual native capture; runner display cannot contain the requested full window"
         ]
         let data = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
@@ -64,6 +75,10 @@ final class FigmaShellUITests: XCTestCase {
         XCTAssertEqual(window.width, web.frame.width, accuracy: 1)
         XCTAssertGreaterThanOrEqual(window.height, web.frame.height,
                                     "Window decoration may add height but must not shrink page content")
+        XCTAssertTrue(requestedCanFit && canFitOnDisplay,
+                      "The native test display must actually contain the entire requested content and window decoration")
+        XCTAssertTrue(wholeWindowIsVisible,
+                      "The actual full native window must be inside a visible NSScreen, without off-screen content")
         XCTAssertTrue(app.navigationBars.allElementsBoundByIndex.isEmpty)
         app.terminate()
     }
@@ -80,7 +95,7 @@ final class FigmaShellUITests: XCTestCase {
         #if os(iOS)
         XCUIDevice.shared.orientation = .portrait
         #endif
-        let app = XCUIApplication()
+        var app = XCUIApplication()
         app.launchArguments = ["--uitesting-figma"]
         #if os(macOS)
         let exportDirectory = FileManager.default.temporaryDirectory
@@ -96,10 +111,10 @@ final class FigmaShellUITests: XCTestCase {
         capture(app, name: "Figma-library-portrait")
         libraryTab.tap()
         ensureSampleInLibrary(app)
-        let viewScore = button("查看曲谱", in: app)
+        var viewScore = button("查看曲谱", in: app)
         XCTAssertTrue(viewScore.waitForExistence(timeout: 15))
         viewScore.tap()
-        let close = button("‹ 我的曲谱", in: app)
+        var close = button("‹ 我的曲谱", in: app)
         XCTAssertTrue(close.waitForExistence(timeout: 30))
         assertScoreRendered(app)
         assertNoteSelection(app)
@@ -110,12 +125,10 @@ final class FigmaShellUITests: XCTestCase {
 
         // Relaunch through the real production entry: the card and its XML must
         // come from IndexedDB, rather than only the previous React state.
-        app.terminate()
-        app.launch()
-        XCTAssertTrue(libraryTab.waitForExistence(timeout: 45))
-        libraryTab.tap()
-        XCTAssertTrue(viewScore.waitForExistence(timeout: 15), "The example must persist across application relaunch")
-        viewScore.tap()
+        app = try relaunchFromLibrary(app, checkpoint: "Figma-core-persistence-relaunch")
+        // Do not retain element proxies rooted in the terminated process.
+        viewScore = button("查看曲谱", in: app)
+        close = button("‹ 我的曲谱", in: app)
         assertScoreRendered(app)
 
         // Cancel is a real native picker path. Reopening immediately proves the
@@ -208,7 +221,7 @@ final class FigmaShellUITests: XCTestCase {
         #if os(iOS)
         XCUIDevice.shared.orientation = .portrait
         #endif
-        let app = XCUIApplication()
+        var app = XCUIApplication()
         app.launchArguments = ["--uitesting-figma"]
         #if os(macOS)
         let exportDirectory = FileManager.default.temporaryDirectory
@@ -254,7 +267,7 @@ final class FigmaShellUITests: XCTestCase {
 
         // A fresh app reads the edited Blob from IndexedDB; React state alone
         // cannot satisfy the C5 assertion after this relaunch.
-        relaunchLocalScore(app)
+        app = try relaunchLocalScore(app, checkpoint: "Figma-C5-persistence-relaunch")
         assertScoreRendered(app, expectedPitches: ["C5", "D4", "E4", "F4"])
         capture(app, name: "Figma-new-interactions-C5-after-relaunch")
         openScoreMetadata(app)
@@ -287,7 +300,7 @@ final class FigmaShellUITests: XCTestCase {
         assertScoreRendered(app, expectedFeedback: "曲谱信息已保存到本机。",
                             expectedPitches: ["C5", "D4", "E4", "F4"])
 
-        relaunchLocalScore(app)
+        app = try relaunchLocalScore(app, checkpoint: "Figma-tempo96-persistence-relaunch")
         assertScoreRendered(app, expectedPitches: ["C5", "D4", "E4", "F4"])
         openScoreMetadata(app)
         let persistedTempo = app.webViews.textFields.matching(identifier: "谱面速度").firstMatch
@@ -663,21 +676,177 @@ final class FigmaShellUITests: XCTestCase {
     }
 
     @MainActor
-    private func relaunchLocalScore(_ app: XCUIApplication) {
+    private func relaunchLocalScore(_ app: XCUIApplication, checkpoint: String) throws -> XCUIApplication {
         let close = button("‹ 我的曲谱", in: app)
         makeReturnNavigationHittable(close, in: app)
         XCTAssertTrue(close.isHittable)
         close.tap()
         XCTAssertTrue(button("查看曲谱", in: app).waitForExistence(timeout: 10))
+        return try relaunchFromLibrary(app, checkpoint: checkpoint)
+    }
+
+    @MainActor
+    private func relaunchFromLibrary(_ app: XCUIApplication, checkpoint: String) throws -> XCUIApplication {
+        // The failed iPhone run targeted the new process with a 1/3-size event
+        // window while its attached snapshot still described the old process.
+        // Drop both application and element proxies across that boundary. A
+        // new proxy is a repair candidate; the actual native touch log and
+        // xcresult event records must still confirm the injected coordinates.
+        let previous = try waitForNativeInteractionGeometry("查看曲谱", in: app,
+                                                           checkpoint: "\(checkpoint)-before-termination")
+        let arguments = app.launchArguments
+        var environment = app.launchEnvironment
+        environment["NOTELITE_UI_LAUNCH_ID"] = UUID().uuidString
+        attachHierarchy(app, name: "\(checkpoint)-terminated-process-hierarchy")
         app.terminate()
-        app.launch()
-        let library = button("我的曲谱", in: app)
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15),
+                      "The previous real application process must terminate before relaunch")
+
+        let relaunched = XCUIApplication()
+        relaunched.launchArguments = arguments
+        relaunched.launchEnvironment = environment
+        relaunched.launch()
+        XCTAssertTrue(relaunched.wait(for: .runningForeground, timeout: 15),
+                      "The new real application process must enter the foreground")
+        let library = button("我的曲谱", in: relaunched)
         XCTAssertTrue(library.waitForExistence(timeout: 45))
+        _ = try waitForNativeInteractionGeometry("我的曲谱", in: relaunched,
+                                                 expectedWindowSize: previous.window.size,
+                                                 checkpoint: "\(checkpoint)-before-library-tap")
+        // Each destination receives one ordinary element tap. A failed tap is
+        // never retried, replaced with coordinates, or replaced with JS.
         library.tap()
-        let view = button("查看曲谱", in: app)
-        XCTAssertTrue(view.waitForExistence(timeout: 15))
-        XCTAssertEqual(app.webViews.buttons.matching(identifier: "查看曲谱").count, 1)
+        let view = button("查看曲谱", in: relaunched)
+        XCTAssertTrue(view.waitForExistence(timeout: 15),
+                      "The actual IndexedDB score must persist across application relaunch")
+        XCTAssertEqual(relaunched.webViews.buttons.matching(identifier: "查看曲谱").count, 1)
+        _ = try waitForNativeInteractionGeometry("查看曲谱", in: relaunched,
+                                                 expectedWindowSize: previous.window.size,
+                                                 checkpoint: "\(checkpoint)-before-view-score-tap")
         view.tap()
+        attachHierarchy(relaunched, name: "\(checkpoint)-after-single-view-score-tap-hierarchy")
+        capture(relaunched, name: "\(checkpoint)-after-single-view-score-tap")
+        return relaunched
+    }
+
+    private struct NativeInteractionGeometry: Equatable {
+        let application: CGRect
+        let window: CGRect
+        let webView: CGRect
+        let target: CGRect
+
+        var isConsistent: Bool {
+            // An AX Application node can have no own rectangle (the actual
+            // macOS artifact does not expose one). Its real Window owns the
+            // native surface; keep the root frame as diagnostic metadata only.
+            let rectangles = [window, webView, target]
+            guard rectangles.allSatisfy({ rect in
+                !rect.isNull && !rect.isEmpty && !rect.isInfinite &&
+                    [rect.minX, rect.minY, rect.width, rect.height].allSatisfy(\.isFinite)
+            }) else { return false }
+            let center = CGPoint(x: target.midX, y: target.midY)
+            return window.insetBy(dx: -1, dy: -1).contains(center) &&
+                webView.insetBy(dx: -1, dy: -1).contains(center) &&
+                window.width + 1 >= webView.width && window.height + 1 >= webView.height
+        }
+
+        func matchesWindowSize(_ size: CGSize?) -> Bool {
+            guard let size else { return true }
+            return abs(window.width - size.width) <= 1 && abs(window.height - size.height) <= 1
+        }
+    }
+
+    @MainActor
+    private func firstSnapshot(in root: any XCUIElementSnapshot,
+                               matching predicate: (any XCUIElementSnapshot) -> Bool) -> (any XCUIElementSnapshot)? {
+        if predicate(root) { return root }
+        for child in root.children {
+            if let found = firstSnapshot(in: child, matching: predicate) { return found }
+        }
+        return nil
+    }
+
+    @MainActor
+    private func nativeInteractionGeometry(_ label: String,
+                                           in app: XCUIApplication) throws -> NativeInteractionGeometry? {
+        // All frames come from the same fresh public snapshot, so an old
+        // landscape WebKit node cannot be combined with a new portrait window.
+        let snapshot = try app.snapshot()
+        guard let window = firstSnapshot(in: snapshot, matching: { $0.elementType == .window }),
+              let web = firstSnapshot(in: window, matching: { $0.elementType == .webView }),
+              let target = firstSnapshot(in: web, matching: {
+                  $0.elementType == .button && ($0.identifier == label || $0.label == label)
+              }) else { return nil }
+        return NativeInteractionGeometry(application: snapshot.frame, window: window.frame,
+                                         webView: web.frame, target: target.frame)
+    }
+
+    @MainActor
+    private func waitForNativeInteractionGeometry(_ label: String, in app: XCUIApplication,
+                                                 expectedWindowSize: CGSize? = nil,
+                                                 checkpoint: String) throws -> NativeInteractionGeometry {
+        var previous: NativeInteractionGeometry?
+        var accepted: NativeInteractionGeometry?
+        var consecutiveSamples = 0
+        var stableSince = Date()
+        let stable = XCTNSPredicateExpectation(predicate: NSPredicate { [weak self] _, _ in
+            guard let self, app.state == .runningForeground,
+                  let geometry = try? self.nativeInteractionGeometry(label, in: app),
+                  geometry.isConsistent, geometry.matchesWindowSize(expectedWindowSize),
+                  self.button(label, in: app).isHittable else {
+                previous = nil
+                consecutiveSamples = 0
+                stableSince = Date()
+                return false
+            }
+            if geometry == previous {
+                consecutiveSamples += 1
+            } else {
+                previous = geometry
+                consecutiveSamples = 1
+                stableSince = Date()
+            }
+            guard consecutiveSamples >= 3, Date().timeIntervalSince(stableSince) >= 1 else { return false }
+            accepted = geometry
+            return true
+        }, object: app)
+        let result = XCTWaiter.wait(for: [stable], timeout: 20)
+        attachHierarchy(app, name: "\(checkpoint)-actual-process-hierarchy")
+        capture(app, name: "\(checkpoint)-actual-screen")
+        XCTAssertEqual(result, .completed,
+                       "One current native window, WebKit tree and hittable target must agree and stabilize before a real tap")
+        guard result == .completed, let geometry = accepted else {
+            throw NSError(domain: "NoteLiteNativeGeometry", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "No stable native geometry for \(checkpoint)"])
+        }
+        let point = button(label, in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint
+        XCTAssertEqual(point.x, geometry.target.midX, accuracy: 1,
+                       "XCTest's computed horizontal coordinate must agree with the fresh native target frame")
+        XCTAssertEqual(point.y, geometry.target.midY, accuracy: 1,
+                       "XCTest's computed vertical coordinate must agree with the fresh native target frame")
+        let metrics: [String: Any] = [
+            "checkpoint": checkpoint,
+            "launchID": app.launchEnvironment["NOTELITE_UI_LAUNCH_ID"] ?? "initial-process",
+            "applicationState": app.state.rawValue,
+            "applicationFrame": frameValues(geometry.application),
+            "windowFrame": frameValues(geometry.window),
+            "webViewFrame": frameValues(geometry.webView),
+            "targetFrame": frameValues(geometry.target),
+            "computedCoordinateCenter": ["x": point.x, "y": point.y],
+            "stableSamples": consecutiveSamples,
+            "geometrySource": "One public app.snapshot() per sample; no cached element frames",
+            "touchScope": "Pre-touch accessibility geometry only; actual native touch and xcresult event records are separate evidence"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
+        let attachment = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        attachment.name = "\(checkpoint)-native-interaction-geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        return geometry
+    }
+
+    private func frameValues(_ rect: CGRect) -> [String: CGFloat] {
+        ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
     }
 
     @MainActor

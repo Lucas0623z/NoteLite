@@ -1,10 +1,13 @@
 import { CloudError, cloud, createUUID, isNativeCloud, nativeRequest } from "./cloud.ts";
+import type { NoteWiseAnalysis } from "./notewise.ts";
 
 export type AccountIdentity = { authenticated: true; userId: string; username: string; sessionId: string; deviceName: string; expiresAt: string; kind: "browser" | "native" };
 export type PersonalScore = { id: string; title: string; revision: number; etag: string; updatedAt: string; omr?: { jobId: string; scoreIndex: number; revision: number } };
 export type CatalogScore = { id: string; title: string; composer: string; license: string; source: string };
-export type PracticeAnalysis = { status: string; source: string; errors: unknown[] | null; verifiedByServer: boolean };
-export type PracticeEvent = { eventId: string; sourceKind: "official" | "personal"; scoreId: string; mode: "free" | "strict" | "follow" | "playback"; durationSeconds: number; startedAt: string; endedAt: string; scoreRevision?: number; scoreSha256?: string; analysis?: PracticeAnalysis; receivedAt?: string; scoreValidated?: boolean };
+export type PracticeAnalysis = Omit<Partial<NoteWiseAnalysis>, "status" | "source" | "errors" | "verifiedByServer"> & { status: string; source: string; errors: unknown[] | null; verifiedByServer: boolean; snapshotValidatedByServer?: boolean; serverNormalizerVersion?: string; serverMetrics?: Record<string, unknown> };
+export type HistoryAnalysisMetadata = { version: number; parentVersion: number; requestId: string; sourceHash: string; analysisHash: string; createdAt: string; snapshotValidatedByServer: boolean };
+export type HistoryAnalysisVersion = HistoryAnalysisMetadata & { analysis: PracticeAnalysis; duplicate?: boolean };
+export type PracticeEvent = { eventId: string; sourceKind: "official" | "personal"; scoreId: string; mode: "free" | "strict" | "follow" | "playback"; durationSeconds: number; startedAt: string; endedAt: string; scoreRevision?: number; scoreSha256?: string; analysis?: PracticeAnalysis; receivedAt?: string; scoreValidated?: boolean; analysisVersion?: number; latestAnalysisVersion?: number; analysisHash?: string; snapshotValidatedByServer?: boolean };
 export type Classroom = { id: string; title: string; role: "teacher" | "student"; teacher?: string; creator?: string; [key: string]: unknown };
 export type Assignment = { id: string; courseId: string; courseScoreId: string; title: string; dueAt: string | null; requirements: string; createdAt: string };
 export type Submission = { id: string; assignmentId: string; student: string; event: PracticeEvent; audioAvailable: boolean; analysis: { status: string; errors: unknown[] | null; source: string; verifiedByServer: boolean }; submittedAt: string; late: boolean };
@@ -90,6 +93,9 @@ export class AccountClient {
   history(cursor?: string) { return this.request<{ events: PracticeEvent[]; nextCursor: string | null }>({ path: `/history?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, method: "GET", response: "json" }); }
   addHistory(event: PracticeEvent) { return this.request<{ event: PracticeEvent; duplicate: boolean }>({ path: "/history", method: "POST", body: event, response: "json" }); }
   historyXML(eventId: string) { return this.request<string>({ path: `/history/${id(eventId)}/musicxml`, method: "GET", response: "text" }); }
+  historyAnalyses(eventId: string) { return this.request<{ analyses: HistoryAnalysisMetadata[]; latestVersion: number }>({ path: `/history/${id(eventId)}/analyses`, method: "GET", response: "json" }); }
+  historyAnalysis(eventId: string, version: number) { if (!Number.isInteger(version) || version < 1) throw new CloudError("分析版本无效。"); return this.request<HistoryAnalysisVersion>({ path: `/history/${id(eventId)}/analyses/${version}`, method: "GET", response: "json" }); }
+  addHistoryAnalysis(eventId: string, body: { requestId: string; parentVersion: number; sourceHash: string; analysis: PracticeAnalysis }) { if (!Number.isInteger(body.parentVersion) || body.parentVersion < 0 || !/^[0-9a-f]{64}$/.test(body.sourceHash)) throw new CloudError("原谱或分析版本无效。"); return this.request<HistoryAnalysisVersion>({ path: `/history/${id(eventId)}/analyses`, method: "POST", body: { ...body, requestId: id(body.requestId) }, response: "json" }); }
   analyzePractice(eventIds?: string[], requestId = createUUID()) { return this.request<PracticeAnalysisResult>({ path: "/practice-analysis", method: "POST", body: { requestId: id(requestId), ...(eventIds ? { eventIds: eventIds.map(id) } : {}) }, response: "json" }); }
   courses() { return this.request<{ courses: Classroom[] }>({ path: "/courses", method: "GET", response: "json" }); }
   createCourse(title: string) { return this.request<Classroom>({ path: "/courses", method: "POST", body: { title }, response: "json" }); }
@@ -102,7 +108,7 @@ export class AccountClient {
   createAssignment(courseId: string, body: { title: string; courseScoreId: string; dueAt?: string; requirements?: string }) { return this.request<Assignment>({ path: `/courses/${id(courseId)}/assignments`, method: "POST", body, response: "json" }); }
   submissions(assignmentId: string) { return this.request<{ submissions: Submission[] }>({ path: `/assignments/${id(assignmentId)}/submissions`, method: "GET", response: "json" }); }
   submissionXML(submissionId: string) { return this.request<string>({ path: `/submissions/${id(submissionId)}/musicxml`, method: "GET", response: "text" }); }
-  submit(assignmentId: string, eventId: string, uploadId?: string) { return this.request<Submission>({ path: `/assignments/${id(assignmentId)}/submissions`, method: "POST", body: { eventId: id(eventId), ...(uploadId ? { uploadId: id(uploadId) } : {}) }, response: "json" }); }
+  submit(assignmentId: string, eventId: string, uploadId?: string, analysisVersion?: number) { if (analysisVersion !== undefined && (!Number.isInteger(analysisVersion) || analysisVersion < 0)) throw new CloudError("分析版本无效。"); return this.request<Submission>({ path: `/assignments/${id(assignmentId)}/submissions`, method: "POST", body: { eventId: id(eventId), ...(uploadId ? { uploadId: id(uploadId) } : {}), ...(analysisVersion !== undefined ? { analysisVersion } : {}) }, response: "json" }); }
   async audio(submissionId: string): Promise<Blob> {
     const value = await this.request<Blob | { base64: string; mime: string }>({ path: `/submissions/${id(submissionId)}/audio`, method: "GET", response: "base64" });
     return value instanceof Blob ? value : new Blob([Uint8Array.from(atob(value.base64), (char) => char.charCodeAt(0))], { type: value.mime });

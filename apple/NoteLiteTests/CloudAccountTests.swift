@@ -185,6 +185,13 @@ final class CloudAccountTests: XCTestCase {
             XCTAssertThrowsError(try CloudAccountClient.route(path: path, method: "GET"), path)
         }
         XCTAssertNoThrow(try CloudAccountClient.route(path: "/practice-analysis", method: "POST"))
+        XCTAssertNoThrow(try CloudAccountClient.route(path: "/history/\(recordID)/analyses", method: "GET"))
+        XCTAssertNoThrow(try CloudAccountClient.route(path: "/history/\(recordID)/analyses", method: "POST"))
+        XCTAssertNoThrow(try CloudAccountClient.route(path: "/history/\(recordID)/analyses/2", method: "GET"))
+        for suffix in ["0", "-1", "2?token=secret", "2/../../me", "99999999999999999999999"] {
+            XCTAssertThrowsError(try CloudAccountClient.route(path: "/history/\(recordID)/analyses/\(suffix)", method: "GET"))
+        }
+        XCTAssertThrowsError(try CloudAccountClient.route(path: "/history/\(recordID)/analyses/1", method: "PUT"))
         let classroomCodeID = String(repeating: "a", count: 64)
         XCTAssertNoThrow(try CloudAccountClient.route(path: "/courses/\(recordID)/codes/\(classroomCodeID)", method: "DELETE"))
         XCTAssertThrowsError(try CloudAccountClient.route(path: "/courses/\(recordID)/codes/\(recordID)", method: "DELETE"))

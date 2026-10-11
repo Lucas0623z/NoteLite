@@ -10,7 +10,7 @@ struct NoteLiteApp: App {
     @StateObject private var history = PracticeHistoryStore()
 
     var body: some Scene {
-        WindowGroup("音伴-你的音乐搭子") {
+        WindowGroup("黑白键AI-你的陪练搭子") {
             Group {
                 if legacyTestInterface { LibraryView() }
                 else { FigmaShellView() }

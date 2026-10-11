@@ -1,0 +1,12 @@
+NoteWise uses Spotify Basic Pitch 0.4.0's ICASSP 2022 CoreML model for optional local post-recording polyphonic transcription.
+Copyright 2022 Spotify AB. Licensed under Apache License, Version 2.0.
+The original model bytes and upstream license are preserved. BASIC-PITCH-LICENSE contains the full license.
+Upstream: https://github.com/spotify/basic-pitch/tree/v0.4.0
+The package hashes and model input/output contract are recorded in MODEL-LOCK.json.
+
+NoteWiseBasicPitchDecoder.swift adapts the upstream note_creation.py decoding rules and constants for Swift.
+The Swift port is a modified work. Copyright 2026 NoteLite contributors.
+Licensed under Apache License, Version 2.0 for the adapted decoder portion.
+
+The model's confidence values are neural activations, not calibrated correctness probabilities.
+Its contour resolution is one third of a semitone; it does not alone establish precise intonation.

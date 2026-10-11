@@ -15,12 +15,13 @@ import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPSHandler
+from performance_analysis import aggregate_music, normalize_performance, RULES as PERFORMANCE_RULES
 
 CONTRACTS = Path(__file__).parent / "contracts/practice-record-analysis"
-AGGREGATE_VERSION = "2.0-account-1"
-MAPPING_VERSION = "account-history-1"
-CLAIM_RULES_VERSION = "counts-only-scoped-text-and-investment-summary-2"
-SELECTION_VERSION = "all-selected-counts-fixed-category-order-1"
+AGGREGATE_VERSION = "2.0-account-performance-2"
+MAPPING_VERSION = "account-history-immutable-versions-2"
+CLAIM_RULES_VERSION = PERFORMANCE_RULES["version"]
+SELECTION_VERSION = "full-dimension-counts-coverage-positive-pending-bounded-2"
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
 MAX_INPUT_BYTES = 16 * 1024
 MAX_INPUT_TOKEN_BOUND = 32768
@@ -300,7 +301,18 @@ class PracticeAnalysis:
                 raise AnalysisError(409, "尚无已同步练习记录，请先保存一次练习。")
             if sum(row["size"] for row in selected) > MAX_SOURCE_BYTES:
                 raise AnalysisError(413, "记录内容超过本次汇总范围，请选择较少记录。")
-            rows = [dict(db.execute("SELECT event_id,payload,created,score_sha256,score_revision FROM history WHERE user_id=? AND event_id=?", (user_id, row["event_id"])).fetchone()) for row in selected]
+            rows = []
+            for selected_row in selected:
+                history = db.execute("SELECT * FROM history WHERE user_id=? AND event_id=?", (user_id, selected_row["event_id"])).fetchone()
+                record = self.store.history_meta(db, history)
+                if record.get("analysis", {}).get("schemaVersion") == 2:
+                    try:
+                        record["analysis"] = normalize_performance(record["analysis"], history["score_xml"], history["score_sha256"], history["score_revision"], record["mode"])
+                    except ValueError as error:
+                        raise AnalysisError(503, "演奏快照未通过当前规则复核，请重新分析该条记录。") from error
+                rows.append({"event_id": history["event_id"], "payload": json_bytes(record).decode(), "created": history["created"], "score_sha256": history["score_sha256"], "score_revision": history["score_revision"], "analysis_version": record.get("analysisVersion", 0), "analysis_hash": record.get("analysisHash")})
+            if sum(len(row["payload"].encode()) for row in rows) > MAX_SOURCE_BYTES:
+                raise AnalysisError(413, "记录内容超过本次汇总范围，请选择较少记录。")
         rows.sort(key=lambda row: row["event_id"])
         source_hash = sha(rows)
         records = [parse_json(row["payload"]) for row in rows]
@@ -310,12 +322,14 @@ class PracticeAnalysis:
         buckets = {key: [] for key in ("timing", "unanalysed", "empty", "pending", "pending-state", "wrong", "missed", "extra", "rhythm", "conflict")}
         duration = Decimal(0)
         for row, record in zip(rows, records):
-            base = {"eventId": row["event_id"], "sourceContentHash": sha(record), "scoreRevision": row["score_revision"], "scoreSha256": row["score_sha256"]}
+            base = {"eventId": row["event_id"], "analysisVersion": row["analysis_version"], "analysisHash": row["analysis_hash"], "sourceContentHash": sha(record), "scoreRevision": row["score_revision"], "scoreSha256": row["score_sha256"]}
             value = record.get("durationSeconds")
             if not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) and 0 <= value <= 86400:
                 duration += Decimal(str(value))
                 buckets["timing"].append({**base, "field": "/durationSeconds"})
             analysis = record.get("analysis") or {}
+            if isinstance(analysis, dict) and analysis.get("snapshotValidatedByServer") is True:
+                continue  # V2 is aggregated by opportunity and dimension below.
             state = analysis.get("status") if isinstance(analysis, dict) else None
             errors = analysis.get("errors") if isinstance(analysis, dict) else None
             if state == "uncertain":
@@ -380,10 +394,27 @@ class PracticeAnalysis:
         if buckets["conflict"]:
             add("conflicting-record-state", "pending_review", "other", "记录状态不一致", "部分分析状态或字段与练习协议不一致，需要复核，未计入确定演奏统计。", None, "pending_review")
         buckets["unavailable"] = [{"eventId": row["event_id"], "sourceContentHash": sha(record), "field": "/analysis"} for row, record in zip(rows, records)]
-        add("capability-dimensions-unavailable", "unavailable", "other", "音程、速度和稳定能力暂不可判定", "当前协议缺少预期音符匹配、已评估机会、可靠速度和技巧标签，不能生成音程、速度趋势、稳定强弱项或进步结论。", None, "unavailable", ["不同曲谱和版本没有被认定可比；错误计数没有失败率分母。"])
-        status = "partial" if metrics["confirmedClientErrorCount"] else "investment_only" if buckets["timing"] else "pending_review" if pending or buckets["pending-state"] or buckets["conflict"] else "no_usable_data"
-        coverage = {"description": scope["description"], "omittedDetail": True, "selectionPolicy": "所选记录全部在程序侧聚合；保留投入、未分析、客户端问题计数、待复核和限制；模型不接收原始逐音内容。", "limitations": ["模型未接收逐音记录、乐谱、曲名备注或录音；只解释本次已选汇总事实。", "计时不能替代演奏判定；未声明评估分母、匹配和可比条件。"] + (["超过最近 200 条的历史未纳入本次分析。"] if has_more else [])}
+        music = aggregate_music(rows, records, evidence, facts, scope, source_hash, AGGREGATE_VERSION)
+        if music:
+            metrics["performance"] = music
+            metrics["stableCapabilityRulesSatisfied"] = music["stableCapabilityRulesSatisfied"]
+            metrics["evaluatedOpportunities"] = music["coverageByDimension"]["pitch"]["evaluated"]
+            pitch = music["coverageByDimension"]["pitch"]
+            metrics["errorRate"] = pitch["failed"] / pitch["evaluated"] if pitch["evaluated"] else None
+        else:
+            add("capability-dimensions-unavailable", "unavailable", "other", "音程、速度和稳定能力暂不可判定", "当前协议缺少预期音符匹配、已评估机会、可靠速度和技巧标签，不能生成音程、速度趋势、稳定强弱项或进步结论。", None, "unavailable", ["不同曲谱和版本没有被认定可比；错误计数没有失败率分母。"])
+        status = "partial" if metrics["confirmedClientErrorCount"] or music and music["evaluatedDimensionOpportunities"] else "investment_only" if buckets["timing"] else "pending_review" if pending or buckets["pending-state"] or buckets["conflict"] or music and any(c["pending"] for c in music["coverageByDimension"].values()) else "no_usable_data"
+        coverage = {"description": scope["description"], "omittedDetail": True, "selectionPolicy": "全部所选记录按不可变版本聚合；保留维度覆盖、问题、局部正确样本、待复核与关键限制；音程和小节按样本分母选择细节。", "limitations": ["模型未接收逐音记录、乐谱、曲名备注或录音；只解释本次已选汇总事实。", "客户端测量未经过独立录音核验；计时不代表技术水平。", "曲目类型和技巧标签未声明；不同曲谱或不同版本不被认定可比。"] + (["超过最近 200 条的历史未纳入本次分析。"] if has_more else [])}
         model_input = {"schemaVersion": "2.0", "reportStatus": status, "locale": "zh-CN", "snapshotId": source_hash, "aggregateVersion": AGGREGATE_VERSION, "coverage": coverage, "facts": facts}
+        detail_prefixes = ("music-interval-", "music-location-", "music-voice-")
+        while len(facts) > 40 or len(json_bytes(model_input)) > MAX_INPUT_BYTES:
+            removable = next((i for i in range(len(facts)-1, -1, -1) if facts[i]["factId"].startswith(detail_prefixes)), None)
+            if removable is None:
+                break
+            removed = facts.pop(removable)
+            for ref in removed["evidenceRefs"]:
+                evidence.pop(ref, None)
+            coverage["selectionPolicy"] = "所选记录全量聚合；预算内保留覆盖、问题、局部正确、待复核和限制；省略部分音程、小节及声部文字细节，指标未省略。"
         validate_input(model_input, evidence, self.input_schema)
         if len(json_bytes([{"role": "system", "content": self.prompt}, {"role": "user", "content": json_bytes(model_input).decode()}])) + 512 > MAX_INPUT_TOKEN_BOUND:
             raise AnalysisError(413, "事实汇总超过输入预算，请选择较少的记录。")

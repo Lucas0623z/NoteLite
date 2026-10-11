@@ -122,10 +122,12 @@ type AttributeBackup = { element: Element; name: string; value: string | null };
 const descendants = (element: Element): Element[] => [element, ...Array.from(element.childNodes).flatMap((child) => child.nodeType === 1 ? descendants(child as Element) : [])];
 const restore = (attributes: AttributeBackup[]) => { for (const { element, name, value } of attributes) value === null ? element.removeAttribute(name) : element.setAttribute(name, value); };
 
+export type NotationFeedback = { key: NoteKey; state: "correct" | "wrong" | "pending" };
 export function createNotationInteraction(host: HTMLElement, bindings: () => NoteBinding[], onSelect: (key: NoteKey) => void) {
   let active = true;
   let selected: NoteKey | null = null;
   let playhead: NoteKey[] = [];
+  let feedback: NotationFeedback[] = [];
   let current: NoteBinding[] = [];
   let attributes: AttributeBackup[] = [];
   let colored: AttributeBackup[] = [];
@@ -137,11 +139,13 @@ export function createNotationInteraction(host: HTMLElement, bindings: () => Not
     for (const binding of current) {
       const chosen = selected !== null && noteKeyId(binding.key) === noteKeyId(selected);
       binding.head.setAttribute("aria-pressed", String(chosen));
-      if (!chosen) continue;
+      const state=feedback.find(value=>noteKeyId(value.key)===noteKeyId(binding.key))?.state;
+      if (!chosen && !state) continue;
+      const color=chosen?"#2563eb":state==="correct"?"#22a447":state==="wrong"?"#dc2626":"#d97706";
       for (const element of descendants(binding.head)) for (const name of ["fill", "stroke"]) {
         const value = element.getAttribute(name);
         if (value === "none" || name === "stroke" && value === null) continue;
-        colored.push({ element, name, value }); element.setAttribute(name, "#2563eb");
+        colored.push({ element, name, value }); element.setAttribute(name, color);
       }
     }
   };
@@ -223,6 +227,7 @@ export function createNotationInteraction(host: HTMLElement, bindings: () => Not
       colorSelection(); drawPointer();
     },
     setSelection(key: NoteKey | null) { if (active) { selected = key; colorSelection(); } },
+    setFeedback(values: NotationFeedback[]) { if (active) { feedback=values.map(value=>({key:{...value.key},state:value.state}));colorSelection(); } },
     setPlayhead(keys: NoteKey[]) { if (active) { playhead = [...keys]; drawPointer(); } },
     dispose() {
       active = false; host.removeEventListener("click", click); host.removeEventListener("keydown", keydown);

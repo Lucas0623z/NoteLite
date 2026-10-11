@@ -83,6 +83,9 @@ are rejected. Protected endpoints require the authentication described above.
 | POST | `/history` | Idempotent practice event with score snapshot |
 | GET | `/history?limit=100&cursor=…` | Own events and optional `nextCursor`; limit 1–200 |
 | GET | `/history/{eventId}/musicxml` | Exact practiced XML, SHA256 as ETag |
+| GET | `/history/{eventId}/analyses` | Owner only: immutable analysis version metadata and `latestVersion` |
+| POST | `/history/{eventId}/analyses` | Owner only: `{requestId,parentVersion,sourceHash,analysis}` → new immutable NoteWise V2 analysis |
+| GET | `/history/{eventId}/analyses/{version}` | Owner only: one immutable analysis, its canonical SHA256 and score source hash |
 | GET / POST | `/courses` | Own/enrolled classrooms / create `{title}` (max 40 chars) |
 | GET | `/courses/{uuid}` | Role, teacher username, shared scores, delivered scores, sharing scope |
 | POST | `/courses/{uuid}/scores` | Teacher only: `{sourceKind:'official'|'personal',scoreId}` → immutable course snapshot |
@@ -97,7 +100,7 @@ are rejected. Protected endpoints require the authentication described above.
 | GET | `/uploads/{uuid}` | Same student: `{uploadId,assignmentId,size,offset,mime,complete,expiresAt}` |
 | PUT | `/uploads/{uuid}` | Binary chunk ≤8 MiB, `Upload-Offset`, `application/octet-stream` |
 | POST | `/uploads/{uuid}/complete` | Verify full size, SHA256 and container signature/format |
-| POST | `/assignments/{uuid}/submissions` | Student: `{eventId,uploadId?,analysis?}` → submitted homework |
+| POST | `/assignments/{uuid}/submissions` | Student: `{eventId,uploadId?,analysis?,analysisVersion?}` → submitted homework pinned to that analysis version |
 | GET | `/assignments/{uuid}/submissions` | Teacher sees that assignment; student sees only own submissions |
 | GET | `/submissions/{uuid}` | Submitting student or that classroom's teacher only |
 | GET | `/submissions/{uuid}/musicxml` | Same scope, exact practiced-score snapshot |
@@ -186,6 +189,34 @@ Status may be `uncertain` or `analysed`; error types are `wrong`, `missed`, `ext
 Every saved result includes `verifiedByServer:false`. Null/omitted analysis is
 stored as `{status:'unanalysed',source:'none',errors:null,verifiedByServer:false}`.
 Submitting homework without a separate analysis reuses this event's analysis.
+
+### NoteWise V2 evidence and reanalysis
+
+Structured V2 records bind `takeId` to the practice event UUID and
+`sourceScoreSha256` to the immutable practiced MusicXML. The server checks the
+score relationship and derives dimension denominators from raw opportunities and
+detector evidence using `performance_analysis.py`. Measurement remains client
+reported (`verifiedByServer:false`); `snapshotValidatedByServer:true` describes
+the checked score relationship only. A new V2 history event creates version 1.
+The original history payload and practiced XML never change when reanalysed.
+
+Reanalysis uses a UUID `requestId`, the last seen integer `parentVersion` and
+mandatory `sourceHash` equal to the event's stored XML SHA256. Concurrent changes
+or a changed request body with a reused request ID return `409`. An exact retry
+returns its original version even after later versions exist. Each canonical JSON
+payload is limited to 1 MiB of UTF-8; each event has at most 64 versions, with
+128 MiB total analysis storage per account. History lists expose the latest
+analysis/version/hash. The separate version list returns metadata only; fetch
+one version to read its full evidence. Teachers see the submitted version and
+cannot read later private reanalyses or the owner's private version endpoints.
+
+`deploy/public-source-files.json` is the explicit public source allowlist,
+including the normalizer, synthetic fixture, regression tests and both interface
+schemas. Generate staged source hashes with
+`python deploy/build-public-manifest.py --output manifest.json`. Public archive
+builders must copy only these paths; private prompts, keys, recordings, SQLite
+files and user history must remain outside the source offer. Both installers
+reject an incomplete module manifest and compile the normalizer before restart.
 
 ### Classroom privacy and recording
 

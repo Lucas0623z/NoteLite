@@ -1,12 +1,15 @@
 import { account, ACCOUNT_EVENT, type AccountClient, type PracticeEvent, type PracticeAnalysis } from "./account.ts";
 import { createUUID } from "./cloud.ts";
+import type { NoteWiseAnalysis } from "./notewise.ts";
 
 export const PRACTICE_RECORD_EVENT = "notelite-practice-records-changed";
 export type PracticeRecord = {
   eventId: string; userId: string; name: string; scoreIdentity: string; musicxml: string;
   sourceKind: "local" | "official" | "personal"; scoreId?: string; scoreRevision?: number;
   startedAt: string; endedAt: string; durationSeconds: number; mode: PracticeEvent["mode"];
-  sync: "local" | "pending" | "synced"; interrupted?: boolean; error?: string; analysis?: PracticeAnalysis;
+  sync: "local" | "pending" | "synced"; interrupted?: boolean; error?: string; analysis?: PracticeAnalysis | NoteWiseAnalysis;
+  scoreSha256?:string; analysisVersion?:number; latestAnalysisVersion?:number; analysisHash?:string;
+  localAnalyses?:PracticeAnalysis[]; pendingAnalysis?:{requestId:string;parentVersion:number;sourceHash:string;analysis:NoteWiseAnalysis};
 };
 type RecordStore = { put: (record: PracticeRecord) => Promise<void>; getAll: () => Promise<PracticeRecord[]> };
 async function recordsDB<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -22,7 +25,7 @@ async function recordsDB<T>(mode: IDBTransactionMode, operation: (store: IDBObje
   });
 }
 const storage: RecordStore = { put: (record) => recordsDB("readwrite", (store) => store.put(record)).then(() => undefined), getAll: () => recordsDB("readonly", (store) => store.getAll()) };
-type RecordAccount = Pick<AccountClient, "current" | "createScore" | "addHistory" | "history">;
+type RecordAccount = Pick<AccountClient, "current" | "createScore" | "addHistory" | "history"> & Partial<Pick<AccountClient,"addHistoryAnalysis"|"historyAnalyses"|"historyAnalysis">>;
 
 /** A queued record belongs to its original account, never the next account that logs in. */
 export class PracticeRecords {
@@ -42,7 +45,8 @@ export class PracticeRecords {
     return (await this.store.getAll()).filter((record) => record.userId === owner).sort((left, right) => right.endedAt.localeCompare(left.endedAt));
   }
   async sync(record: PracticeRecord): Promise<PracticeRecord> {
-    if (record.sync === "synced" || record.userId === "guest" || this.client.current?.userId !== record.userId) return record;
+    if (record.userId === "guest" || this.client.current?.userId !== record.userId) return record;
+    if(record.sync==="synced")return record.pendingAnalysis?this.syncAnalysis(record):record;
     const previous = this.syncing.get(record.eventId); if (previous) return previous;
     const promise = this.performSync(record); this.syncing.set(record.eventId, promise);
     try { return await promise; } finally { this.syncing.delete(record.eventId); }
@@ -63,12 +67,28 @@ export class PracticeRecords {
         await this.store.put(record);
       }
       if (this.client.current?.userId !== record.userId) return record;
-      const result = await this.client.addHistory({ eventId: record.eventId, sourceKind: record.sourceKind === "official" ? "official" : "personal", scoreId: record.scoreId!, ...(record.scoreRevision ? { scoreRevision: record.scoreRevision } : {}), mode: record.mode, durationSeconds: record.durationSeconds, startedAt: record.startedAt, endedAt: record.endedAt });
-      record = { ...record, analysis: result.event.analysis, sync: "synced", error: undefined };
+      const result = await this.client.addHistory({ eventId: record.eventId, sourceKind: record.sourceKind === "official" ? "official" : "personal", scoreId: record.scoreId!, ...(record.scoreRevision ? { scoreRevision: record.scoreRevision } : {}), mode: record.mode, durationSeconds: record.durationSeconds, startedAt: record.startedAt, endedAt: record.endedAt, ...(record.analysis ? {analysis:record.analysis} : {}) });
+      record = { ...record, analysis: result.event.analysis,scoreSha256:result.event.scoreSha256,analysisVersion:result.event.analysisVersion,latestAnalysisVersion:result.event.latestAnalysisVersion,analysisHash:result.event.analysisHash, sync: "synced", error: undefined };
     } catch (error) { record = { ...record, sync: "pending", error: error instanceof Error ? error.message : "记录待同步。" }; }
-    await this.store.put(record); this.changed(); return record;
+    await this.store.put(record); this.changed(); return record.sync==="synced"&&record.pendingAnalysis?this.syncAnalysis(record):record;
   }
-  async retry(): Promise<void> { for (const record of await this.local()) if (record.sync === "pending") await this.sync(record); }
+  async reviseAnalysis(record:PracticeRecord,analysis:NoteWiseAnalysis):Promise<PracticeRecord>{
+    if(record.userId!=="guest" && this.client.current?.userId!==record.userId)return record;
+    const updated:PracticeRecord={...record,localAnalyses:[...(record.localAnalyses||[]),...(record.analysis?[structuredClone(record.analysis)]:[])].slice(-20),
+      ...(record.userId==="guest"?{analysis}:{pendingAnalysis:{requestId:createUUID(),parentVersion:record.latestAnalysisVersion||record.analysisVersion||1,sourceHash:record.scoreSha256||analysis.sourceScoreSha256,analysis}})};
+    await this.store.put(updated);this.changed();return updated.userId==="guest"?updated:this.syncAnalysis(updated);
+  }
+  private async syncAnalysis(record:PracticeRecord):Promise<PracticeRecord>{
+    const pending=record.pendingAnalysis;
+    if(!pending||record.sync!=="synced"||this.client.current?.userId!==record.userId||!this.client.addHistoryAnalysis)return record;
+    try {
+      const result=await this.client.addHistoryAnalysis(record.eventId,pending);
+      if(this.client.current?.userId!==record.userId)return record;
+      record={...record,analysis:result.analysis,analysisVersion:result.version,latestAnalysisVersion:result.version,analysisHash:result.analysisHash,pendingAnalysis:undefined,error:undefined};
+    }catch(error){record={...record,error:`录后分析已保存在本机，追加版本待确认：${error instanceof Error?error.message:"连接失败"}`};}
+    await this.store.put(record);this.changed();return record;
+  }
+  async retry(): Promise<void> { for (const record of await this.local()) if (record.sync === "pending"||record.pendingAnalysis) await this.sync(record); }
   async list(): Promise<PracticeRecord[]> {
     const owner = this.client.current?.userId, local = await this.local();
     if (!owner) return local;

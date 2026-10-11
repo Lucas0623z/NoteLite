@@ -154,6 +154,14 @@ test("selection survives a genuine SVG replacement by key and disposed listeners
   controller.dispose(); host.event("click", { target: current.path });
   assert.equal(selected.length, 1); assert.equal(current.path.getAttribute("fill"), "#ff0000"); assert.equal(current.element.getAttribute("role"), null);
 });
+test("actual practice feedback paints exact written heads and preserves blue edit selection and source colors",()=>{
+ const host=new Element("div"),svg=host.appendChild(new Element("svg"));const correct=head(svg,"#aabbcc"),wrong=head(svg),pending=head(svg);
+ const controller=createNotationInteraction(host as any,()=>[binding(0,correct.element),binding(1,wrong.element),binding(2,pending.element)],()=>{});controller.refresh();
+ controller.setFeedback([{key:key(0),state:"correct"},{key:key(1),state:"wrong"},{key:key(2),state:"pending"}]);
+ assert.equal(correct.path.getAttribute("fill"),"#22a447");assert.equal(wrong.path.getAttribute("fill"),"#dc2626");assert.equal(pending.path.getAttribute("fill"),"#d97706");
+ controller.setSelection(key(1));assert.equal(wrong.path.getAttribute("fill"),"#2563eb");controller.setSelection(null);assert.equal(wrong.path.getAttribute("fill"),"#dc2626");
+ controller.refresh();assert.equal(correct.path.getAttribute("fill"),"#22a447");controller.setFeedback([]);assert.equal(correct.path.getAttribute("fill"),"#aabbcc");assert.equal(wrong.path.getAttribute("fill"),"#000000");controller.dispose();
+});
 
 test("a physically shared glyph cannot silently choose one of two XML notes", () => {
   const host = new Element("div"); const shared = head(host); const selected: NoteKey[] = [];

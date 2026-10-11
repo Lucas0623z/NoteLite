@@ -1,6 +1,16 @@
 import Foundation
 import AVFoundation
 import CoreMIDI
+import Darwin
+
+struct MIDIPerformanceEvent: Equatable {
+    let type: String
+    let midi: Int
+    let channel: Int
+    let velocity: Int
+    let timestamp: UInt64
+    var sourceID: UInt = 0
+}
 
 /// MIDI 1.0 stream decoding, including running status, real-time bytes, and split packets.
 struct MIDINoteParser {
@@ -9,7 +19,11 @@ struct MIDINoteParser {
     private var systemExclusive = false
 
     mutating func consume(_ bytes: [UInt8]) -> [Int] {
-        var notes: [Int] = []
+        consumeEvents(bytes, timestamp: 0).filter { $0.type == "on" }.map(\.midi)
+    }
+
+    mutating func consumeEvents(_ bytes: [UInt8], timestamp: UInt64) -> [MIDIPerformanceEvent] {
+        var notes: [MIDIPerformanceEvent] = []
         for byte in bytes {
             if byte >= 0xF8 { continue }
             if byte & 0x80 != 0 {
@@ -26,7 +40,10 @@ struct MIDINoteParser {
             let command = status & 0xF0
             let needed = command == 0xC0 || command == 0xD0 ? 1 : 2
             if pending.count == needed {
-                if command == 0x90 && pending[1] > 0 { notes.append(Int(pending[0])) }
+                if command == 0x90 || command == 0x80 {
+                    notes.append(MIDIPerformanceEvent(type: command == 0x90 && pending[1] > 0 ? "on" : "off",
+                        midi: Int(pending[0]), channel: Int(status & 0x0F), velocity: Int(pending[1]), timestamp: timestamp))
+                }
                 pending.removeAll(keepingCapacity: true)
             }
         }
@@ -38,10 +55,13 @@ private final class MIDIStreamDecoder: @unchecked Sendable {
     private let lock = NSLock()
     private var parsers: [UInt: MIDINoteParser] = [:]
     func notes(_ bytes: [UInt8], source: UInt) -> [Int] {
+        events(bytes, source: source, timestamp: 0).filter { $0.type == "on" }.map(\.midi)
+    }
+    func events(_ bytes: [UInt8], source: UInt, timestamp: UInt64) -> [MIDIPerformanceEvent] {
         lock.lock()
         defer { lock.unlock() }
         var parser = parsers[source] ?? MIDINoteParser()
-        let result = parser.consume(bytes)
+        let result = parser.consumeEvents(bytes, timestamp: timestamp).map { value -> MIDIPerformanceEvent in var value=value;value.sourceID=source;return value }
         parsers[source] = parser
         return result
     }
@@ -65,6 +85,9 @@ private final class MicrophoneFrames: @unchecked Sendable {
 final class NativePracticeInput {
     var onNotes: (([Int]) -> Void)?
     var onAudio: (([Float], Double) -> Void)?
+    /// Called on the audio callback queue. PCM stays native; consumers must copy promptly.
+    var onPCM: ((AVAudioPCMBuffer, AVAudioTime) -> Void)?
+    var onMIDI: (([MIDIPerformanceEvent]) -> Void)?
     var onError: ((String) -> Void)?
     private var engine: AVAudioEngine?
     private var midiClient = MIDIClientRef()
@@ -102,7 +125,11 @@ final class NativePracticeInput {
                 throw NoteLiteError.server("未找到可用麦克风，请检查系统声音输入设置。")
             }
             let frames = MicrophoneFrames()
-            input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            let pcm = onPCM
+            let legacy = onAudio
+            input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, time in
+                pcm?(buffer, time)
+                guard legacy != nil else { return }
                 let batches = frames.append(buffer)
                 let rate = buffer.format.sampleRate
                 Task { @MainActor [weak self] in
@@ -135,29 +162,31 @@ final class NativePracticeInput {
             #endif
         } else if mode == "midi" {
             let decoder = MIDIStreamDecoder()
-            let clientStatus = MIDIClientCreateWithBlock("音伴-你的音乐搭子" as CFString, &midiClient) { [weak self] _ in
+            let clientStatus = MIDIClientCreateWithBlock("黑白键AI-你的陪练搭子" as CFString, &midiClient) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, self.generation == current else { return }
                     self.refreshMIDISources()
                 }
             }
             guard clientStatus == noErr else { stop(); throw NoteLiteError.server("无法启动 MIDI 服务（\(clientStatus)）。") }
-            let portStatus = MIDIInputPortCreateWithBlock(midiClient, "音伴演奏输入" as CFString, &midiPort) { [weak self] list, connection in
+            let portStatus = MIDIInputPortCreateWithBlock(midiClient, "NoteWise 演奏输入" as CFString, &midiPort) { [weak self] list, connection in
                 let source = UInt(bitPattern: connection)
                 var packet = UnsafeRawPointer(list).advanced(by: MemoryLayout<MIDIPacketList>.offset(of: \.packet)!)
                     .assumingMemoryBound(to: MIDIPacket.self)
-                var notes: [Int] = []
+                var events: [MIDIPerformanceEvent] = []
                 for _ in 0..<list.pointee.numPackets {
                     let bytes = UnsafeRawPointer(packet).advanced(by: MemoryLayout<MIDIPacket>.offset(of: \.data)!)
                         .assumingMemoryBound(to: UInt8.self)
-                    notes.append(contentsOf: decoder.notes(Array(UnsafeBufferPointer(start: bytes,
-                        count: Int(packet.pointee.length))), source: source))
+                    events.append(contentsOf: decoder.events(Array(UnsafeBufferPointer(start: bytes,
+                        count: Int(packet.pointee.length))), source: source, timestamp: packet.pointee.timeStamp))
                     packet = UnsafePointer(MIDIPacketNext(packet))
                 }
-                guard !notes.isEmpty else { return }
+                guard !events.isEmpty else { return }
+                let captured = events
                 Task { @MainActor [weak self] in
                     guard let self, self.generation == current else { return }
-                    self.onNotes?(notes)
+                    self.onMIDI?(captured)
+                    self.onNotes?(captured.filter { $0.type == "on" }.map(\.midi))
                 }
             }
             guard portStatus == noErr else { stop(); throw NoteLiteError.server("无法打开 MIDI 输入（\(portStatus)）。") }

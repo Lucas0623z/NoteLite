@@ -41,12 +41,30 @@ def write(path, raw, mode=0o644):
     os.chmod(name,mode);os.replace(name,path)
 
 
+def checked_account_release(root, manifest):
+    required = {"account_service.py", "practice_analysis.py", "performance_analysis.py", "integrated_service.py", "omr_bridge.py"}
+    assert isinstance(manifest, dict) and required <= set(manifest), "incomplete_account_release"
+    checked = {}
+    for name, expected in manifest.items():
+        assert isinstance(name, str) and name and "\\" not in name and ":" not in name
+        assert not Path(name).is_absolute() and ".." not in Path(name).parts
+        assert isinstance(expected, str) and len(expected) == 64 and all(c in "0123456789abcdef" for c in expected)
+        source = root / name
+        assert source.is_file() and not source.is_symlink() and source.resolve().is_relative_to(root.resolve())
+        raw = source.read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == expected, "account_source_hash_mismatch"
+        checked[name] = raw
+    return checked
+
+
 try:
     run(["systemctl","is-active","--quiet","notelite-omr.service"])
     for part,target in (("gateway",Path("/opt/notelite-gateway")),("accounts",Path("/opt/notelite-accounts"))):
         if part=="accounts" and target.exists():
             assert (target/".notelite-managed").is_file(),"unmanaged_account_source"
         source=STAGED/part;manifest=json.loads((source/"manifest.json").read_text())
+        if part == "accounts":
+            checked_account_release(source, manifest)
         for name,expected in manifest.items():
             path=source/name
             assert path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(source.resolve())
@@ -62,6 +80,7 @@ try:
             while parent!=target:
                 assert parent.resolve().is_relative_to(target.resolve())
                 parent.chmod(0o755);parent=parent.parent
+    run(["python3", "-m", "compileall", "-q", *[str(Path("/opt/notelite-accounts") / name) for name in ("account_service.py", "practice_analysis.py", "performance_analysis.py", "integrated_service.py", "omr_bridge.py")]])
     private=Path("/var/lib/notelite-accounts")
     assert not private.is_symlink();private.mkdir(mode=0o700,exist_ok=True)
     os.chown(private,identity.pw_uid,identity.pw_gid);os.chmod(private,0o700)
@@ -102,8 +121,11 @@ try:
 except BaseException:
     # Preserve every runtime database, recording and score; restore service code.
     for name,raw in saved.items():
+        path=Path(name)
         if raw is not None:
-            path=Path(name);path.write_bytes(raw)
+            path.write_bytes(raw)
+        else:
+            path.unlink(missing_ok=True)
     subprocess.run(["systemctl","stop","notelite-accounts.service"],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     subprocess.run(["systemctl","daemon-reload"],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     subprocess.run(["systemctl","restart","notelite-gateway.service"],stdout=subprocess.PIPE,stderr=subprocess.PIPE)

@@ -3,7 +3,7 @@ import PracticeSession, { type PracticeSource } from "./PracticeSession";
 import { createScoreRenderHost, resolveOSMDConstructor } from "./osmd";
 import { cancelNativeFileRequests, cloud, CloudError, createUUID, downloadBlob, errorMessage, isNativeCloud, type CloudJob, type CloudNote, type NoteEdit } from "./cloud";
 import { RemoteScoreLoader } from "./remote-score";
-import { createNotationInteraction, graphicalNoteBindings, inspectNoteDraft, noteKeyId, notationSources, prepareNotation, previewNoteEdits, restoreNotationSources, summarizeRuleErrors, type NoteKey } from "./notationInteraction";
+import { createNotationInteraction, graphicalNoteBindings, inspectNoteDraft, noteKeyId, notationSources, prepareNotation, previewNoteEdits, restoreNotationSources, summarizeRuleErrors, type NoteKey, type NotationFeedback } from "./notationInteraction";
 import { checkScoreRules, compareScoreRules, parseScoreXML, type ScoreRuleComparison, type ScoreRuleReport } from "./scoreRules";
 import { editScoreDocument, readScoreDocument, type ScoreDocumentPatch } from "./scoreDocumentEdit";
 import { ScoreStatus, type ScoreStatusVersion } from "./score-status";
@@ -46,6 +46,8 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const selectedKey = useRef<NoteKey | null>(null);
   const latestNotes = useRef<NoteInfo[]>([]);
   const playhead = useRef<NoteKey[]>([]);
+  const performanceColors = useRef<NotationFeedback[]>([]);
+  useEffect(()=>{interaction.current?.setSelection(practicing?null:selectedKey.current);if(!practicing){performanceColors.current=[];interaction.current?.setFeedback([]);}},[practicing]);
   const statusVersion = useMemo<ScoreStatusVersion>(() => ({ jobId: job?.id, score: scoreIndex, revision, xml }), [job?.id, scoreIndex, revision, xml]);
   useLayoutEffect(() => scoreStatus.select(statusVersion), [scoreStatus, statusVersion]);
   function setStatus(message: string, version?: ScoreStatusVersion) { scoreStatus.report(message, version); }
@@ -139,9 +141,9 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
     setDraftOwner(current || null);
     latestNotes.current = notes;
     selectedKey.current = current?.key || null;
-    interaction.current?.setSelection(selectedKey.current);
+    interaction.current?.setSelection(practicing?null:selectedKey.current);
     if (current) { setStep(current.step); setOctave(current.octave); setAlter(current.alter); setDuration(current.duration); setNoteType(current.source?.type || ""); setDot(String(current.source?.dot || 0)); setRest(current.rest); }
-  }, [current, notes]);
+  }, [current, notes, practicing]);
 
   useEffect(() => {
     const container = sheet.current;
@@ -170,7 +172,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
           if (index >= 0) { setSelected(index); setMeasure(""); }
         });
         interaction.current = localInteraction;
-        localInteraction.refresh(); localInteraction.setSelection(selectedKey.current); localInteraction.setPlayhead(playhead.current);
+        localInteraction.refresh(); localInteraction.setSelection(practicing?null:selectedKey.current); localInteraction.setPlayhead(playhead.current);localInteraction.setFeedback(performanceColors.current);
       }
       setSheetReady(true);
       layoutStatus.ready(job ? `曲谱已载入 · 校对版本 ${revision}${job.warnings?.length ? " · 请对照原稿核对识谱提示" : ""}` : xmlFile ? "MusicXML 已载入 · 可从右侧选择音符校对" : "压缩曲谱已载入 · 上传至识谱服务后可校对并导出 MIDI");
@@ -303,7 +305,7 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
           {notation ? <div ref={sheet} role={sheetReady ? "img" : undefined} aria-label={sheetReady ? "MusicXML 谱面" : undefined} /> : format === "PDF" && url ? <iframe src={url} title={`${name}乐谱原稿`} /> : originalFile?.type.startsWith("image/") && url ? <img src={url} alt={`${name}乐谱原稿`} /> : <p>{job && !remoteReady ? "正在等待识谱结果。" : "此文件暂不支持预览。"}</p>}
         </div>
       </main>
-      {practicing ? <PracticeSession name={name} measures={Math.max(1, new Set(notes.map((note) => note.measure)).size)} parts={[...new Set(notes.map((note) => note.part))]} musicxml={xml} recordIdentity={recordIdentity ? `${recordIdentity}${job ? `:${scoreIndex}` : ""}` : undefined} source={practiceSource} scoreIdentity={job ? `${job.id}:${scoreIndex}:${revision}` : `local:${localScoreIdentity}`} onPosition={(keys: NoteKey[]) => { playhead.current = keys; interaction.current?.setPlayhead(keys); }} /> : <aside className="score-inspector">
+      {practicing ? <PracticeSession name={name} measures={Math.max(1, new Set(notes.map((note) => note.measure)).size)} parts={[...new Set(notes.map((note) => note.part))]} musicxml={xml} recordIdentity={recordIdentity ? `${recordIdentity}${job ? `:${scoreIndex}` : ""}` : undefined} source={practiceSource} scoreIdentity={job ? `${job.id}:${scoreIndex}:${revision}` : `local:${localScoreIdentity}`} onPosition={(keys: NoteKey[]) => { playhead.current = keys; interaction.current?.setPlayhead(keys); }} onFeedback={values=>{performanceColors.current=values;interaction.current?.setFeedback(values);}} /> : <aside className="score-inspector">
         <p className="score-eyebrow">音符校对</p><h2>把每个音符校准</h2>
         <p className="score-description">{job ? "点击谱面音符或从列表选择，选中音符显示蓝色。校对保存后更新云端 MusicXML 与 MIDI。" : "点击谱面音符或从列表选择，选中音符显示蓝色。校对保存后更新本地 MusicXML。"}</p>
         {xml && <ScoreMetadataEditor xml={xml} disabled={busy || conflict} onSave={saveXML} onError={(error) => setStatus(errorMessage(error))} />}
