@@ -91,7 +91,9 @@ final class FigmaShellUITests: XCTestCase {
     @MainActor
     func testBundledFigmaScorePersistenceNativeFilePanelsAndPractice() throws {
         continueAfterFailure = false
-        executionTimeAllowance = 300
+        // Allow strict three-sample AX geometry, two system exports and a real process
+        // relaunch to finish cleanly within the existing global maximum.
+        executionTimeAllowance = 360
         #if os(iOS)
         XCUIDevice.shared.orientation = .portrait
         #endif
