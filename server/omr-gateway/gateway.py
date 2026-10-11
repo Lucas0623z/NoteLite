@@ -425,6 +425,7 @@ class Handler(BaseHTTPRequestHandler):
             raise GatewayError(400, "重复的查询参数。")
         if self.command == "GET" and target.path == "/api/health" and not query:
             status, value = self.json_upstream()
+            value["engine"] = "NoteLite"
             value["gateway"] = "device-scoped"
             value["authentication"] = "account-or-legacy-device" if self.server.account_resolver else "device-or-session"
             self.json(status, value)

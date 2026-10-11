@@ -268,6 +268,8 @@ final class FigmaShellUITests: XCTestCase {
         tempo.tap()
         tempo.typeText("96")
         assertFieldValue("96", field: tempo, in: app, name: "Figma-new-interactions-tempo-draft")
+        capture(app, name: "Figma-new-interactions-tempo96-after-real-input")
+        attachHierarchy(app, name: "Figma-new-interactions-tempo96-after-real-input-hierarchy")
         guard dismissIOSKeyboardIfPresent(app) else { return }
         let saveTempo = button("保存速度", in: app)
         makeInteractionHittable(saveTempo, in: app)

@@ -30,8 +30,8 @@ public final class LocalAudioAnalysis
     public static boolean available () { return findRuntime().isPresent(); }
 
     public static String availabilityMessage () {
-        return available() ? "Basic Pitch 本地录音分析已就绪。"
-                : "未安装 Basic Pitch 本地分析组件，请安装包含本地听音引擎的 Windows 版本。";
+        return available() ? "NoteWise 本地录音分析已就绪。"
+                : "未安装 NoteWise 本地分析组件，请安装包含本地听音引擎的 Windows 版本。";
     }
 
     /** Return validated UTF-8 schemaVersion 1 JSON, retaining all actual onset timestamps. */

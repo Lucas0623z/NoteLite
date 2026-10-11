@@ -92,6 +92,9 @@
 .score-description { margin-block: 12px; }
 .score-field { display: grid; gap: 7px; margin-block: 12px; font-size: 11px; color: var(--score-muted); }
 .score-field input, .score-field select { width: 100%; min-width: 0; min-height: 40px; border: 2px solid var(--score-line); border-radius: 10px; padding: 7px; background: var(--score-surface); color: var(--score-ink); font-size: 12px; }
+/* Keep text/number entry readable at the page's scale. Small input text makes
+   iPhone WebKit zoom the entire editor when the keyboard opens. */
+.score-field input { font-size: 16px; line-height: 20px; }
 .score-note-list { max-height: 240px; overflow-y: auto; border: 2px solid var(--score-line); border-radius: 12px; }
 .score-note-list button { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 13px 10px; font-size: 12px; border-bottom: 1px solid var(--score-line); text-align: left; cursor: pointer; }
 .score-note-list button[aria-pressed="true"] { background: var(--score-accent); color: #173b09; font-weight: 700; }

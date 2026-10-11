@@ -30,6 +30,8 @@ Content-Type: application/json
 
 除了 `/api/health`、首次 `/api/pair`，所有接口需要设备认证。每项创建的任务在 SQLite 内记录主体，读取、修改、导出均检查所有者；列表只返回本人任务，其他主体/原管理员验收任务返回 404。共享内部口令仅由网关读取 `/var/lib/audiveris/access-token` 并用于内部转发，它不能用于公网设备认证，不会下发客户端。
 
+公网 `/api/health` 的 `engine` 使用识谱产品名称 `NoteLite`。兼容字段 `engineVersion` 保留上游返回的实际基础识谱引擎版本，例如 Audiveris `5.11.0`，不表示 NoteLite 产品版本。本机上游健康信息、诊断日志、许可证与公开源码来源保留原有技术归属；此品牌别名不改变识谱实现或听音接入状态。
+
 - `POST /api/jobs?filename=URL编码文件名`：原始文件体，32 MiB；202 返回真实 job。
 - `GET /api/jobs`、`GET /api/jobs/{UUID}`：任务列表/状态，包含 `scores`（所有乐章）、`revision`、`artifacts` 字典。
 - `GET /api/jobs/{UUID}/score/notes?score=0`：逐音符数据。

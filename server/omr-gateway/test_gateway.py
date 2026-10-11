@@ -120,6 +120,7 @@ class GatewayTests(unittest.TestCase):
     def test_health_and_public_host_origin_validation(self):
         status, health, _ = self.request("GET", "/api/health", headers={"Host": "124.221.211.156", "Origin": self.server.origin})
         self.assertEqual(status, 200)
+        self.assertEqual(health["engine"], "NoteLite")
         self.assertEqual(health["engineVersion"], "5.11.0")
         self.assertEqual(health["authentication"], "device-or-session")
         self.assertEqual(self.request("GET", "/api/health", headers={"Host": "attacker.example"})[0], 403)
