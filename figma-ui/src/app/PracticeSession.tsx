@@ -138,8 +138,8 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
       <button type="button" className="score-tool" onClick={() => setShowRecords(!showRecords)}>{showRecords ? "收起练习记录" : "练习记录"}</button>
       {saveFailed && <button type="button" className="score-tool" onClick={() => void recordWriter.current()}>重试保存练习记录</button>}
       {showRecords && <div className="practice-records">{sessions.length ? sessions.map((session) => <p key={session.eventId}>{new Date(session.endedAt).toLocaleString("zh-CN")}<strong>{time(session.durationSeconds)} · {session.sync === "synced" ? "已同步" : session.sync === "pending" ? "待同步" : "本机"} · 未分析</strong></p>) : <p className="score-description">结束一次练习后，可在这里查看保存的计时记录。</p>}</div>}
-      <p className="score-description">演奏指针 · {performanceConnected ? "已收到演奏跟谱位置" : "等待连接 MIDI 或麦克风跟谱"}</p>
-      <p className="score-description">试听指针 · {playbackState === "playing" ? "随声音移动" : playbackState === "paused" ? "已暂停" : "点击试听后显示"}</p>
+      <p className="score-description">{`演奏指针 · ${performanceConnected ? "已收到演奏跟谱位置" : "等待连接 MIDI 或麦克风跟谱"}`}</p>
+      <p className="score-description">{`试听指针 · ${playbackState === "playing" ? "随声音移动" : playbackState === "paused" ? "已暂停" : "点击试听后显示"}`}</p>
     </aside>
     <footer className="practice-controls">
       <button type="button" disabled={running} className="score-tool" onClick={() => { setDraft(settings); setSettingsOpen(true); setNotice(""); }}>练习设置</button>

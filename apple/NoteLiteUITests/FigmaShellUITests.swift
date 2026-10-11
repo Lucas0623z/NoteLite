@@ -172,11 +172,22 @@ final class FigmaShellUITests: XCTestCase {
         startPractice.tap()
         XCTAssertTrue(text("练琴时刻", in: app).waitForExistence(timeout: 10))
         XCTAssertTrue(text("自由练习计时 · 不含演奏评分", in: app).exists)
-        XCTAssertTrue(text("演奏指针 · 等待连接 MIDI 或麦克风跟谱", in: app).exists,
+        let waitingPointer = text("演奏指针 · 等待连接 MIDI 或麦克风跟谱", in: app)
+        // On the real phone capture this description is below the viewport.
+        // Read it through ordinary scrolling before checking the whole text.
+        makeInteractionHittable(waitingPointer, in: app)
+        let waitingPointerExists = waitingPointer.waitForExistence(timeout: 10)
+        if !waitingPointerExists {
+            attachHierarchy(app, name: "Figma-waiting-pointer-text-missing-actual-hierarchy")
+            capture(app, name: "Figma-waiting-pointer-text-missing-actual-view")
+        }
+        XCTAssertTrue(waitingPointerExists,
                       "The reviewed UI must not claim an audio engine is connected")
         capture(app, name: "Figma-practice-awaiting-audio")
         let returnToEditing = button("返回曲谱校对", in: app)
         XCTAssertTrue(returnToEditing.waitForExistence(timeout: 10))
+        makeReturnNavigationHittable(returnToEditing, in: app)
+        XCTAssertTrue(returnToEditing.isHittable)
         returnToEditing.tap()
         XCTAssertTrue(text("曲谱预览与校对", in: app).waitForExistence(timeout: 10))
         #if os(macOS)
@@ -256,11 +267,20 @@ final class FigmaShellUITests: XCTestCase {
         tempo.tap()
         tempo.typeText("96")
         assertFieldValue("96", field: tempo, in: app, name: "Figma-new-interactions-tempo-draft")
+        guard dismissIOSKeyboardIfPresent(app) else { return }
         let saveTempo = button("保存速度", in: app)
         makeInteractionHittable(saveTempo, in: app)
         XCTAssertTrue(saveTempo.isEnabled)
         XCTAssertTrue(saveTempo.isHittable)
         saveTempo.tap()
+        let tempoSaved = text("曲谱信息已保存到本机。", in: app).waitForExistence(timeout: 20)
+        if !tempoSaved {
+            attachHierarchy(app, name: "Figma-new-interactions-tempo-save-confirmation-missing")
+            capture(app, name: "Figma-new-interactions-tempo-save-confirmation-missing")
+        }
+        XCTAssertTrue(tempoSaved,
+                      "The real tempo save must complete before the app is closed and relaunched")
+        guard tempoSaved else { return }
         assertScoreRendered(app, expectedPitches: ["C5", "D4", "E4", "F4"])
 
         relaunchLocalScore(app)
@@ -528,6 +548,60 @@ final class FigmaShellUITests: XCTestCase {
     #endif
 
     @MainActor
+    private func dismissIOSKeyboardIfPresent(_ app: XCUIApplication) -> Bool {
+        #if os(iOS)
+        // The real tempo-edit failure has a focused numeric input and a native
+        // Done accessory above the keyboard. Dismiss it with the actual button
+        // before scrolling the long metadata page back to its navigation.
+        if app.keyboards.firstMatch.exists {
+            let englishDone = app.buttons.matching(identifier: "Done").firstMatch
+            let chineseDone = app.buttons.matching(identifier: "完成").firstMatch
+            if englishDone.isHittable {
+                englishDone.tap()
+            } else if chineseDone.isHittable {
+                chineseDone.tap()
+            } else {
+                attachHierarchy(app, name: "Figma-return-navigation-keyboard-dismiss-missing")
+                capture(app, name: "Figma-return-navigation-keyboard-dismiss-missing")
+                XCTFail("The visible native keyboard must have a reachable dismissal control")
+                return false
+            }
+            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !app.keyboards.firstMatch.exists
+            }, object: app)
+            let result = XCTWaiter.wait(for: [dismissed], timeout: 10)
+            if result != .completed {
+                attachHierarchy(app, name: "Figma-return-navigation-keyboard-still-visible")
+                capture(app, name: "Figma-return-navigation-keyboard-still-visible")
+            }
+            XCTAssertEqual(result, .completed,
+                           "The real native Done control must dismiss the keyboard before navigation")
+            guard result == .completed else { return false }
+        }
+        #endif
+        return true
+    }
+
+    @MainActor
+    private func makeReturnNavigationHittable(_ element: XCUIElement, in app: XCUIApplication) {
+        #if os(iOS)
+        guard dismissIOSKeyboardIfPresent(app) else { return }
+        // The header is at the document's upper boundary: complete downward
+        // swipes cannot pass it. Short control-column drags are retained for
+        // note selection, where overshooting an interior control was observed.
+        for _ in 0..<12 where !element.isHittable {
+            app.webViews.firstMatch.swipeDown()
+        }
+        if !element.isHittable {
+            attachHierarchy(app, name: "Figma-return-navigation-scroll-exhausted")
+            capture(app, name: "Figma-return-navigation-scroll-exhausted")
+        }
+        #else
+        makeInteractionHittable(element, in: app, upward: false)
+        #endif
+    }
+
+    @MainActor
     private func selectHTMLValue(_ value: String, named label: String,
                                  in app: XCUIApplication) throws {
         #if os(macOS)
@@ -587,7 +661,7 @@ final class FigmaShellUITests: XCTestCase {
     @MainActor
     private func relaunchLocalScore(_ app: XCUIApplication) {
         let close = button("‹ 我的曲谱", in: app)
-        makeInteractionHittable(close, in: app, upward: false)
+        makeReturnNavigationHittable(close, in: app)
         XCTAssertTrue(close.isHittable)
         close.tap()
         XCTAssertTrue(button("查看曲谱", in: app).waitForExistence(timeout: 10))
