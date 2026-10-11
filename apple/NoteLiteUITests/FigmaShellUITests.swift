@@ -172,7 +172,7 @@ final class FigmaShellUITests: XCTestCase {
         startPractice.tap()
         XCTAssertTrue(text("练琴时刻", in: app).waitForExistence(timeout: 10))
         XCTAssertTrue(text("自由练习计时 · 不含演奏评分", in: app).exists)
-        XCTAssertTrue(text("演奏设备 · 尚未连接", in: app).exists,
+        XCTAssertTrue(text("演奏指针 · 等待连接 MIDI 或麦克风跟谱", in: app).exists,
                       "The reviewed UI must not claim an audio engine is connected")
         capture(app, name: "Figma-practice-awaiting-audio")
         let returnToEditing = button("返回曲谱校对", in: app)
