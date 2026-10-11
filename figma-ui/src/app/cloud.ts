@@ -37,7 +37,7 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "连接失败，请稍后重试。";
 }
 
-const pending = new Map<string, { resolve: (result: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+const pending = new Map<string, { action: string; resolve: (result: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 export function createUUID(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   const bytes = crypto.getRandomValues(new Uint8Array(16)); bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
@@ -68,10 +68,22 @@ export function nativeRequest<T>(action: string, payload: unknown = {}, timeout 
       const writing = action === "notes/patch" || action === "score/put";
       reject(new CloudError(writing ? "保存结果待确认，请重新载入最新版本。" : "连接超时，请检查网络或重新读取任务状态。", undefined, writing ? "write_status_unknown" : "timeout"));
     }, timeout);
-    pending.set(requestId, { resolve: (value) => resolve(value as T), reject, timer });
+    pending.set(requestId, { action, resolve: (value) => resolve(value as T), reject, timer });
     try { handler.postMessage({ requestId, action, payload }); }
     catch (error) { clearTimeout(timer); pending.delete(requestId); reject(error); }
   });
+}
+
+/** Prevent a closed score workspace from later opening a native preview or save dialog. */
+export function cancelNativeFileRequests(): void {
+  const handler = typeof window !== "undefined" && window.webkit?.messageHandlers?.noteLiteCloud;
+  if (!handler) return;
+  for (const [requestId, entry] of pending) {
+    if (!["files/view", "files/export", "files/save"].includes(entry.action)) continue;
+    clearTimeout(entry.timer); pending.delete(requestId);
+    try { handler.postMessage({ requestId: createUUID(), action: "request/cancel", payload: { targetRequestId: requestId } }); } catch { /* View already closed. */ }
+    entry.reject(new CloudError("已取消文件操作。", undefined, "cancelled"));
+  }
 }
 
 function jobPath(jobId: string, suffix = "", score?: number): string {
@@ -86,7 +98,8 @@ export class CloudClient {
   private fetcher: typeof fetch;
   private native: typeof isNativeCloud;
   private bridge: typeof nativeRequest;
-  constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest) { this.fetcher = fetcher; this.native = native; this.bridge = bridge; }
+  private timeouts: { read: number; write: number };
+  constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, timeouts = { read: 30000, write: 300000 }) { this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.timeouts = timeouts; }
   private async request(path: string, init: RequestInit = {}, response: "json" | "text" | "blob" = "json"): Promise<unknown> {
     const method = (init.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD" && path !== "/api/pair" && !this.csrf) await this.session();
@@ -94,19 +107,20 @@ export class CloudClient {
     if (method !== "GET" && method !== "HEAD" && path !== "/api/pair") headers.set("X-NoteLite-CSRF", this.csrf);
     let result: Response;
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), method === "GET" ? 30000 : 300000);
+    const timer = setTimeout(() => abort.abort(), method === "GET" ? this.timeouts.read : this.timeouts.write);
+    try {
     try { result = await this.fetcher(path, { ...init, headers, credentials: "same-origin", signal: abort.signal }); }
     catch { throw new CloudError(abort.signal.aborted ? "连接超时，请重新读取任务状态。" : "无法连接识谱服务，请检查网络后重试。", undefined, method === "PATCH" || method === "PUT" ? "write_status_unknown" : "network"); }
-    finally { clearTimeout(timer); }
     if (!result.ok) {
       let message = `识谱服务暂时无法处理请求（${result.status}）。`;
       try { const body = await result.json(); if (typeof body.error === "string") message = body.error; else if (body.error?.message) message = body.error.message; }
       catch { /* A reverse proxy may return an HTML error page. */ }
       if (result.status === 401) this.csrf = "";
-      throw new CloudError(message, result.status);
+      throw new CloudError(message, result.status, (method === "PATCH" || method === "PUT") && result.status >= 500 ? "write_status_unknown" : undefined);
     }
     try { return await (response === "text" ? result.text() : response === "blob" ? result.blob() : result.json()); }
     catch { throw new CloudError("服务响应未完整收到，请重新读取任务状态。", undefined, method === "PATCH" || method === "PUT" ? "write_status_unknown" : "network"); }
+    } finally { clearTimeout(timer); }
   }
   private async session(): Promise<{ authenticated: boolean; csrf: string }> {
     const session = await this.request("/api/session") as { authenticated: boolean; csrf: string };

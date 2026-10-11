@@ -250,7 +250,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             guard data.count <= CloudOMRClient.maximumUploadBytes else {
                 throw CloudOMRError(code: "file_too_large", message: "原稿预览不能超过 32 MiB。")
             }
-            guard previewURL == nil else { throw CloudOMRError(code: "busy", message: "原稿预览已经打开。") }
+            guard previewURL == nil, filePanel == nil else { throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。") }
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("notelite-preview-\(UUID().uuidString)", isDirectory: true)
             let fileURL = directory.appendingPathComponent(filename)
             try await Task.detached(priority: .userInitiated) {
@@ -259,6 +259,10 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                 catch { try? FileManager.default.removeItem(at: directory); throw error }
             }.value
             if Task.isCancelled { try? FileManager.default.removeItem(at: directory); throw CancellationError() }
+            guard previewURL == nil, filePanel == nil else {
+                try? FileManager.default.removeItem(at: directory)
+                throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。")
+            }
             clearPreview()
             previewDirectory = directory
             previewURL = fileURL
@@ -297,7 +301,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         }.value
         defer { try? FileManager.default.removeItem(at: directory) }
         try Task.checkCancellation()
-        guard exportContinuation == nil, importContinuation == nil else {
+        guard exportContinuation == nil, importContinuation == nil, filePanel == nil, previewURL == nil else {
             throw CloudOMRError(code: "busy", message: "文件选择窗口已经打开。")
         }
         let savedName = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in

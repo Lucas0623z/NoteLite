@@ -14,7 +14,9 @@ for candidate in \
   /Applications/Xcode_26.0.1.app \
   /Applications/Xcode.app; do
   if [ ! -x "$candidate/Contents/Developer/usr/bin/xcodebuild" ]; then continue; fi
-  version=$(DEVELOPER_DIR="$candidate/Contents/Developer" xcodebuild -version | head -n 1)
+  # Read the complete output. Closing stdout early (head -n 1) makes newer
+  # xcodebuild abort with NSFileHandleOperationException / Broken pipe.
+  version=$(DEVELOPER_DIR="$candidate/Contents/Developer" xcodebuild -version)
   if [[ "$version" == *[Bb]eta* || "$version" == *[Pp]review* ]]; then continue; fi
   sdk=$(DEVELOPER_DIR="$candidate/Contents/Developer" xcrun --sdk iphoneos --show-sdk-version)
   if [ "${sdk%%.*}" -lt 26 ]; then continue; fi

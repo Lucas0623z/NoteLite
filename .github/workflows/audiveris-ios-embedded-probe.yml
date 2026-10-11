@@ -22,15 +22,14 @@ concurrency:
   group: audiveris-embedded-probe-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-
 jobs:
   bridge-interface-check:
     runs-on: macos-26
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Select an installed stable Xcode
+        run: bash apple/scripts/select-xcode.sh
       - name: Test native build provenance gates
         run: |
           python3 tools/audiveris-port/test_download_native_artifacts.py
@@ -77,6 +76,19 @@ jobs:
             artifact_suffix: '-iPad'
     steps:
       - uses: actions/checkout@v4
+      - name: Select an installed stable Xcode
+        run: bash apple/scripts/select-xcode.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prepare the bundled Figma product interface
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+          pnpm --dir figma-ui typecheck
+          pnpm --dir figma-ui test
+          pnpm --dir figma-ui build
+          python3 apple/scripts/prepare-figma-ui.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

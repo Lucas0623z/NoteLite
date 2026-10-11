@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CloudClient, CloudError, createUUID, errorMessage, nativeRequest } from "../src/app/cloud.ts";
+import { cancelNativeFileRequests, CloudClient, CloudError, createUUID, errorMessage, nativeRequest } from "../src/app/cloud.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const job = { id, filename: "练习.pdf", state: "succeeded", revision: 2, scores: [], artifacts: {} };
@@ -61,6 +61,21 @@ test("a lost write response is marked unknown so the UI must reload before anoth
   await assert.rejects(client.put(id, 0, 1, "<score-partwise/>"), (error) => error instanceof CloudError && error.code === "write_status_unknown" && errorMessage(error).includes("重新载入"));
 });
 
+test("gateway 5xx responses after a write require a reload, preserving their actual HTTP status", async () => {
+  for (const status of [500, 502, 503, 504]) {
+    const { client } = mock({ "GET /api/session": { authenticated: true, csrf: "c" }, [`PATCH /api/jobs/${id}/notes?score=0`]: () => new Response(JSON.stringify({ error: "upstream error" }), { status }) });
+    await assert.rejects(client.patch(id, 0, 1, [{ partId: "P1", measureIndex: 0, noteIndex: 0, rest: true }]), (error) => error instanceof CloudError && error.status === status && error.code === "write_status_unknown");
+  }
+});
+
+test("the network timeout covers body reading after response headers", async () => {
+  const fetcher = async (_path: string | URL | Request, init: RequestInit = {}) => new Response(new ReadableStream({
+    start(controller) { init.signal!.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true }); },
+  }));
+  const client = new CloudClient(fetcher as typeof fetch, () => false, nativeRequest, { read: 10, write: 20 });
+  await assert.rejects(client.score(id, 0), (error) => error instanceof CloudError && error.code === "network");
+});
+
 test("restored cloud originals can be read without a cached local upload", async () => {
   const { client, calls } = mock({ [`GET /api/jobs/${id}/original?score=0`]: () => new Response("%PDF-1.7", { headers: { "Content-Type": "application/pdf" } }) });
   const blob = await client.original(id, 0, "original.pdf");
@@ -107,6 +122,17 @@ test("native bridge resolves callbacks and propagates native failures", async ()
   } } } } } as Window & typeof globalThis;
   try { assert.deepEqual(await nativeRequest("health"), { status: "ok" }); await assert.rejects(nativeRequest("jobs/import"), (error) => error instanceof CloudError && error.code === "cancelled" && error.status === 499); }
   finally { globalThis.window = saved; }
+});
+
+test("closing a workspace cancels a pending native file preview", async () => {
+  const saved = globalThis.window; const messages: { action: string; payload: unknown }[] = [];
+  globalThis.window = { webkit: { messageHandlers: { noteLiteCloud: { postMessage(message) { messages.push(message); } } } } } as Window & typeof globalThis;
+  try {
+    const request = nativeRequest("files/view", { jobId: id });
+    const rejected = assert.rejects(request, (error) => error instanceof CloudError && error.code === "cancelled");
+    cancelNativeFileRequests(); await rejected;
+    assert.equal(messages[1].action, "request/cancel"); assert.ok((messages[1].payload as { targetRequestId: string }).targetRequestId);
+  } finally { globalThis.window = saved; }
 });
 
 test("HTTPS configuration rejects insecure URLs and credential-bearing URLs", async () => {

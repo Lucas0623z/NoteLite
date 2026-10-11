@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import PracticeSession from "./PracticeSession";
-import { cloud, CloudError, downloadBlob, errorMessage, isNativeCloud, type CloudJob, type CloudNote, type NoteEdit } from "./cloud";
+import { resolveOSMDConstructor } from "./osmd";
+import { cancelNativeFileRequests, cloud, CloudError, downloadBlob, errorMessage, isNativeCloud, type CloudJob, type CloudNote, type NoteEdit } from "./cloud";
 
 type NoteInfo = { index: number; measure: string; part: string; step: string; octave: string; alter: string; duration: string; rest: boolean; source?: CloudNote };
 type Props = { name: string; format: string; file?: Blob; practice?: boolean; job?: CloudJob; orientationNotice?: string; onJob?: (job: CloudJob) => Promise<void>; onClose: () => void; onSave: (file: Blob) => Promise<void> };
@@ -37,6 +38,8 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
   const notation = !originalView && (xmlFile || (!job && format === "MXL"));
   const current = notes[selected];
   const filtered = notes.filter((note) => !measure || note.measure === measure);
+
+  useEffect(() => () => { generation.current++; cancelNativeFileRequests(); }, []);
 
   async function loadRemote(target: CloudJob, index: number, ticket = ++generation.current) {
     setStatus("正在载入最新曲谱…");
@@ -115,10 +118,13 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
     let display: import("opensheetmusicdisplay").OpenSheetMusicDisplay | undefined;
     let observer: ResizeObserver | undefined;
     setStatus("正在排版曲谱…");
-    import("opensheetmusicdisplay").then(async ({ OpenSheetMusicDisplay }) => {
+    import("opensheetmusicdisplay").then(async (module) => {
       if (!live) return;
+      const OpenSheetMusicDisplay = resolveOSMDConstructor(module);
       display = new OpenSheetMusicDisplay(container, { autoResize: false, backend: "svg", drawTitle: true });
-      await display.load(xmlFile ? xml : file!);
+      const source = xmlFile ? new DOMParser().parseFromString(xml, "application/xml") : file!;
+      if (source instanceof Document && (source.querySelector("parsererror") || source.documentElement.localName !== "score-partwise")) throw new Error("曲谱不是有效的 MusicXML。");
+      await display.load(source);
       if (!live) return;
       display.Zoom = zoom;
       display.render();
@@ -133,7 +139,10 @@ export default function ScoreWorkspace({ name, format, file, practice = false, j
         }
       });
       observer.observe(container.parentElement!);
-    }).catch(() => { if (live) setStatus("曲谱排版失败，请检查文件是否为有效的 MusicXML。"); });
+    }).catch((error) => {
+      console.error("MusicXML layout failed", error);
+      if (live) setStatus(`曲谱排版失败：${error instanceof Error ? error.message : String(error)}`);
+    });
     return () => { live = false; observer?.disconnect(); display?.clear(); };
   }, [xml, notation, file, xmlFile, zoom, revision]);
 

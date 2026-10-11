@@ -7,6 +7,7 @@ on:
     paths:
       - "apple/**"
       - "practice-web/**"
+      - "figma-ui/**"
       - "app/res/practice/**"
       - "tools/audiveris-port/**"
       - ".github/workflows/app-store-release.yml"
@@ -83,6 +84,14 @@ jobs:
           npm ci
           npm test
           npm run build
+      - name: Prepare the bundled Figma product interface
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+          pnpm --dir figma-ui typecheck
+          pnpm --dir figma-ui test
+          pnpm --dir figma-ui build
+          python3 apple/scripts/prepare-figma-ui.py
       - name: Prepare complete native artifacts and validate accepted source before export
         env:
           GH_TOKEN: ${{ github.token }}
