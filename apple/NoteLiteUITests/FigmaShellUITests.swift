@@ -247,7 +247,8 @@ final class FigmaShellUITests: XCTestCase {
         if pitchResult != .completed { attachHierarchy(app, name: "Figma-new-interactions-C5-save-missing") }
         XCTAssertEqual(pitchResult, .completed,
                        "Only a committed local edit may change the original C4 note to C5")
-        assertScoreRendered(app, expectedPitches: ["C5", "D4", "E4", "F4"])
+        assertScoreRendered(app, expectedFeedback: "校对已保存到本机。",
+                            expectedPitches: ["C5", "D4", "E4", "F4"])
         capture(app, name: "Figma-new-interactions-C5-after-real-save")
         attachHierarchy(app, name: "Figma-new-interactions-C5-after-real-save-hierarchy")
 
@@ -281,7 +282,8 @@ final class FigmaShellUITests: XCTestCase {
         XCTAssertTrue(tempoSaved,
                       "The real tempo save must complete before the app is closed and relaunched")
         guard tempoSaved else { return }
-        assertScoreRendered(app, expectedPitches: ["C5", "D4", "E4", "F4"])
+        assertScoreRendered(app, expectedFeedback: "曲谱信息已保存到本机。",
+                            expectedPitches: ["C5", "D4", "E4", "F4"])
 
         relaunchLocalScore(app)
         assertScoreRendered(app, expectedPitches: ["C5", "D4", "E4", "F4"])
