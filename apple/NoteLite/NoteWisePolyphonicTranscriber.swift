@@ -12,14 +12,48 @@ private final class NoteWiseTranscriptionCancellation: @unchecked Sendable {
     }
 }
 
+/// Bounded numeric evidence for native verification. No PCM, file path,
+/// account data or score enters this snapshot or the WebView result.
+struct NoteWiseTranscriptionDiagnostics: Codable, Sendable {
+    let computeUnitsRequested: String
+    let modelPredictionCount: Int
+    let audioSampleCount: Int
+    let audioNonzeroSampleCount: Int
+    let audioPeakAbsolute: Double
+    let audioRMS: Double
+    let maximumNoteActivation: Float
+    let maximumOnsetActivation: Float
+    let maximumContourActivation: Float
+    let decodedNotesBeforeAudioConstraint: Int
+    let digitalSilenceConstraintApplied: Bool
+}
+
 /// The shipped CoreML model, PCM conversion and decoder all run on one native
 /// queue. This module never fetches a model, uploads PCM, inspects a score or
 /// blocks the UI/WebView to transcribe a recording.
 final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.notelite.notewise.polyphonic", qos: .userInitiated)
     private let bundle: Bundle
+    private let computeUnits: MLComputeUnits
     private var model: MLModel?
-    init(bundle: Bundle = .main) { self.bundle = bundle }
+    private let diagnosticLock = NSLock()
+    private var diagnosticValue: NoteWiseTranscriptionDiagnostics?
+    init(bundle: Bundle = .main, computeUnits: MLComputeUnits = .all) {
+        self.bundle = bundle
+        self.computeUnits = computeUnits
+    }
+
+    func diagnosticsSnapshot() -> NoteWiseTranscriptionDiagnostics? {
+        diagnosticLock.lock()
+        defer { diagnosticLock.unlock() }
+        return diagnosticValue
+    }
+
+    private func storeDiagnostics(_ value: NoteWiseTranscriptionDiagnostics?) {
+        diagnosticLock.lock()
+        diagnosticValue = value
+        diagnosticLock.unlock()
+    }
 
     func transcribe(recordingURL: URL, tuning: Double = 440,
                     minimumMIDI: Int = 21, maximumMIDI: Int = 108) async throws -> NoteWiseRecordedTranscription {
@@ -33,13 +67,49 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
             return try await withCheckedThrowingContinuation { continuation in
                 queue.async { [self] in
                     do {
+                        storeDiagnostics(nil)
                         try cancellation.check()
                         let audio = try readAudio(recordingURL, cancellation: cancellation)
+                        var nonzeroSamples = 0
+                        var peak: Double = 0
+                        var squaredSum: Double = 0
+                        for sample in audio {
+                            if sample != 0 { nonzeroSamples += 1 }
+                            let value = Double(sample)
+                            peak = max(peak, abs(value))
+                            squaredSum += value * value
+                        }
+                        // Run the actual pinned model even for digital silence.
+                        // Its priors alone cannot prove a heard musical event.
                         let values = try infer(audio, cancellation: cancellation)
-                        let result = try NoteWiseBasicPitchDecoder.decode(frames: values.frames, onsets: values.onsets,
+                        let decoded = try NoteWiseBasicPitchDecoder.decode(frames: values.frames, onsets: values.onsets,
                             contour: values.contour, sampleCount: audio.count, tuning: tuning,
                             minimumMIDI: minimumMIDI, maximumMIDI: maximumMIDI,
                             checkCancellation: { try cancellation.check() })
+                        let digitalSilence = nonzeroSamples == 0
+                        let result = digitalSilence ? NoteWiseRecordedTranscription(notes: [], uncertaintyIntervals: [],
+                            sampleRate: decoded.sampleRate, sampleCount: decoded.sampleCount,
+                            durationMs: decoded.durationMs, tuning: decoded.tuning,
+                            modelVersion: decoded.modelVersion, detectorVersion: decoded.detectorVersion,
+                            supportedPitchRange: decoded.supportedPitchRange,
+                            warnings: decoded.warnings + ["录音为数字静音，没有可听见的音乐事件。"]) : decoded
+                        let requestedUnits: String
+                        switch computeUnits {
+                        case .all: requestedUnits = "all"
+                        case .cpuOnly: requestedUnits = "cpuOnly"
+                        case .cpuAndGPU: requestedUnits = "cpuAndGPU"
+                        case .cpuAndNeuralEngine: requestedUnits = "cpuAndNeuralEngine"
+                        @unknown default: requestedUnits = "unknown"
+                        }
+                        storeDiagnostics(NoteWiseTranscriptionDiagnostics(computeUnitsRequested: requestedUnits,
+                            modelPredictionCount: values.predictionCount, audioSampleCount: audio.count,
+                            audioNonzeroSampleCount: nonzeroSamples, audioPeakAbsolute: peak,
+                            audioRMS: sqrt(squaredSum / Double(audio.count)),
+                            maximumNoteActivation: values.frames.max() ?? 0,
+                            maximumOnsetActivation: values.onsets.max() ?? 0,
+                            maximumContourActivation: values.contour.max() ?? 0,
+                            decodedNotesBeforeAudioConstraint: decoded.notes.count,
+                            digitalSilenceConstraintApplied: digitalSilence))
                         try cancellation.check()
                         continuation.resume(returning: result)
                     } catch { continuation.resume(throwing: error) }
@@ -54,7 +124,7 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
             throw NoteWiseTranscriptionError.missingModel
         }
         let configuration = MLModelConfiguration()
-        configuration.computeUnits = .all
+        configuration.computeUnits = computeUnits
         let loaded = try MLModel(contentsOf: url, configuration: configuration)
         let input = loaded.modelDescription.inputDescriptionsByName["input_2"]?.multiArrayConstraint
         guard input?.shape.map(\.intValue) == [1, NoteWiseBasicPitchDecoder.inputSamples, 1],
@@ -133,6 +203,7 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
         var frames: [Float] = []
         var onsets: [Float] = []
         var contour: [Float] = []
+        var predictionCount = 0
     }
 
     private func infer(_ audio: [Float], cancellation: NoteWiseTranscriptionCancellation) throws -> Activations {
@@ -155,6 +226,7 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
                 }
                 let provider = try MLDictionaryFeatureProvider(dictionary: ["input_2": MLFeatureValue(multiArray: input)])
                 let prediction = try model.prediction(from: provider)
+                result.predictionCount += 1
                 try append(prediction.featureValue(for: "Identity_1")?.multiArrayValue, bins: 88,
                            into: &result.frames, expectedFrames: expectedFrames)
                 try append(prediction.featureValue(for: "Identity_2")?.multiArrayValue, bins: 88,

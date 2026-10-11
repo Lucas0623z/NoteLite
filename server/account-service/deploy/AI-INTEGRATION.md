@@ -31,6 +31,15 @@ outbound result blocks another call for the same input, including with a new
 request ID. Known failures return program-produced fallback facts with an
 explicit retry flag; a later paid attempt requires a new user action.
 
+The supplied private system prompt remains the first system message unchanged.
+A separate public runtime constraint tells the model to qualify each visible
+conclusion citing `provisional_pattern` as a current-sample initial observation.
+For each such observation, both its title and description must explicitly use
+`当前样本`, `初步观察` or `初步`. The existing semantic guard remains authoritative;
+unqualified output is rejected rather than rewritten into success. The public
+runtime constraint hash enters the cache fingerprint, and its message bytes
+enter both input-budget checks. No automatic model retry is added.
+
 The production acceptance uses one synthetic timer event and one actual model
 request, then validates the cached repeat and cross-account/empty-record
 refusals. No user's original performance is submitted as an acceptance test.

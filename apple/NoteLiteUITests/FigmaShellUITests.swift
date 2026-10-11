@@ -775,7 +775,12 @@ final class FigmaShellUITests: XCTestCase {
         guard let window = firstSnapshot(in: snapshot, matching: { $0.elementType == .window }),
               let web = firstSnapshot(in: window, matching: { $0.elementType == .webView }),
               let target = firstSnapshot(in: web, matching: {
-                  $0.elementType == .button && ($0.identifier == label || $0.label == label)
+                  // WebKit text buttons on macOS expose AXTitle, while
+                  // aria-label controls expose AXDescription. Match the same
+                  // public names as the element query without taking a second
+                  // snapshot or substituting coordinates for the actual tap.
+                  $0.elementType == .button &&
+                      ($0.identifier == label || $0.label == label || $0.title == label)
               }) else { return nil }
         return NativeInteractionGeometry(application: snapshot.frame, window: window.frame,
                                          webView: web.frame, target: target.frame)

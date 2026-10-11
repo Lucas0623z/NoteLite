@@ -80,7 +80,12 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
     func testActualBundledCoreMLTranscribesChordAndLaterRepeatedPitch() async throws {
         let recording = try syntheticRecording(silent: false)
         defer { try? FileManager.default.removeItem(at: recording) }
-        let actual = try await NoteWisePolyphonicTranscriber().transcribe(recordingURL: recording)
+        let transcriber = NoteWisePolyphonicTranscriber()
+        let actual = try await transcriber.transcribe(recordingURL: recording)
+        let diagnostics = try attachDiagnostics(transcriber, name: "NoteWise-actual-CoreML-sounding-signal-diagnostics")
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0, "The bundled model must actually run")
+        XCTAssertGreaterThan(diagnostics.audioNonzeroSampleCount, 0)
+        XCTAssertFalse(diagnostics.digitalSilenceConstraintApplied, "Sounding chords must retain the actual model and decoder output")
         XCTAssertEqual(actual.modelVersion, "0.4.0")
         XCTAssertEqual(actual.detectorVersion, "basic-pitch-coreml-0.4.0")
         XCTAssertEqual(actual.sampleRate, 22050)
@@ -101,10 +106,28 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
     func testActualBundledCoreMLSilenceDoesNotBecomeCorrectNotes() async throws {
         let recording = try syntheticRecording(silent: true)
         defer { try? FileManager.default.removeItem(at: recording) }
-        let actual = try await NoteWisePolyphonicTranscriber().transcribe(recordingURL: recording)
+        let transcriber = NoteWisePolyphonicTranscriber()
+        let actual = try await transcriber.transcribe(recordingURL: recording)
+        // Preserve audio and raw-model evidence before any assertion can fail.
+        let diagnostics = try attachDiagnostics(transcriber, name: "NoteWise-actual-CoreML-digital-silence-diagnostics")
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0, "Silence must still exercise the actual bundled model")
+        XCTAssertEqual(diagnostics.audioNonzeroSampleCount, 0, "The converted synthetic recording must be actual digital silence")
+        XCTAssertEqual(diagnostics.audioPeakAbsolute, 0)
+        XCTAssertEqual(diagnostics.audioRMS, 0)
+        XCTAssertTrue(diagnostics.digitalSilenceConstraintApplied)
         XCTAssertTrue(actual.notes.isEmpty, "Actual CoreML silence must not manufacture performance notes")
         XCTAssertTrue(actual.uncertaintyIntervals.isEmpty)
         XCTAssertEqual(actual.durationMs, 6000, accuracy: 1)
+    }
+
+    private func attachDiagnostics(_ transcriber: NoteWisePolyphonicTranscriber,
+                                   name: String) throws -> NoteWiseTranscriptionDiagnostics {
+        let diagnostics = try XCTUnwrap(transcriber.diagnosticsSnapshot())
+        let proof = XCTAttachment(data: try JSONEncoder().encode(diagnostics), uniformTypeIdentifier: "public.json")
+        proof.name = name
+        proof.lifetime = .keepAlways
+        add(proof)
+        return diagnostics
     }
 
     private func syntheticRecording(silent: Bool) throws -> URL {

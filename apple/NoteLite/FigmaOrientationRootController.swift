@@ -49,7 +49,7 @@ final class FigmaOrientationRootController: UIViewController {
     }
     @available(iOS 26.0, *)
     override var prefersInterfaceOrientationLocked: Bool {
-        FigmaOrientationPolicy.shared.lockedLandscape
+        FigmaOrientationPolicy.shared.prefersOrientationLock
     }
     override var childForStatusBarStyle: UIViewController? { content }
     override var childForStatusBarHidden: UIViewController? { content }
@@ -73,7 +73,7 @@ final class FigmaOrientationRootController: UIViewController {
         guard ProcessInfo.processInfo.arguments.contains("--uitesting-figma"),
               let window = viewIfLoaded?.window, let scene = window.windowScene else { return }
         let launchID = ProcessInfo.processInfo.environment["NOTELITE_UI_LAUNCH_ID"] ?? "unspecified"
-        var value = "[NoteLite geometry] launch=\(launchID) pid=\(ProcessInfo.processInfo.processIdentifier) window=\(window.bounds) screen=\(scene.screen.bounds) orientation=\(scene.interfaceOrientation.rawValue) requestedLock=\(FigmaOrientationPolicy.shared.lockedLandscape)"
+        var value = "[NoteLite geometry] launch=\(launchID) pid=\(ProcessInfo.processInfo.processIdentifier) window=\(window.bounds) screen=\(scene.screen.bounds) orientation=\(scene.interfaceOrientation.rawValue) requestedLock=\(FigmaOrientationPolicy.shared.prefersOrientationLock) restorePending=\(FigmaOrientationPolicy.shared.restoringOrientation)"
         if #available(iOS 26.0, *) {
             value += " effectiveLock=\(scene.effectiveGeometry.isInterfaceOrientationLocked)"
         }

@@ -28,6 +28,21 @@ MAX_INPUT_TOKEN_BOUND = 32768
 MAX_OUTPUT_TOKENS = 4096
 UUID_RE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 SETTINGS = {"response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}, "temperature": 0, "max_tokens": MAX_OUTPUT_TOKENS, "stream": False}
+RUNTIME_OUTPUT_CONSTRAINTS = (
+    "运行时 V2 输出约束：保留既有分析规则，只解释收到的事实。"
+    "凡引用 claimState 为 provisional_pattern 的事实，每一个用户可见结论都必须明确限定为当前样本的初步观察。"
+    "尤其 observations 的每一项，只要 factIds 引用任意 provisional_pattern 事实，"
+    "其 title 和 description 每个字段都须包含以下至少一个原样中文短语：当前样本、初步观察、初步。"
+    "摘要与建议引用这些事实时也须保留该限定，不得把局部样本升级为稳定强项、弱项或进步。"
+    "输出前逐项核对 factIds 和上述限定；仅 JSON 结构合法并不等于结论通过校验。"
+)
+
+
+def provider_messages(prompt, input_value, runtime_instructions=""):
+    messages = [{"role": "system", "content": prompt}]
+    if runtime_instructions:
+        messages.append({"role": "system", "content": runtime_instructions})
+    return [*messages, {"role": "user", "content": json_bytes(input_value).decode("utf8")}]
 
 
 class AnalysisError(Exception):
@@ -232,11 +247,12 @@ class DeepSeekProvider:
         self.key_file, self.model = Path(key_file), model
         self.skill_dir = private_skill_directory(skill_dir)
         self.prompt = (self.skill_dir / "deepseek-system-prompt.txt").read_text(encoding="utf8")
+        self.runtime_instructions = RUNTIME_OUTPUT_CONSTRAINTS
         self.settings = SETTINGS.copy()
         self.opener = build_opener(NoRedirect(), HTTPSHandler())
 
     def __call__(self, input_value):
-        messages = [{"role": "system", "content": self.prompt}, {"role": "user", "content": json_bytes(input_value).decode("utf8")}]
+        messages = provider_messages(self.prompt, input_value, self.runtime_instructions)
         # Conservative UTF-8 byte upper bound plus message framing, not billing
         # token estimation or an asserted provider-specific tokenizer count.
         if len(json_bytes(input_value)) > MAX_INPUT_BYTES or len(json_bytes(messages)) + 512 > MAX_INPUT_TOKEN_BOUND:
@@ -278,7 +294,8 @@ class PracticeAnalysis:
         self.prompt = getattr(provider, "prompt", None)
         if not isinstance(self.prompt, str) or not self.prompt:
             raise AnalysisError(503, "文字分析规则尚未配置。")
-        self.fingerprint = {"aggregateVersion": AGGREGATE_VERSION, "mappingVersion": MAPPING_VERSION, "claimRulesVersion": CLAIM_RULES_VERSION, "selectionVersion": SELECTION_VERSION, "promptHash": sha(self.prompt.encode()), "inputSchemaHash": sha(self.input_schema), "outputSchemaHash": sha(self.output_schema), "model": getattr(provider, "model", "test-provider"), "settings": getattr(provider, "settings", SETTINGS), "locale": "zh-CN", "timezone": "UTC"}
+        self.runtime_instructions = getattr(provider, "runtime_instructions", "")
+        self.fingerprint = {"aggregateVersion": AGGREGATE_VERSION, "mappingVersion": MAPPING_VERSION, "claimRulesVersion": CLAIM_RULES_VERSION, "selectionVersion": SELECTION_VERSION, "promptHash": sha(self.prompt.encode()), "runtimeInstructionsHash": sha(self.runtime_instructions.encode()), "inputSchemaHash": sha(self.input_schema), "outputSchemaHash": sha(self.output_schema), "model": getattr(provider, "model", "test-provider"), "settings": getattr(provider, "settings", SETTINGS), "locale": "zh-CN", "timezone": "UTC"}
         with store.connect() as db:
             db.executescript("""
             CREATE TABLE IF NOT EXISTS practice_analysis_v2_requests(user_id TEXT NOT NULL,request_id TEXT NOT NULL,input_sha TEXT NOT NULL,state TEXT NOT NULL,result TEXT,attempted INTEGER NOT NULL,created REAL NOT NULL,PRIMARY KEY(user_id,request_id));
@@ -417,7 +434,7 @@ class PracticeAnalysis:
                 evidence.pop(ref, None)
             coverage["selectionPolicy"] = "所选记录全量聚合；预算内保留覆盖、问题、局部正确、待复核和限制；省略部分音程、小节及声部文字细节，指标未省略。"
         validate_input(model_input, evidence, self.input_schema)
-        if len(json_bytes([{"role": "system", "content": self.prompt}, {"role": "user", "content": json_bytes(model_input).decode()}])) + 512 > MAX_INPUT_TOKEN_BOUND:
+        if len(json_bytes(provider_messages(self.prompt, model_input, self.runtime_instructions))) + 512 > MAX_INPUT_TOKEN_BOUND:
             raise AnalysisError(413, "事实汇总超过输入预算，请选择较少的记录。")
         return {"modelInput": model_input, "scope": scope, "evidenceIndex": evidence, "metrics": metrics, "sourceHash": source_hash}
 

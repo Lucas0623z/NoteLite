@@ -460,6 +460,8 @@ class ProviderTransportTests(unittest.TestCase):
                     self.assertEqual(provider(input_value), good)
                 self.assertEqual(len(calls), 1)
                 self.assertEqual(calls[0]["messages"][0]["content"], SYNTHETIC_PROMPT)
+                self.assertEqual(calls[0]["messages"][1], {"role": "system", "content": module.RUNTIME_OUTPUT_CONSTRAINTS})
+                self.assertEqual(calls[0]["messages"][2], {"role": "user", "content": module.json_bytes(input_value).decode("utf8")})
                 self.assertEqual(calls[0]["response_format"], {"type": "json_object"})
                 self.assertEqual(calls[0]["thinking"], {"type": "disabled"})
                 self.assertLessEqual(calls[0]["max_tokens"], 4096)
@@ -484,6 +486,52 @@ class ProviderTransportTests(unittest.TestCase):
             store = accounts.Store(directory / "test-store")
             analyzer = module.PracticeAnalysis(store, provider)
             self.assertEqual(analyzer.fingerprint["promptHash"], module.sha(SYNTHETIC_PROMPT.encode()))
+            self.assertEqual(analyzer.fingerprint["runtimeInstructionsHash"], module.sha(module.RUNTIME_OUTPUT_CONSTRAINTS.encode()))
+            provider.runtime_instructions += " 当前样本限定必须保留。"
+            changed = module.PracticeAnalysis(store, provider)
+            self.assertNotEqual(analyzer.fingerprint, changed.fingerprint)
+
+    def test_serialized_provisional_observation_requires_qualification_without_rewriting_output(self):
+        data = synthetic_input()
+        data["reportStatus"] = "partial"
+        fact = data["facts"][0]
+        fact.update(kind="performance_observation", claimState="provisional_pattern", dimension="rhythm")
+        bad = valid_output(data)
+        bad["observations"][0]["title"] = "观察"
+        bad["observations"][0]["description"] = "Synthetic timer recorded 30 seconds."
+        for qualification in (None, "当前样本", "初步观察", "初步"):
+            with self.subTest(qualification=qualification), tempfile.TemporaryDirectory() as root:
+                directory = Path(root)
+                key = directory / "synthetic-key"
+                key.write_text("sk-" + "synthetic" * 4, encoding="ascii")
+                (directory / "deepseek-system-prompt.txt").write_text(SYNTHETIC_PROMPT, encoding="utf8")
+                for name in ("aggregate-input.schema.json", "output.schema.json"):
+                    shutil.copyfile(module.CONTRACTS / name, directory / name)
+                provider = module.DeepSeekProvider(key, skill_dir=directory)
+                output = deepcopy(bad)
+                if qualification:
+                    output["observations"][0]["title"] = qualification + "观察"
+                    output["observations"][0]["description"] = qualification + "：Synthetic timer recorded 30 seconds."
+                calls = []
+                class Response(io.BytesIO):
+                    status = 200
+                class Opener:
+                    def open(self, request, timeout):
+                        calls.append(json.loads(request.data))
+                        return Response(module.json_bytes({"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(output)}}]}))
+                provider.opener = Opener()
+                received = provider(data)
+                self.assertEqual(received, output)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0]["messages"][0]["content"], SYNTHETIC_PROMPT)
+                self.assertIn("provisional_pattern", calls[0]["messages"][1]["content"])
+                self.assertIn("title 和 description 每个字段", calls[0]["messages"][1]["content"])
+                self.assertEqual(json.loads(calls[0]["messages"][-1]["content"]), data)
+                if qualification:
+                    self.assertEqual(module.validate_output(received, data), output)
+                else:
+                    with self.assertRaisesRegex(ValueError, "Provisional claim lost its qualification"):
+                        module.validate_output(received, data)
 
 
 if __name__ == "__main__":

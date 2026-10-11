@@ -1,6 +1,8 @@
 import XCTest
 #if os(iOS)
 import UIKit
+#else
+import AppKit
 #endif
 
 final class NoteLiteUITests: XCTestCase {
@@ -74,9 +76,41 @@ final class NoteLiteUITests: XCTestCase {
         XCTAssertTrue(start.isHittable, "The bottom practice control must not be clipped")
         XCTAssertTrue(back.isHittable, "The native return control must not be clipped")
         #if os(macOS)
-        let windowBottom = app.windows.firstMatch.frame.maxY
-        XCTAssertLessThanOrEqual(start.frame.maxY, windowBottom + 1)
-        XCTAssertLessThanOrEqual(back.frame.maxY, windowBottom + 1)
+        // The practice sheet is taller than the library window underneath it.
+        // Compare controls with the native presentation that actually owns them.
+        let sheets = app.sheets.containing(.button, identifier: "practice-close")
+        let sheet = sheets.firstMatch
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screen.name = "Practice-native-presentation-actual-screen"
+        screen.lifetime = .keepAlways
+        add(screen)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "Practice-native-presentation-actual-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5),
+                      "The practice controls must belong to the actual native sheet")
+        XCTAssertEqual(sheets.count, 1, "Only one active sheet may own the practice controls")
+        let renderer = sheet.webViews.firstMatch
+        XCTAssertTrue(renderer.exists, "The native sheet must contain the real practice renderer")
+        let frame = sheet.frame
+        XCTAssertGreaterThan(frame.width, 0)
+        XCTAssertGreaterThan(frame.height, 0)
+        let bounds = frame.insetBy(dx: -1, dy: -1)
+        XCTAssertTrue(bounds.contains(renderer.frame), "The full renderer must fit inside its native sheet")
+        XCTAssertTrue(bounds.contains(start.frame), "The whole start control must fit inside its native sheet")
+        XCTAssertTrue(bounds.contains(back.frame), "The whole return control must fit inside its native sheet")
+        // XCTest accessibility rectangles use a top-left global origin, while
+        // AppKit display rectangles use the primary display's bottom-left origin.
+        guard let primaryTop = NSScreen.screens.first?.frame.maxY else {
+            XCTFail("A real display is required to verify the complete practice sheet")
+            return
+        }
+        let screenFrame = CGRect(x: frame.minX, y: primaryTop - frame.maxY,
+                                 width: frame.width, height: frame.height)
+        XCTAssertTrue(NSScreen.screens.contains { display in
+            display.visibleFrame.insetBy(dx: -1, dy: -1).contains(screenFrame)
+        }, "The full native practice sheet must remain above the Dock and inside a visible display")
         #endif
     }
 
