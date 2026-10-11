@@ -78,11 +78,12 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
     }
 
     func testActualBundledCoreMLTranscribesChordAndLaterRepeatedPitch() async throws {
-        let recording = try syntheticRecording(silent: false)
+        let recording = try syntheticRecording(signal: .music)
         defer { try? FileManager.default.removeItem(at: recording) }
         let transcriber = NoteWisePolyphonicTranscriber()
         let actual = try await transcriber.transcribe(recordingURL: recording)
         let diagnostics = try attachDiagnostics(transcriber, name: "NoteWise-actual-CoreML-sounding-signal-diagnostics")
+        XCTAssertEqual(diagnostics.computeUnitsRequested, "cpuOnly")
         XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0, "The bundled model must actually run")
         XCTAssertGreaterThan(diagnostics.audioNonzeroSampleCount, 0)
         XCTAssertFalse(diagnostics.digitalSilenceConstraintApplied, "Sounding chords must retain the actual model and decoder output")
@@ -101,21 +102,52 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
         proof.name = "NoteWise-actual-CoreML-synthetic-chord-and-reattack"
         proof.lifetime = .keepAlways
         add(proof)
+        let comparison = NoteWisePolyphonicTranscriber(computeUnits: .all)
+        _ = try await comparison.transcribe(recordingURL: recording)
+        _ = try attachDiagnostics(comparison, name: "NoteWise-actual-CoreML-all-sounding-signal-comparison")
     }
 
     func testActualBundledCoreMLSilenceDoesNotBecomeCorrectNotes() async throws {
-        let recording = try syntheticRecording(silent: true)
+        let recording = try syntheticRecording(signal: .digitalSilence)
         defer { try? FileManager.default.removeItem(at: recording) }
         let transcriber = NoteWisePolyphonicTranscriber()
         let actual = try await transcriber.transcribe(recordingURL: recording)
         // Preserve audio and raw-model evidence before any assertion can fail.
         let diagnostics = try attachDiagnostics(transcriber, name: "NoteWise-actual-CoreML-digital-silence-diagnostics")
+        XCTAssertEqual(diagnostics.computeUnitsRequested, "cpuOnly")
         XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0, "Silence must still exercise the actual bundled model")
         XCTAssertEqual(diagnostics.audioNonzeroSampleCount, 0, "The converted synthetic recording must be actual digital silence")
         XCTAssertEqual(diagnostics.audioPeakAbsolute, 0)
         XCTAssertEqual(diagnostics.audioRMS, 0)
+        XCTAssertEqual(diagnostics.decodedNotesBeforeAudioConstraint, 0, "CPU inference must itself decode no digital-silence notes")
         XCTAssertTrue(diagnostics.digitalSilenceConstraintApplied)
         XCTAssertTrue(actual.notes.isEmpty, "Actual CoreML silence must not manufacture performance notes")
+        XCTAssertTrue(actual.uncertaintyIntervals.isEmpty)
+        XCTAssertEqual(actual.durationMs, 6000, accuracy: 1)
+        let comparison = NoteWisePolyphonicTranscriber(computeUnits: .all)
+        _ = try await comparison.transcribe(recordingURL: recording)
+        _ = try attachDiagnostics(comparison, name: "NoteWise-actual-CoreML-all-digital-silence-comparison")
+    }
+
+    func testActualBundledCoreMLNonzeroQuietNoiseHasNoPerformanceNotes() async throws {
+        let recording = try syntheticRecording(signal: .quietDither)
+        defer { try? FileManager.default.removeItem(at: recording) }
+        let transcriber = NoteWisePolyphonicTranscriber()
+        let actual = try await transcriber.transcribe(recordingURL: recording)
+        let diagnostics = try attachDiagnostics(transcriber, name: "NoteWise-actual-CoreML-nonzero-quiet-noise-diagnostics")
+        // Retain the alternative backend's real activations without claiming that
+        // an accelerator ran, or that its low-level-noise output is correct.
+        let comparison = NoteWisePolyphonicTranscriber(computeUnits: .all)
+        _ = try await comparison.transcribe(recordingURL: recording)
+        _ = try attachDiagnostics(comparison, name: "NoteWise-actual-CoreML-all-nonzero-quiet-noise-comparison")
+        XCTAssertEqual(diagnostics.computeUnitsRequested, "cpuOnly")
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0)
+        XCTAssertGreaterThan(diagnostics.audioNonzeroSampleCount, 0, "The converted fixture must contain actual nonzero samples")
+        XCTAssertGreaterThan(diagnostics.audioPeakAbsolute, 0)
+        XCTAssertGreaterThan(diagnostics.audioRMS, 0)
+        XCTAssertFalse(diagnostics.digitalSilenceConstraintApplied, "Digital-zero filtering cannot make the noise regression pass")
+        XCTAssertEqual(diagnostics.decodedNotesBeforeAudioConstraint, 0, "Non-musical dither must not produce raw musical events")
+        XCTAssertTrue(actual.notes.isEmpty, "Quiet non-musical noise must not manufacture performance notes")
         XCTAssertTrue(actual.uncertaintyIntervals.isEmpty)
         XCTAssertEqual(actual.durationMs, 6000, accuracy: 1)
     }
@@ -130,7 +162,9 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
         return diagnostics
     }
 
-    private func syntheticRecording(silent: Bool) throws -> URL {
+    private enum SyntheticSignal { case music, digitalSilence, quietDither }
+
+    private func syntheticRecording(signal: SyntheticSignal) throws -> URL {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("notewise-synthetic-\(UUID().uuidString).wav")
         let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 44100, channels: 1, interleaved: false))
         let output = try AVAudioFile(forWriting: file, settings: [AVFormatIDKey: kAudioFormatLinearPCM,
@@ -140,10 +174,19 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
         buffer.frameLength = buffer.frameCapacity
         let samples = try XCTUnwrap(buffer.floatChannelData?[0])
         let attacks: [(Double, Double, [Int])] = [(1, 1.3, [60, 64, 67]), (3, 1, [62]), (4.5, 0.8, [60])]
+        var noiseState: UInt32 = 0x6e6f7465
         for index in 0..<Int(buffer.frameLength) {
             let time = Double(index) / 44100
             var value: Double = 0
-            if !silent {
+            if signal == .quietDither {
+                // Seeded triangular 16-bit quantization-scale noise, without a
+                // deterministic musical tone. No microphone or private recording.
+                noiseState = noiseState &* 1664525 &+ 1013904223
+                let left = Int(noiseState >> 16)
+                noiseState = noiseState &* 1664525 &+ 1013904223
+                let right = Int(noiseState >> 16)
+                value = Double(left - right) / 65536 * (2.0 / 32768)
+            } else if signal == .music {
                 for (start, duration, pitches) in attacks {
                     let elapsed = time - start
                     guard elapsed >= 0 && elapsed < duration else { continue }

@@ -38,7 +38,10 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
     private var model: MLModel?
     private let diagnosticLock = NSLock()
     private var diagnosticValue: NoteWiseTranscriptionDiagnostics?
-    init(bundle: Bundle = .main, computeUnits: MLComputeUnits = .all) {
+    // The pinned model produced strong note priors on digital zero with .all
+    // on both iOS CI devices. Use CPU execution and require strict native
+    // silence/noise/music regressions; retain explicit backend comparisons.
+    init(bundle: Bundle = .main, computeUnits: MLComputeUnits = .cpuOnly) {
         self.bundle = bundle
         self.computeUnits = computeUnits
     }

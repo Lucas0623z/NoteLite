@@ -79,6 +79,52 @@ class AcceptanceGateTests(unittest.TestCase):
             {"nodeType": "Test Case", "name": "testActualBundledCoreMLSilenceDoesNotBecomeCorrectNotes()", "result": "Passed"}]}]}
         self.assertEqual(cloud.test_outcomes(nested), {"NoteWiseRecordedTranscriptionTests/testActualBundledCoreMLSilenceDoesNotBecomeCorrectNotes": "Passed"})
 
+    def test_actual_public_account_lifecycle_cannot_be_missing_skipped_or_failed_on_any_platform(self):
+        for platform in cloud.PLATFORMS:
+            with self.subTest(platform=platform):
+                required = cloud.required_tests(platform)
+                self.assertIn(cloud.LIVE_ACCOUNT_TEST, required)
+                summary = {"result": "Passed", "failedTests": 0, "passedTests": len(required)}
+                tree = test_tree(platform)
+                leaves = tree["testNodes"][0]["children"]
+                actual = next(leaf for leaf in leaves if leaf["nodeIdentifier"] == cloud.LIVE_ACCOUNT_TEST + "()")
+                self.assertEqual(cloud.validate_test_results(platform, tree, summary)["actualResults"][cloud.LIVE_ACCOUNT_TEST], "Passed")
+                # Other test leaves and even the parent bundle stay green: a
+                # test opt-in that was skipped must never permit signing.
+                for status in ("Skipped", "Failed", "Unknown", "In Progress", None):
+                    actual["result"] = status
+                    with self.assertRaises(cloud.release.ReleaseError):
+                        cloud.validate_test_results(platform, tree, summary)
+                leaves.remove(actual)
+                with self.assertRaises(cloud.release.ReleaseError):
+                    cloud.validate_test_results(platform, tree, summary)
+        nested = {"testNodes": [{"nodeType": "Test Suite", "name": "CloudAccountLiveLifecycleTests", "children": [
+            {"nodeType": "Test Case", "name": cloud.LIVE_ACCOUNT_TEST.split("/")[-1] + "()", "result": "Passed"}]}]}
+        self.assertEqual(cloud.test_outcomes(nested), {cloud.LIVE_ACCOUNT_TEST: "Passed"})
+
+    def test_added_actual_recorded_inference_regression_is_required_on_every_platform(self):
+        original_read = Path.read_text
+        name = "NoteWiseRecordedTranscriptionTests/testAdditionalActualRecordedInferenceAcceptance"
+        def source_with_added_test(path, *args, **kwargs):
+            source = original_read(path, *args, **kwargs)
+            if path.name == "NoteWiseRecordedTranscriptionTests.swift":
+                return source + "\nfunc testAdditionalActualRecordedInferenceAcceptance() throws {}\n"
+            return source
+        with patch.object(Path, "read_text", source_with_added_test):
+            for platform in cloud.PLATFORMS:
+                self.assertIn(name, cloud.required_tests(platform))
+                tree = test_tree(platform)
+                summary = {"result": "Passed", "failedTests": 0, "passedTests": len(cloud.required_tests(platform))}
+                self.assertEqual(cloud.validate_test_results(platform, tree, summary)["actualResults"][name], "Passed")
+                leaves = tree["testNodes"][0]["children"]
+                actual = next(leaf for leaf in leaves if leaf["nodeIdentifier"] == name + "()")
+                actual["result"] = "Skipped"
+                with self.assertRaises(cloud.release.ReleaseError):
+                    cloud.validate_test_results(platform, tree, summary)
+                leaves.remove(actual)
+                with self.assertRaises(cloud.release.ReleaseError):
+                    cloud.validate_test_results(platform, tree, summary)
+
 
 class PackagingGateTests(unittest.TestCase):
     def setUp(self):

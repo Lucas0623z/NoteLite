@@ -118,10 +118,19 @@ final class FigmaShellUITests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 30))
         assertScoreRendered(app)
         assertNoteSelection(app)
+        close = button("‹ 我的曲谱", in: app)
+        makeReturnNavigationHittable(close, in: app)
+        _ = try waitForNativeInteractionGeometry("‹ 我的曲谱", in: app,
+                                                 checkpoint: "Figma-core-before-first-close")
         XCTAssertTrue(close.isHittable)
         capture(app, name: "Figma-score-actual-current-window")
         close.tap()
-        XCTAssertTrue(viewScore.waitForExistence(timeout: 10), "Closing restores the saved library cards")
+        let returnedToLibrary = button("查看曲谱", in: app).waitForExistence(timeout: 10)
+        if !returnedToLibrary {
+            attachHierarchy(app, name: "Figma-core-first-close-library-missing")
+            capture(app, name: "Figma-core-first-close-library-missing")
+        }
+        XCTAssertTrue(returnedToLibrary, "Closing restores the saved library cards")
 
         // Relaunch through the real production entry: the card and its XML must
         // come from IndexedDB, rather than only the previous React state.
@@ -484,7 +493,7 @@ final class FigmaShellUITests: XCTestCase {
         XCTAssertFalse(button("保存校对", in: app).isEnabled)
         // Return to the header with ordinary scrolling, preserving all layout
         // and content. No JavaScript clicks or injected test controls are used.
-        makeHittable(button("‹ 我的曲谱", in: app), in: app, upward: false)
+        makeReturnNavigationHittable(button("‹ 我的曲谱", in: app), in: app)
     }
 
     @MainActor
@@ -606,13 +615,27 @@ final class FigmaShellUITests: XCTestCase {
         // The header is at the document's upper boundary: complete downward
         // swipes cannot pass it. Short control-column drags are retained for
         // note selection, where overshooting an interior control was observed.
-        for _ in 0..<12 where !element.isHittable {
+        // A partially clipped HTML button can report isHittable even when
+        // XCTest chooses a point outside its actual native visible rectangle.
+        // The failed iPhone capture had y=-22 for this 43-point header button.
+        // Scroll normally until the complete real target is inside both the
+        // window and WebKit; never compensate with synthetic coordinates.
+        func fullyVisible() -> Bool {
+            guard element.isHittable,
+                  let geometry = try? nativeInteractionGeometry(element.label, in: app),
+                  geometry.isConsistent else { return false }
+            return geometry.window.insetBy(dx: -1, dy: -1).contains(geometry.target) &&
+                geometry.webView.insetBy(dx: -1, dy: -1).contains(geometry.target)
+        }
+        for _ in 0..<12 where !fullyVisible() {
             app.webViews.firstMatch.swipeDown()
         }
-        if !element.isHittable {
+        if !fullyVisible() {
             attachHierarchy(app, name: "Figma-return-navigation-scroll-exhausted")
             capture(app, name: "Figma-return-navigation-scroll-exhausted")
         }
+        XCTAssertTrue(fullyVisible(),
+                      "The entire return button must be visible in the current native window and WebKit before one real tap")
         #else
         makeInteractionHittable(element, in: app, upward: false)
         #endif
@@ -744,9 +767,8 @@ final class FigmaShellUITests: XCTestCase {
                 !rect.isNull && !rect.isEmpty && !rect.isInfinite &&
                     [rect.minX, rect.minY, rect.width, rect.height].allSatisfy(\.isFinite)
             }) else { return false }
-            let center = CGPoint(x: target.midX, y: target.midY)
-            return window.insetBy(dx: -1, dy: -1).contains(center) &&
-                webView.insetBy(dx: -1, dy: -1).contains(center) &&
+            return window.insetBy(dx: -1, dy: -1).contains(target) &&
+                webView.insetBy(dx: -1, dy: -1).contains(target) &&
                 window.width + 1 >= webView.width && window.height + 1 >= webView.height
         }
 

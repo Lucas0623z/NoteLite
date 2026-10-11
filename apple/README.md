@@ -119,3 +119,6 @@ xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
 真机验收需检查：iCloud 导入、iPad 分屏与旋转、本机完整识谱的准确率/内存/耗时、停止与重试、后台恢复、识谱后练习及分享 `.mxl` 和 `.mid`；启用服务器时还需检查无效令牌、清理服务器任务和删除本地文件。单元测试不覆盖 OMR 准确率或完整触摸交互。
 
 API 契约：`GET /v1/health`；带认证的 `POST /v1/jobs?filename=...`（原始文件字节）、`GET /v1/jobs/{id}`、`GET /v1/jobs/{id}/artifacts/{name}`、`DELETE /v1/jobs/{id}`。结果下载始终在原服务器上根据校验过的文件名构造地址，不信任服务端返回的任意 URL。
+# iPad score orientation policy
+
+The iPad client requests Apple's `UIRequiresFullScreen` compatibility mode so the existing Figma score/practice layouts retain their native scene proportions and UIKit can honor the requested supported interface orientations; the actual landscape and restored portrait geometry must still pass native UI tests. This key is deprecated in iPadOS 26 and does not prevent all windowed presentation there, so later SDK releases require another review of the real scene behavior; see [Apple's key documentation](https://developer.apple.com/documentation/bundleresources/information-property-list/uirequiresfullscreen) and [TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key).

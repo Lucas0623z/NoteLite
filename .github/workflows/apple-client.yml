@@ -191,7 +191,7 @@ jobs:
         run: |
           xcodebuild test -project NoteLite.xcodeproj -scheme NoteLiteMac \
             -destination 'platform=macOS' -parallel-testing-enabled NO \
-            -resultBundlePath TestResults-macOS.xcresult CODE_SIGNING_ALLOWED=NO
+            -resultBundlePath TestResults-macOS.xcresult NOTELITE_LIVE_ACCOUNT_ACCEPTANCE=1 CODE_SIGNING_ALLOWED=NO
       - name: Export native Figma event diagnostics
         if: always()
         working-directory: apple
@@ -301,7 +301,7 @@ jobs:
             -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 360 \
-            NOTELITE_SIM_SWIFT_PATH= CODE_SIGNING_ALLOWED=NO
+            NOTELITE_SIM_SWIFT_PATH= NOTELITE_LIVE_ACCOUNT_ACCEPTANCE=1 CODE_SIGNING_ALLOWED=NO
       - name: Export simulator Figma event diagnostics
         if: always()
         continue-on-error: true

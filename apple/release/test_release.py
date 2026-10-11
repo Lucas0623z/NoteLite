@@ -55,8 +55,14 @@ class EmbeddedReleaseTests(unittest.TestCase):
         (self.project / "NoteLite.xcodeproj").mkdir(parents=True)
         (self.project / "EmbeddedRuntime").mkdir()
         for name in ("EmbeddedJVM.h", "EmbeddedJVM.mm"):
-            (self.project / "EmbeddedRuntime" / name).write_text("JNI bridge fixture", encoding="utf-8")
+            shutil.copyfile(release.REPO_SOURCE / "apple/EmbeddedOMRRuntime/Sources" / name,
+                            self.project / "EmbeddedRuntime" / name)
         (self.project / "Generated").mkdir()
+        self.bridge = self.project / "Generated/NoteLiteEmbedded-Bridging-Header.h"
+        self.bridge.write_text('#pragma once\n#include "../EmbeddedRuntime/EmbeddedJVM.h"\n#include '
+                               + json.dumps((release.REPO_SOURCE / "apple/NoteLite/NoteWise-Bridging-Header.h").as_posix(), ensure_ascii=False)
+                               + '\n', encoding="utf-8", newline="\n")
+        shutil.copyfile(self.bridge, self.evidence / self.bridge.name)
         (self.project / "Generated/native-symbols.c").write_text("void loadfunctions(void) {}", encoding="utf-8")
         self.archive = self.root / "native/libjvm.a"
         self.archive.parent.mkdir()
@@ -73,7 +79,7 @@ class EmbeddedReleaseTests(unittest.TestCase):
             "configFiles": {"Release": "Generated/native-libraries.xcconfig"},
             "settings": {"base": {
                 "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) EMBEDDED_OMR_RUNTIME",
-                "SWIFT_OBJC_BRIDGING_HEADER": str(self.project / "EmbeddedRuntime/EmbeddedJVM.h"),
+                "SWIFT_OBJC_BRIDGING_HEADER": str(self.bridge),
             }},
         }}}
         self.write_spec()
@@ -109,6 +115,7 @@ class EmbeddedReleaseTests(unittest.TestCase):
         self.addCleanup(self.environment.stop)
         self.settings = [{"target": "NoteLite", "buildSettings": {
             "PLATFORM_NAME": "iphoneos", "ARCHS": "arm64",
+            "SWIFT_OBJC_BRIDGING_HEADER": str(self.bridge),
             "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "EMBEDDED_OMR_RUNTIME",
             "OTHER_LDFLAGS": self.flags,
             "OTHER_CPLUSPLUSFLAGS": "-O2 -fno-fast-math -ffp-contract=off",
@@ -220,6 +227,52 @@ class EmbeddedReleaseTests(unittest.TestCase):
     def test_generated_configuration_must_match_evidence(self):
         (self.project / "Generated/native-libraries.xcconfig").write_text("ARCHS = x86_64", encoding="utf-8")
         with self.assertRaisesRegex(release.ReleaseError, "differs from its evidence"):
+            release.embedded_build()
+
+    def test_combined_bridge_rejects_missing_api_even_with_updated_evidence(self):
+        self.bridge.write_text('#pragma once\n#include "../EmbeddedRuntime/EmbeddedJVM.h"\n', encoding="utf-8", newline="\n")
+        shutil.copyfile(self.bridge, self.evidence / self.bridge.name)
+        with self.assertRaisesRegex(release.ReleaseError, "both original JNI and NoteWise"):
+            release.embedded_build()
+        self.mock_run.assert_not_called()
+
+    def test_combined_bridge_must_match_build_evidence(self):
+        (self.evidence / self.bridge.name).write_text("changed evidence", encoding="utf-8")
+        with self.assertRaisesRegex(release.ReleaseError, "bridge differs from its build evidence"):
+            release.embedded_build()
+        self.mock_run.assert_not_called()
+
+    def test_same_named_substituted_header_cannot_replace_original_notewise(self):
+        substitute = self.project / "Generated/NoteWise-Bridging-Header.h"
+        substitute.write_text('#include "NoteWiseDSP.h"\n', encoding="utf-8", newline="\n")
+        self.bridge.write_text('#pragma once\n#include "../EmbeddedRuntime/EmbeddedJVM.h"\n#include '
+                              + json.dumps(substitute.as_posix()) + '\n', encoding="utf-8", newline="\n")
+        shutil.copyfile(self.bridge, self.evidence / self.bridge.name)
+        with self.assertRaisesRegex(release.ReleaseError, "both original JNI and NoteWise"):
+            release.embedded_build()
+        self.mock_run.assert_not_called()
+
+    def test_original_copied_jni_header_and_implementation_cannot_be_substituted(self):
+        for name in ("EmbeddedJVM.h", "EmbeddedJVM.mm"):
+            with self.subTest(name=name):
+                copied = self.project / "EmbeddedRuntime" / name
+                original = copied.read_bytes()
+                copied.write_bytes(b"substituted JNI bridge")
+                with self.assertRaisesRegex(release.ReleaseError, "differs from its original source"):
+                    release.embedded_build()
+                self.mock_run.assert_not_called()
+                copied.write_bytes(original)
+
+    def test_target_cannot_override_combined_bridge_with_legacy_jni_only_header(self):
+        self.spec["targets"]["NoteLite"]["settings"]["base"]["SWIFT_OBJC_BRIDGING_HEADER"] = str(self.project / "EmbeddedRuntime/EmbeddedJVM.h")
+        self.write_spec()
+        with self.assertRaisesRegex(release.ReleaseError, "unexpected combined native bridge"):
+            release.embedded_build()
+        self.mock_run.assert_not_called()
+
+    def test_effective_release_settings_must_retain_verified_combined_bridge(self):
+        self.settings[0]["buildSettings"]["SWIFT_OBJC_BRIDGING_HEADER"] = str(self.project / "EmbeddedRuntime/EmbeddedJVM.h")
+        with self.assertRaisesRegex(release.ReleaseError, "Effective Release settings lost"):
             release.embedded_build()
 
     def test_disabled_engine_flag_is_rejected(self):
