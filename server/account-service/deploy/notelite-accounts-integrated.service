@@ -1,0 +1,26 @@
+[Unit]
+Description=NoteLite account, score and classroom service with OMR ownership adapters
+After=network.target notelite-omr.service
+Wants=notelite-omr.service
+
+[Service]
+Type=simple
+User=audiveris
+Group=audiveris
+WorkingDirectory=/opt/notelite-accounts
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/notelite-accounts/integrated_service.py --root /var/lib/notelite-accounts --port 8771 --public-origin https://124.221.211.156 --internal-key-file /var/lib/notelite-accounts/internal-key
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/notelite-accounts /var/lib/notelite-gateway
+MemoryMax=768M
+TasksMax=32
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+[Unit]
+Description=NoteLite account and legacy-device OMR gateway
+After=network.target notelite-omr.service notelite-accounts.service
+Wants=notelite-omr.service notelite-accounts.service
+
+[Service]
+Type=simple
+User=audiveris
+Group=audiveris
+WorkingDirectory=/opt/notelite-gateway
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/notelite-gateway/gateway.py --storage /var/lib/notelite-gateway --public-origin https://124.221.211.156 serve --host 127.0.0.1 --port 8770 --upstream-token-file /var/lib/audiveris/access-token --account-port 8771 --account-key-file /var/lib/notelite-accounts/internal-key
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/notelite-gateway
+MemoryMax=512M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

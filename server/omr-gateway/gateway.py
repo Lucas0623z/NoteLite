@@ -28,6 +28,8 @@ import time
 from urllib.parse import parse_qs, urlsplit
 import uuid
 
+from account_auth import AccountResolver, AccountAuthError, COOKIE as ACCOUNT_COOKIE
+
 LOG = logging.getLogger("notelite.gateway")
 MAX_UPLOAD = 32 * 1024 * 1024
 MAX_XML = 10 * 1024 * 1024
@@ -87,6 +89,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS pairs(hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires REAL NOT NULL,used INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,hash TEXT UNIQUE NOT NULL,kind TEXT NOT NULL,csrf TEXT NOT NULL,expires REAL NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS legacy_claims(owner TEXT PRIMARY KEY,user_id TEXT NOT NULL,created REAL NOT NULL,count INTEGER NOT NULL);
             """)
         if os.name == "posix":
             root.chmod(0o700)
@@ -162,6 +165,8 @@ class Store:
     def register(self, job, owner):
         canonical_uuid(job)
         with self.connect() as db:
+            if db.execute("SELECT 1 FROM legacy_claims WHERE owner=?", (owner,)).fetchone():
+                raise GatewayError(409, "旧设备资料已迁移，请使用账户重新登录。")
             db.execute("INSERT INTO jobs VALUES(?,?,?)", (job, owner, time.time()))
 
     def list_ids(self, owner):
@@ -194,10 +199,11 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, store, origin, upstream_token, *, upstream_port=8765, upstream_timeout=180):
+    def __init__(self, address, store, origin, upstream_token, *, upstream_port=8765, upstream_timeout=180, account_resolver=None):
         self.store, self.origin, self.upstream_token = store, public_origin(origin), upstream_token
         self.authority = urlsplit(self.origin).netloc
         self.upstream_port, self.upstream_timeout = upstream_port, upstream_timeout
+        self.account_resolver = account_resolver
         self.limiter = RateLimit()
         self.capacity = threading.BoundedSemaphore(16)
         super().__init__(address, Handler)
@@ -287,22 +293,51 @@ class Handler(BaseHTTPRequestHandler):
         if values:
             if len(values) != 1 or not values[0].startswith("Bearer "):
                 raise GatewayError(401, "设备凭据无效。")
-            return self.server.store.device(values[0][7:], "native")
+            # Conflicting browser/native principals are not a fallback channel.
+            for raw_cookie in self.headers.get_all("Cookie", []):
+                try:
+                    cookie = SimpleCookie();cookie.load(raw_cookie)
+                    if ACCOUNT_COOKIE in cookie:
+                        raise GatewayError(401, "登录凭据冲突，请重新载入登录状态。")
+                except CookieError:
+                    raise GatewayError(401, "登录凭据无效。") from None
+            token = values[0][7:]
+            if self.server.account_resolver:
+                try:
+                    return self.server.account_resolver.resolve(token, "native")
+                except AccountAuthError as error:
+                    if error.status != 401:
+                        raise GatewayError(error.status, error.message) from None
+            return self.server.store.device(token, "native")
         cookies = self.headers.get_all("Cookie", [])
         if len(cookies) != 1:
             raise GatewayError(401, "请先配对此设备。")
         try:
             cookie = SimpleCookie()
             cookie.load(cookies[0])
+            # An account cookie is authoritative, including when it has expired.
+            # Never silently return to a previously paired device's score library.
+            if ACCOUNT_COOKIE in cookie:
+                if not self.server.account_resolver:
+                    raise GatewayError(503, "账户认证服务暂时不可用。")
+                try:
+                    identity = self.server.account_resolver.resolve(cookie[ACCOUNT_COOKIE].value, "browser")
+                except AccountAuthError as error:
+                    raise GatewayError(error.status, error.message) from None
+                self.check_browser_csrf(identity)
+                return identity
             token = cookie[COOKIE].value if COOKIE in cookie else ""
         except CookieError:
             token = ""
         identity = self.server.store.device(token, "browser")
+        self.check_browser_csrf(identity)
+        return identity
+
+    def check_browser_csrf(self, identity):
         if self.command in WRITE_METHODS:
             csrf = self.headers.get_all("X-NoteLite-CSRF", [])
-            if self.headers.get("Origin") != self.server.origin or len(csrf) != 1 or not hmac.compare_digest(csrf[0], identity["csrf"]):
+            if self.headers.get("Origin") != self.server.origin or len(csrf) != 1 or not hmac.compare_digest(csrf[0].encode(), identity["csrf"].encode()):
                 raise GatewayError(403, "请重新加载页面后保存。")
-        return identity
 
     def upstream(self, body=None, extra=None):
         connection = HTTPConnection("127.0.0.1", self.server.upstream_port, timeout=self.server.upstream_timeout)
@@ -391,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and target.path == "/api/health" and not query:
             status, value = self.json_upstream()
             value["gateway"] = "device-scoped"
-            value["authentication"] = "device-or-session"
+            value["authentication"] = "account-or-legacy-device" if self.server.account_resolver else "device-or-session"
             self.json(status, value)
             return
         if self.command == "POST" and target.path == "/api/pair" and not query:
@@ -415,6 +450,12 @@ class Handler(BaseHTTPRequestHandler):
             self.json(201, result, headers)
             return
         identity = self.identity()
+        expected = self.headers.get_all("X-NoteLite-Expected-User", [])
+        if expected:
+            if len(expected) != 1:
+                raise GatewayError(400, "账户一致性字段重复。")
+            if not hmac.compare_digest(expected[0].encode(), identity["owner"].encode()):
+                raise GatewayError(409, "登录账户已改变，请重新载入后操作。")
         self.server.limiter.check(("device", identity["id"]), 120)
         if self.command == "GET" and target.path == "/api/session" and not query:
             result = {"authenticated": True, "deviceId": identity["id"], "owner": identity["owner"], "deviceName": identity["name"], "expiresAt": stamp(identity["expires"])}
@@ -423,8 +464,16 @@ class Handler(BaseHTTPRequestHandler):
             self.json(200, result)
             return
         if self.command == "POST" and target.path == "/api/session/logout" and not query:
-            self.server.store.revoke(identity["id"])
-            self.json(200, {"authenticated": False}, [("Set-Cookie", COOKIE + "=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")])
+            cookie = COOKIE
+            if identity.get("account"):
+                try:
+                    self.server.account_resolver.logout(identity)
+                except AccountAuthError as error:
+                    raise GatewayError(error.status, error.message) from None
+                cookie = ACCOUNT_COOKIE
+            else:
+                self.server.store.revoke(identity["id"])
+            self.json(200, {"authenticated": False}, [("Set-Cookie", cookie + "=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")])
             return
         if target.path == "/api/jobs":
             if self.command == "GET" and not query:
@@ -519,6 +568,8 @@ def main():
     serve.add_argument("--upstream-port", type=int, default=8765)
     serve.add_argument("--upstream-timeout", type=int, default=180)
     serve.add_argument("--upstream-token-file", type=Path, default=Path("/var/lib/audiveris/access-token"))
+    serve.add_argument("--account-port", type=int, default=8771)
+    serve.add_argument("--account-key-file", type=Path)
     args = parser.parse_args()
     origin = public_origin(args.public_origin)
     store = Store(args.storage)
@@ -539,7 +590,12 @@ def main():
     if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", token):
         parser.error("内部凭据文件格式无效。")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    server = Server((args.host, args.port), store, origin, token, upstream_port=args.upstream_port, upstream_timeout=args.upstream_timeout)
+    resolver = None
+    if args.account_key_file:
+        if args.account_key_file.is_symlink():
+            parser.error("账户内部凭据文件不能是符号链接。")
+        resolver = AccountResolver(args.account_port, args.account_key_file.read_text(encoding="ascii").strip(), origin)
+    server = Server((args.host, args.port), store, origin, token, upstream_port=args.upstream_port, upstream_timeout=args.upstream_timeout, account_resolver=resolver)
     def stop(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, stop)

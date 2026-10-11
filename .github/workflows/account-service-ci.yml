@@ -1,0 +1,33 @@
+name: Account service
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'server/account-service/**'
+      - 'server/omr-gateway/**'
+      - '.github/workflows/account-service-ci.yml'
+  push:
+    paths:
+      - 'server/account-service/**'
+      - 'server/omr-gateway/**'
+      - '.github/workflows/account-service-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  accounts-and-omr-gateway:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify private assets are absent
+        run: test ! -e server/account-service/skills/practice-record-analysis/deepseek-system-prompt.txt
+      - name: Test accounts, classroom, OMR integration and V2 analysis
+        run: python -m unittest discover -s server/account-service -v
+      - name: Test original OMR gateway boundaries
+        run: python -m unittest discover -s server/omr-gateway -v

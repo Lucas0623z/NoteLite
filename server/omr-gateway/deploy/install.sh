@@ -59,6 +59,7 @@ PY
     install -d -m 0755 "$target" "$target/deploy" /var/www/notelite-acme
     printf '%s\n' "$marker" > "$target/.notelite-managed"
     install -m 0644 "$gateway" "$target/gateway.py"
+    install -m 0644 "$(dirname -- "$gateway")/account_auth.py" "$target/account_auth.py"
     for name in render_nginx.py install.sh request-certificate.sh reload-nginx.sh renew-certificate.sh check-health.sh issue-pairing.sh; do
         install -m 0755 "$source_dir/$name" "$target/deploy/$name"
     done

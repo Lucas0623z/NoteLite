@@ -1,0 +1,24 @@
+[Unit]
+Description=NoteLite account and classroom service
+After=network.target
+
+[Service]
+Type=simple
+User=audiveris
+Group=audiveris
+WorkingDirectory=/opt/notelite-accounts
+ExecStart=/usr/bin/python3 /opt/notelite-accounts/account_service.py --root /var/lib/notelite-accounts --port 8771 --public-origin https://124.221.211.156 --internal-key-file /var/lib/notelite-accounts/internal-key
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/notelite-accounts
+MemoryMax=768M
+TasksMax=32
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

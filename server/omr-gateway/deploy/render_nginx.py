@@ -7,7 +7,7 @@ from pathlib import Path
 MARKER = "# Managed by NoteLite OMR gateway deployment v1"
 
 
-def render(ip: str, stage: str) -> str:
+def render(ip: str, stage: str, accounts: bool = False) -> str:
     address = ipaddress.ip_address(ip)
     if address.version != 4:
         raise ValueError("This deployment targets an IPv4 Lighthouse instance")
@@ -28,6 +28,26 @@ server {{
         return http
     if stage != "https":
         raise ValueError("unknown deployment stage")
+    account_routes = f"""
+    location = /internal {{ return 404; }}
+    location ^~ /internal/ {{ return 404; }}
+    location ^~ /api/account/ {{
+        client_max_body_size 21m;
+        proxy_pass http://127.0.0.1:8771;
+        proxy_http_version 1.1;
+        proxy_set_header Host {ip};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-NoteLite-Internal-Key "";
+        proxy_set_header Connection "";
+        proxy_request_buffering on;
+        proxy_buffering off;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 60s;
+        add_header Cache-Control no-store always;
+    }}
+""" if accounts else ""
     return http + f"""
 server {{
     listen 443 ssl;
@@ -44,6 +64,7 @@ server {{
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy same-origin always;
     add_header Permissions-Policy "microphone=(self), camera=()" always;
+{account_routes}
     location ^~ /api/ {{
         proxy_pass http://127.0.0.1:8770;
         proxy_http_version 1.1;
@@ -51,6 +72,7 @@ server {{
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-NoteLite-Internal-Key "";
         proxy_set_header Connection "";
         proxy_request_buffering on;
         proxy_connect_timeout 5s;
@@ -75,8 +97,9 @@ def main():
     parser.add_argument("--ip", default="124.221.211.156")
     parser.add_argument("--stage", choices=("bootstrap", "https"), required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--accounts", action="store_true")
     args = parser.parse_args()
-    content = render(args.ip, args.stage)
+    content = render(args.ip, args.stage, args.accounts)
     if args.output:
         args.output.write_text(content, encoding="utf-8", newline="\n")
     else:
