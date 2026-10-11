@@ -126,6 +126,7 @@ class Store:
         owner = canonical_uuid(owner) if owner else self.default_owner()
         code, expires = secrets.token_urlsafe(32), time.time() + ttl
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             self.check_owner(db, owner)
             db.execute("DELETE FROM pairs WHERE expires < ? OR used=1", (time.time(),))
             db.execute("INSERT INTO pairs(hash,owner,expires) VALUES(?,?,?)", (digest(code), owner, expires))
@@ -234,6 +235,7 @@ class Store:
         canonical_uuid(job)
         if db is None:
             with self.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 return self.register(job, owner, connection)
         self.check_owner(db, owner)
         if db.execute("SELECT 1 FROM legacy_claims WHERE owner=?", (owner,)).fetchone():

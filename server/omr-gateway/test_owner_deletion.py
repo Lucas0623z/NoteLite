@@ -75,6 +75,40 @@ class OwnerDeletionTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertFalse(db.execute("SELECT 1 FROM jobs WHERE id=?", (job,)).fetchone())
 
+    def test_pairing_and_direct_registration_reserve_owner_before_their_first_write(self):
+        # Pause immediately after the owner check. Deletion in a separately
+        # opened SQLite Store must wait even before INSERT has started.
+        for action in ("pair", "register"):
+            with self.subTest(action=action):
+                owner = str(uuid.uuid4())
+                other_process = gateway.Store(Path(self.temp.name))
+                checked, release, frozen = threading.Event(), threading.Event(), threading.Event()
+                original = self.store.check_owner
+                def paused_check(db, candidate):
+                    original(db, candidate)
+                    checked.set()
+                    if not release.wait(5): raise AssertionError("synthetic owner check remained paused")
+                self.store.check_owner = paused_check
+                def freeze():
+                    other_process.freeze_owner(owner)
+                    frozen.set()
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                        write = pool.submit(self.store.pair, owner) if action == "pair" else pool.submit(self.store.register, str(uuid.uuid4()), owner)
+                        self.assertTrue(checked.wait(3))
+                        deletion = pool.submit(freeze)
+                        try: self.assertFalse(frozen.wait(.1), "deletion passed a checked owner before its metadata write")
+                        finally: release.set()
+                        write.result(5)
+                        deletion.result(5)
+                finally:
+                    release.set()
+                    self.store.check_owner = original
+                other_process.finish_delete_owner(owner)
+                with self.store.connect() as db:
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM pairs WHERE owner=?", (owner,)).fetchone()[0], 0)
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs WHERE owner=?", (owner,)).fetchone()[0], 0)
+
     def test_freeze_drains_accepted_upload_then_blocks_cached_owner_and_preserves_other_owner(self):
         first, _ = self.pair(str(uuid.uuid4()))
         other, _ = self.pair(str(uuid.uuid4()))
