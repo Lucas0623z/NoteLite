@@ -289,6 +289,27 @@ def code_signature(app, private, expected_profile, expected_fingerprint):
     return {"signatureVerified": True, "team": TEAM, "bundleIdentifier": BUNDLE, "distributionProfileValidated": True}
 
 
+def verify_app_icon(app, info):
+    def primary_name(container):
+        release.require(isinstance(container, dict), "Actual app icon metadata is missing or malformed.")
+        primary = container.get("CFBundlePrimaryIcon")
+        release.require(isinstance(primary, dict) and primary.get("CFBundleIconName") == "AppIcon",
+                        "Actual primary app icon does not reference AppIcon.")
+        return primary["CFBundleIconName"]
+
+    primary = primary_name(info.get("CFBundleIcons"))
+    ipad = primary_name(info["CFBundleIcons~ipad"]) if "CFBundleIcons~ipad" in info else None
+    catalog = release.contained_file(app, "Assets.car")
+    release.require(catalog.stat().st_size > 0, "Actual compiled app asset catalog is empty.")
+    source = resource_inventory(ROOT / "apple/NoteLite/Assets.xcassets/AppIcon.appiconset")
+    source_bytes = json.dumps(source, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {"actualPrimaryIconName": primary, "actualIPadPrimaryIconName": ipad,
+            "actualCompiledAssetCatalog": {"bytes": catalog.stat().st_size, "sha256": release.digest(catalog)},
+            "sourceAppIconInventory": {"scope": "source_assets_only", "files": source,
+                                       "sha256": hashlib.sha256(source_bytes).hexdigest()},
+            "compiledIconPixelsComparedToSource": False}
+
+
 def verify_app(app, private, version, build, *, signing=None):
     info = plistlib.loads(release.contained_file(app, "Info.plist").read_bytes())
     release.require(info.get("CFBundleIdentifier") == BUNDLE and info.get("CFBundleDisplayName") == BRAND
@@ -298,6 +319,7 @@ def verify_app(app, private, version, build, *, signing=None):
                     "Archive must be an actual iPhone/iPad device build.")
     sdk = re.fullmatch(r"iphoneos(\d+)(?:\.\d+)*", info.get("DTSDKName", ""))
     release.require(sdk and int(sdk[1]) >= 26, "Archive requires the iOS 26 device SDK or later.")
+    icon = verify_app_icon(app, info)
     binary = release.contained_file(app, info["CFBundleExecutable"])
     release.run(["xcrun", "lipo", str(binary), "-verify_arch", "arm64"], capture=True)
     commands = release.run(["xcrun", "vtool", "-show-build", str(binary)], capture=True)
@@ -309,7 +331,7 @@ def verify_app(app, private, version, build, *, signing=None):
     signature = code_signature(app, private, *signing) if signing else {"signatureVerified": False}
     return {"bundleIdentifier": BUNDLE, "displayName": BRAND, "version": version, "build": build,
             "deviceFamilies": [1, 2], "sdk": info["DTSDKName"], "architecture": "arm64", "executableSHA256": release.digest(binary),
-            "resources": resources, "embeddedOMR": False, "bundledLocalNoteWise": True, **signature}
+            "resources": resources, "appIcon": icon, "embeddedOMR": False, "bundledLocalNoteWise": True, **signature}
 
 
 def archive():

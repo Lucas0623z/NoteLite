@@ -88,7 +88,8 @@ final class NoteWiseAcousticEvidence {
         let width = max(1, Int(ceil(bin * (pow(2, 50.0 / 1200) - 1))))
         let center = Int(bin.rounded())
         let lower = max(1, center - width), upper = min(spectrum.power.count - 1, center + width)
-        let peak = spectrum.power[lower...upper].max() ?? 0
+        guard let peakIndex = (lower...upper).max(by: { spectrum.power[$0] < spectrum.power[$1] }) else { return false }
+        let peak = spectrum.power[peakIndex]
         let band = spectrum.power[lower...upper].reduce(0, +)
         var surroundings: [Double] = []
         for offset in (width + 3)...(width + 11) {
@@ -100,7 +101,22 @@ final class NoteWiseAcousticEvidence {
         let floor = surroundings.isEmpty ? spectrum.total : surroundings[surroundings.count / 2]
         // Require a pitch-local peak at least 12 times the local median and a
         // measurable share of total signal energy, rather than accepting priors.
-        return band / spectrum.total >= 0.005 && peak > 0 && (floor == 0 || peak / floor >= 12)
+        guard band / spectrum.total >= 0.005, peak > 0, floor == 0 || peak / floor >= 12,
+              peakIndex > 0, peakIndex < spectrum.power.count - 1 else { return false }
+        // A rounded bin is not a pitch measurement: at A0 its width spans
+        // several semitones. Locate the actual peak, interpolate its Hann log
+        // spectrum, and require pitch agreement rather than accepting that
+        // the same broad low-frequency bin overlaps two adjacent candidates.
+        let left = spectrum.power[peakIndex - 1], right = spectrum.power[peakIndex + 1]
+        guard left > 0, right > 0 else { return false }
+        let logLeft = log(left), logPeak = log(peak), logRight = log(right)
+        let curvature = logLeft - 2 * logPeak + logRight
+        guard curvature < 0 else { return false }
+        let fraction = 0.5 * (logLeft - logRight) / curvature
+        guard fraction.isFinite, abs(fraction) <= 0.5 else { return false }
+        let measuredFrequency = (Double(peakIndex) + fraction) * Double(NoteWiseBasicPitchDecoder.sampleRate) / Double(Self.count)
+        let pitchDistance = 1200 * log2(measuredFrequency / frequency)
+        return pitchDistance.isFinite && abs(pitchDistance) <= 50
     }
 
     func qualify(_ decoded: NoteWiseRecordedTranscription,
@@ -112,7 +128,10 @@ final class NoteWiseAcousticEvidence {
             try checkCancellation()
             let times = [note.onsetMs + note.durationMs / 3, note.onsetMs + note.durationMs * 2 / 3]
             let spectra = times.map { spectrum(at: $0) }
-            let frequency = 440 * pow(2, Double(note.modelMIDI - 69) / 12 + note.cents / 1200)
+            // Decoder cents are relative to its calibrated midi/tuning, not
+            // modelMIDI. Reconstruct the actually estimated acoustic frequency;
+            // a contour crossing or non-440 tuning must not move this check.
+            let frequency = decoded.tuning * pow(2, Double(note.midi - 69) / 12 + note.cents / 1200)
             if spectra.allSatisfy({ supports(frequency, in: $0) }) {
                 notes.append(note)
             } else if spectra.allSatisfy({ $0.concentration < 0.20 }) {

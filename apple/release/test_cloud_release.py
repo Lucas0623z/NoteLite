@@ -197,6 +197,46 @@ class PackagingGateTests(unittest.TestCase):
         installed.write_bytes(original)
         self.assertEqual(cloud.verify_resources(self.app)["DIVIDE-NO-NAN-PATCH.json"], actual)
 
+    def test_actual_device_archive_requires_primary_appicon_and_nonempty_compiled_catalog(self):
+        source = self.root / "apple/NoteLite/Assets.xcassets/AppIcon.appiconset"
+        source.mkdir(parents=True)
+        (source / "Contents.json").write_bytes(b'{"images":[],"info":{"version":1}}')
+        (source / "AppIcon-1024.png").write_bytes(b"synthetic source image fixture; not compiled-pixel evidence")
+        primary = {"CFBundlePrimaryIcon": {"CFBundleIconName": "AppIcon"}}
+        info = {"CFBundleIdentifier": cloud.BUNDLE, "CFBundleDisplayName": cloud.BRAND,
+                "CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "13",
+                "UIDeviceFamily": [1, 2], "CFBundleSupportedPlatforms": ["iPhoneOS"],
+                "DTSDKName": "iphoneos26.0", "CFBundleExecutable": "NoteLite",
+                "CFBundleIcons": primary, "CFBundleIcons~ipad": primary}
+        catalog = self.app / "Assets.car"
+        catalog_bytes = b"synthetic compiled catalog fixture; no Xcode execution"
+        catalog.write_bytes(catalog_bytes)
+        (self.app / "NoteLite").write_bytes(b"synthetic executable fixture")
+        def verify(candidate):
+            (self.app / "Info.plist").write_bytes(plistlib.dumps(candidate))
+            with patch.object(cloud.release, "run", side_effect=lambda args, capture=False: "platform IOS\n" if "vtool" in args else ""):
+                return cloud.verify_app(self.app, self.root, "1.0.0", "13")
+        icon = verify(info)["appIcon"]
+        self.assertEqual(icon["actualPrimaryIconName"], "AppIcon")
+        self.assertEqual(icon["actualIPadPrimaryIconName"], "AppIcon")
+        self.assertEqual(icon["actualCompiledAssetCatalog"], {"bytes": len(catalog_bytes), "sha256": hashlib.sha256(catalog_bytes).hexdigest()})
+        self.assertEqual(icon["sourceAppIconInventory"]["scope"], "source_assets_only")
+        self.assertFalse(icon["compiledIconPixelsComparedToSource"])
+        without_ipad = dict(info); without_ipad.pop("CFBundleIcons~ipad")
+        self.assertIsNone(verify(without_ipad)["appIcon"]["actualIPadPrimaryIconName"])
+        missing_primary = dict(info); missing_primary.pop("CFBundleIcons")
+        for candidate in (missing_primary, {**info, "CFBundleIcons": {}},
+                          {**info, "CFBundleIcons": {"CFBundlePrimaryIcon": {"CFBundleIconName": "WrongIcon"}}},
+                          {**info, "CFBundleIcons~ipad": {"CFBundlePrimaryIcon": {"CFBundleIconName": "WrongIcon"}}},
+                          {**info, "CFBundleIcons~ipad": []}):
+            with self.assertRaises(cloud.release.ReleaseError): verify(candidate)
+        catalog.unlink()
+        with self.assertRaises(cloud.release.ReleaseError): verify(info)
+        catalog.write_bytes(b"")
+        with self.assertRaises(cloud.release.ReleaseError): verify(info)
+        catalog.write_bytes(catalog_bytes)
+        self.assertEqual(verify(info)["appIcon"], icon)
+
     def test_zip_traversal_symlink_case_collision_and_size_rejected_before_extraction(self):
         for kind in ("traversal", "symlink", "collision", "size"):
             archive = self.root / (kind + ".zip")

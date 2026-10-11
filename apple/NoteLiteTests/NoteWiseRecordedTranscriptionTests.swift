@@ -219,6 +219,54 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
             checkCancellation: { throw CancellationError() })) { XCTAssertTrue($0 is CancellationError) }
     }
 
+    func testAcousticBassPeakCannotConfirmTheAdjacentSemitone() throws {
+        let sampleRate = NoteWiseBasicPitchDecoder.sampleRate
+        let tone = (0..<sampleRate).map { Float(sin(2 * Double.pi * 27.5 * Double($0) / Double(sampleRate))) }
+        let notes = [21, 22].map { pitch in
+            NoteWiseRecordedNote(id: "synthetic-bass-\(pitch)", midi: pitch, modelMIDI: pitch,
+                onsetMs: 200, offsetMs: 800, durationMs: 600, confidence: 0.99, cents: 0,
+                centsEvidence: "coarse-basic-pitch-contour", releaseReliable: true)
+        }
+        let raw = NoteWiseRecordedTranscription(notes: notes, uncertaintyIntervals: [],
+            sampleRate: sampleRate, sampleCount: tone.count, durationMs: 1000, tuning: 440,
+            modelVersion: "0.4.0", detectorVersion: "basic-pitch-coreml-0.4.0",
+            supportedPitchRange: ["minimumMIDI": 21, "maximumMIDI": 108], warnings: [])
+        for gain in [Float(1), 0.01, 0.000001] {
+            let actual = try NoteWiseAcousticEvidence(audio: tone.map { $0 * gain }).qualify(raw)
+            XCTAssertEqual(actual.notes.map(\.midi), [21], "One low-frequency peak cannot confirm both adjacent notes")
+            XCTAssertEqual(actual.unresolvedCandidates, 1)
+            XCTAssertEqual(actual.uncertainty.count, 1, "Unresolved tonal candidates must remain available for review")
+        }
+    }
+
+    func testAcousticQualificationUsesCalibratedPitchAndTuning() throws {
+        let sampleRate = NoteWiseBasicPitchDecoder.sampleRate
+        for (tuning, bend) in [(480.0, 1.0 / 3), (440.0, 2.0 / 3)] {
+            let modelMIDI = 69
+            let calibrated = Double(modelMIDI) + bend - 12 * log2(tuning / 440)
+            let midi = Int(calibrated.rounded())
+            let cents = (calibrated - Double(midi)) * 100
+            XCTAssertNotEqual(midi, modelMIDI, "Both cases exercise actual model/calibrated pitch divergence")
+            let frequency = 440 * pow(2, bend / 12)
+            let tone = (0..<sampleRate).map { Float(sin(2 * Double.pi * frequency * Double($0) / Double(sampleRate))) }
+            let notes = [0, 1].map { offset in
+                NoteWiseRecordedNote(id: "synthetic-calibrated-\(offset)", midi: midi + offset,
+                    modelMIDI: modelMIDI + offset, onsetMs: 200, offsetMs: 800, durationMs: 600,
+                    confidence: 0.99, cents: cents, centsEvidence: "coarse-basic-pitch-contour", releaseReliable: true)
+            }
+            let raw = NoteWiseRecordedTranscription(notes: notes, uncertaintyIntervals: [],
+                sampleRate: sampleRate, sampleCount: tone.count, durationMs: 1000, tuning: tuning,
+                modelVersion: "0.4.0", detectorVersion: "basic-pitch-coreml-0.4.0",
+                supportedPitchRange: ["minimumMIDI": 21, "maximumMIDI": 108], warnings: [])
+            for gain in [Float(1), 0.01, 0.000001] {
+                let actual = try NoteWiseAcousticEvidence(audio: tone.map { $0 * gain }).qualify(raw)
+                XCTAssertEqual(actual.notes.map(\.id), [notes[0].id], "Tune/contour calibration must preserve the actual pitch")
+                XCTAssertEqual(actual.unresolvedCandidates, 1)
+                XCTAssertEqual(actual.uncertainty.count, 1)
+            }
+        }
+    }
+
     private func attachDiagnostics(_ transcriber: NoteWisePolyphonicTranscriber,
                                    name: String) throws -> NoteWiseTranscriptionDiagnostics {
         let diagnostics = try XCTUnwrap(transcriber.diagnosticsSnapshot())
