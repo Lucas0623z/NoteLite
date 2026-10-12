@@ -514,6 +514,12 @@ final class FigmaShellUITests: XCTestCase {
         #else
         let field = app.webViews.popUpButtons.matching(identifier: "音名").firstMatch
         #endif
+        // The actual iPhone failure has D4 selected and value D already, but
+        // this field is at y=664 in a 440-point viewport. Read the native select
+        // after the ordinary scroll a user needs, not through an off-screen AX
+        // value retry. The selected-state AND pitch assertion remains below.
+        makeInteractionHittable(field, in: app)
+        XCTAssertTrue(field.isHittable, "The actual pitch editor must be reachable before reading its native value")
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             let selectedValue = selected.value
             let active = (selectedValue as? String) == "1" || (selectedValue as? NSNumber)?.boolValue == true
@@ -571,12 +577,26 @@ final class FigmaShellUITests: XCTestCase {
                                    viewport.maxX - viewport.width * 0.1) : viewport.midX
             let high = viewport.minY + viewport.height * 0.3
             let low = viewport.minY + viewport.height * 0.7
+            // Finish a short remaining scroll without a whole-column jump:
+            // in the real iPhone layout D4 and its editor can both fit, while
+            // a second fixed drag would move the selected note above view.
+            let defaultDistance = low - high
+            let distance: CGFloat
+            if hasFrame && upward && target.maxY > viewport.maxY - 16 {
+                distance = min(defaultDistance, max(24, target.maxY - (viewport.maxY - 16)))
+            } else if hasFrame && !upward && target.minY < viewport.minY + 16 {
+                distance = min(defaultDistance, max(24, viewport.minY + 16 - target.minY))
+            } else {
+                distance = defaultDistance
+            }
+            let startY = upward ? low : high
+            let endY = startY + (upward ? -distance : distance)
             let start = web.coordinate(withNormalizedOffset: CGVector(
                 dx: (x - webFrame.minX) / webFrame.width,
-                dy: ((upward ? low : high) - webFrame.minY) / webFrame.height))
+                dy: (startY - webFrame.minY) / webFrame.height))
             let end = web.coordinate(withNormalizedOffset: CGVector(
                 dx: (x - webFrame.minX) / webFrame.width,
-                dy: ((upward ? high : low) - webFrame.minY) / webFrame.height))
+                dy: (endY - webFrame.minY) / webFrame.height))
             start.press(forDuration: 0.1, thenDragTo: end)
         }
         if !element.isHittable {
