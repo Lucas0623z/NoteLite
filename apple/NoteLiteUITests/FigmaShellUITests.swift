@@ -448,18 +448,10 @@ final class FigmaShellUITests: XCTestCase {
         scoreHierarchy.name = "Figma-rendered-score-actual-hierarchy"
         scoreHierarchy.lifetime = .keepAlways
         add(scoreHierarchy)
-        let controls = noteControls(app)
-        let names = Set(controls.flatMap { element in
-            [element.label, element.identifier, element.value as? String ?? ""].map(normalizedName)
-        })
         XCTAssertEqual(expectedPitches.count, 4)
         for (index, pitch) in expectedPitches.enumerated() {
-            let expected = normalizedName("第 1 小节 · \(pitch) #\(index + 1)")
-            // Actual macOS AX exposes these as CheckBox; iOS AX exposes Switch.
-            // Match the same complete note name/index, allowing only whitespace
-            // differences between AXTitle and aria-label. Read strings before
-            // matching so numeric OSMD values cannot crash the harness.
-            let present = names.contains(expected)
+            let expected = "第 1 小节 · \(pitch) #\(index + 1)"
+            let present = note(expected, in: app)?.exists == true
             if !present {
                 let hierarchy = XCTAttachment(string: app.debugDescription)
                 hierarchy.name = "Figma-note-\(pitch)-missing-actual-hierarchy"
@@ -472,17 +464,17 @@ final class FigmaShellUITests: XCTestCase {
     }
 
     @MainActor
-    private func noteControls(_ app: XCUIApplication) -> [XCUIElement] {
-        app.webViews.buttons.allElementsBoundByIndex + app.webViews.checkBoxes.allElementsBoundByIndex +
-            app.webViews.toggles.allElementsBoundByIndex + app.webViews.switches.allElementsBoundByIndex
-    }
-
-    @MainActor
     private func note(_ label: String, in app: XCUIApplication) -> XCUIElement? {
-        let expected = normalizedName(label)
-        return noteControls(app).first { element in
-            [element.label, element.identifier, element.value as? String ?? ""].map(normalizedName).contains(expected)
-        }
+        // Actual shipped WebKit AX attachments expose aria-pressed note buttons
+        // as Switch on iOS and CheckBox on macOS, with this complete aria-label.
+        // Resolve that exact pitch AND occurrence, rather than enumerate the
+        // whole OSMD tree inside a waiter (which can exhaust the AX query).
+        #if os(iOS)
+        let element = app.webViews.switches.matching(identifier: label).firstMatch
+        #else
+        let element = app.webViews.checkBoxes.matching(identifier: label).firstMatch
+        #endif
+        return element.exists ? element : nil
     }
 
     @MainActor
@@ -513,12 +505,20 @@ final class FigmaShellUITests: XCTestCase {
 
     @MainActor
     private func assertSelectedPitch(_ pitch: String, control label: String, in app: XCUIApplication) {
-        let changed = XCTNSPredicateExpectation(predicate: NSPredicate { [weak self] _, _ in
-            guard let self, let selected = note(label, in: app) else { return false }
-            let active = (selected.value as? String) == "1" || (selected.value as? NSNumber)?.boolValue == true
-            let fields = app.webViews.descendants(matching: .any).matching(identifier: "音名").allElementsBoundByIndex
-            return active && fields.contains { ($0.value as? String) == pitch }
-        }, object: app)
+        guard let selected = note(label, in: app) else {
+            XCTFail("The complete note name/index must remain present after a real tap: \(label)")
+            return
+        }
+        #if os(iOS)
+        let field = app.webViews.otherElements.matching(identifier: "音名").firstMatch
+        #else
+        let field = app.webViews.popUpButtons.matching(identifier: "音名").firstMatch
+        #endif
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let selectedValue = selected.value
+            let active = (selectedValue as? String) == "1" || (selectedValue as? NSNumber)?.boolValue == true
+            return active && field.exists && (field.value as? String) == pitch
+        }, object: selected)
         let result = XCTWaiter.wait(for: [changed], timeout: 10)
         if result != .completed { attachHierarchy(app, name: "Figma-note-selection-\(pitch)-actual-hierarchy") }
         XCTAssertEqual(result, .completed, "A real note tap must update both its selected state and the pitch field")
@@ -1022,10 +1022,6 @@ final class FigmaShellUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-    }
-
-    private func normalizedName(_ value: String) -> String {
-        value.components(separatedBy: .whitespacesAndNewlines).joined()
     }
 
     @MainActor
