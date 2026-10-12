@@ -245,14 +245,13 @@ jobs:
             apple/Screenshots/
           if-no-files-found: ignore
 
-  simulator-clients:
-    name: ${{ matrix.family }} interface
+  simulator-test-build:
+    name: Build signed simulator test products
     runs-on: macos-26
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        family: [iPhone, iPad]
+    outputs:
+      artifact_id: ${{ steps.upload_products.outputs.artifact-id }}
+      archive_sha256: ${{ steps.package_products.outputs.archive_sha256 }}
     steps:
       - uses: actions/checkout@v4
       - name: Select an installed stable Xcode
@@ -279,6 +278,7 @@ jobs:
           python3 apple/scripts/prepare-notewise-model.py
           python3 -m unittest discover -s apple/scripts -p test_notewise_model_patch.py
           python3 -B -m unittest discover -s apple/scripts -p test_verify_simulator_identity.py
+          python3 -B -m unittest discover -s apple/scripts -p test_simulator_test_products.py
           python3 apple/scripts/prepare-release-features.py --check
           python3 -B apple/release/legal_resources.py prepare
       - name: Generate Xcode project
@@ -293,7 +293,7 @@ jobs:
         id: simulator
         timeout-minutes: 5
         env:
-          DEVICE_FAMILY: ${{ matrix.family }}
+          DEVICE_FAMILY: iPhone
         run: |
           set -euo pipefail
           python3 -B tools/audiveris-port/test_manage_embedded_simulators.py
@@ -303,19 +303,100 @@ jobs:
           echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$DEVICE_ID"
           xcrun simctl bootstatus "$DEVICE_ID" -b | tee apple/SimulatorResults/boot.log
-      - name: Test native interface and model
-        timeout-minutes: 25
+      - name: Build native interface and model for testing
+        id: build_simulator_tests
         working-directory: apple
         env:
           DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
         run: |
-          xcodebuild test -project NoteLite.xcodeproj -scheme NoteLite \
+          # Preserve the original scheme, default DerivedData and ad-hoc signing.
+          # This job builds both test targets and never creates a test result bundle.
+          xcodebuild build-for-testing -project NoteLite.xcodeproj -scheme NoteLite \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-            -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
+            -parallel-testing-enabled NO \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 360 \
             NOTELITE_SIM_SWIFT_PATH= NOTELITE_LIVE_ACCOUNT_ACCEPTANCE=1 \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY=-
+      - name: Package and verify complete signed simulator test products
+        id: package_products
+        run: |
+          python3 -B apple/scripts/simulator_test_products.py package \
+            --archive apple/NoteLite-simulator-tests.tar.gz
+      - uses: actions/upload-artifact@v4
+        id: upload_products
+        with:
+          name: apple-simulator-test-products
+          path: apple/NoteLite-simulator-tests.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+      - name: Remove dedicated build simulator
+        if: always()
+        run: python3 tools/audiveris-port/manage-embedded-simulators.py cleanup apple/SimulatorResults
+
+  simulator-clients:
+    name: ${{ matrix.family }} interface
+    needs: simulator-test-build
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [iPhone, iPad]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select an installed stable Xcode
+        run: bash apple/scripts/select-xcode.sh
+      - name: Require the exact producer artifact identity
+        env:
+          PRODUCT_ARTIFACT_ID: ${{ needs.simulator-test-build.outputs.artifact_id }}
+          PRODUCT_ARCHIVE_SHA256: ${{ needs.simulator-test-build.outputs.archive_sha256 }}
+        run: |
+          [[ "$PRODUCT_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$PRODUCT_ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.simulator-test-build.outputs.artifact_id }}
+          path: apple/SimulatorTestDownload
+          merge-multiple: true
+      - name: Prepare the current commit source offer
+        run: python3 -B apple/release/legal_resources.py prepare
+      - name: Verify and restore the same-run signed test products
+        id: restore_products
+        env:
+          PRODUCT_ARCHIVE_SHA256: ${{ needs.simulator-test-build.outputs.archive_sha256 }}
+        run: |
+          python3 -B apple/scripts/simulator_test_products.py restore \
+            --archive apple/SimulatorTestDownload/NoteLite-simulator-tests.tar.gz \
+            --destination "$RUNNER_TEMP/notelite-simulator-tests" \
+            --expected-sha256 "$PRODUCT_ARCHIVE_SHA256"
+      - name: Create and boot dedicated screenshot simulator
+        id: simulator
+        timeout-minutes: 5
+        env:
+          DEVICE_FAMILY: ${{ matrix.family }}
+        run: |
+          set -euo pipefail
+          python3 tools/audiveris-port/manage-embedded-simulators.py create \
+            apple/SimulatorResults --family "$DEVICE_FAMILY" --screenshot
+          DEVICE_ID=$(python3 -c 'import json, os; from pathlib import Path; print(json.loads((Path("apple/SimulatorResults") / os.environ["DEVICE_FAMILY"] / "device.json").read_text())["udid"])')
+          echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b | tee apple/SimulatorResults/boot.log
+      - name: Test native interface and model
+        if: ${{ success() && steps.restore_products.outcome == 'success' }}
+        timeout-minutes: 25
+        working-directory: apple
+        env:
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+          XCTESTRUN_PATH: ${{ steps.restore_products.outputs.xctestrun_path }}
+        run: |
+          test ! -e 'TestResults-${{ matrix.family }}.xcresult'
+          xcodebuild test-without-building -xctestrun "$XCTESTRUN_PATH" \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -parallel-testing-enabled NO -resultBundlePath 'TestResults-${{ matrix.family }}.xcresult' \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
+            -maximum-test-execution-time-allowance 360
       - name: Verify the actual simulator host signature and private Keychain identity
         if: always() && steps.simulator.outputs.device_id != ''
         env:
