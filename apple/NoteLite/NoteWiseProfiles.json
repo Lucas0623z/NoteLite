@@ -1,7 +1,33 @@
 {
   "schemaVersion": 1,
   "source": "practice-web/src/instruments.js",
-  "sourceSha256": "62451dd2a38f3bc79459440c41988ac42f507429fe9d18998e9dd2ca27c03bbc",
+  "sourceSha256": "a8d1d737304c408fe55a998c2165ee98db4e56c363f2896bb3bd87ee7ac07b7e",
+  "policySource": "practice-web/src/engine-policy.js",
+  "policySourceSha256": "952cac452d5cc2e30feecd4079677e340ff965ecc161abfaf62e513bf1cf87ee",
+  "fusionPolicy": {
+    "version": "notewise-fusion-1",
+    "mono": {
+      "windowsPrimary": "pyin",
+      "windowsReview": "crepe",
+      "applePrimary": "native-mpm-yin",
+      "appleReview": "basic-pitch",
+      "reviewMinimumHz": 50,
+      "reviewMaximumHz": 1975.6,
+      "onsetToleranceSeconds": 0.18,
+      "centsTolerance": 60,
+      "appleOnsetToleranceSeconds": 0.15,
+      "appleCentsTolerance": 50
+    },
+    "poly": {
+      "primary": "basic-pitch",
+      "review": "independent-acoustic-evidence"
+    },
+    "confidence": {
+      "native": 0.9,
+      "basicPitch": 0.5,
+      "comparisonIsCalibratedProbability": false
+    }
+  },
   "profiles": [
     {
       "id": "piano",
@@ -11,10 +37,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "keyboard",
       "input": "midi",
       "recommendedInput": "midi",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -32,10 +59,11 @@
       "minHz": 195.997717991,
       "maxHz": 4186.00904481,
       "windowSize": 4096,
+      "family": "bowed",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -53,10 +81,11 @@
       "minHz": 130.81278265,
       "maxHz": 2793.82585146,
       "windowSize": 4096,
+      "family": "bowed",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -74,10 +103,11 @@
       "minHz": 65.4063913251,
       "maxHz": 2093.0045224,
       "windowSize": 8192,
+      "family": "bowed",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -95,10 +125,11 @@
       "minHz": 32.7031956626,
       "maxHz": 1046.5022612,
       "windowSize": 8192,
+      "family": "bowed",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "octave",
       "variants": [
         {
@@ -121,10 +152,11 @@
       "minHz": 32.7031956626,
       "maxHz": 3135.96348785,
       "windowSize": 8192,
+      "family": "plucked",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -142,10 +174,11 @@
       "minHz": 130.81278265,
       "maxHz": 4186.00904481,
       "windowSize": 4096,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -163,10 +196,11 @@
       "minHz": 58.2704701898,
       "maxHz": 3135.96348785,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "bb",
       "variants": [
         {
@@ -199,10 +233,11 @@
       "minHz": 29.1352350949,
       "maxHz": 1396.91292573,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -220,10 +255,11 @@
       "minHz": 174.614115717,
       "maxHz": 2793.82585146,
       "windowSize": 4096,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -241,10 +277,11 @@
       "minHz": 41.2034446141,
       "maxHz": 2093.0045224,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "f",
       "variants": [
         {
@@ -272,10 +309,11 @@
       "minHz": 92.4986056779,
       "maxHz": 3135.96348785,
       "windowSize": 4096,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "bb",
       "variants": [
         {
@@ -298,10 +336,11 @@
       "minHz": 41.2034446141,
       "maxHz": 1567.98174393,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -319,10 +358,11 @@
       "minHz": 27.5,
       "maxHz": 1046.5022612,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -340,10 +380,11 @@
       "minHz": 41.2034446141,
       "maxHz": 1567.98174393,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "bass",
       "variants": [
         {
@@ -366,10 +407,11 @@
       "minHz": 65.4063913251,
       "maxHz": 2793.82585146,
       "windowSize": 8192,
+      "family": "voice",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -387,10 +429,33 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "keyboard",
       "input": "midi",
       "recommendedInput": "midi",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "clavinet",
+      "name": "击弦古钢琴",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "family": "keyboard",
+      "input": "midi",
+      "recommendedInput": "midi",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -408,16 +473,22 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
           "id": "concert",
           "name": "实音 / C 调",
           "transpose": 0
+        },
+        {
+          "id": "f",
+          "name": "F 调",
+          "transpose": -7
         }
       ]
     },
@@ -429,16 +500,22 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "plucked",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
           "id": "concert",
           "name": "实音 / C 调",
           "transpose": 0
+        },
+        {
+          "id": "octave",
+          "name": "低八度发声",
+          "transpose": -12
         }
       ]
     },
@@ -450,10 +527,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "keyboard",
       "input": "midi",
       "recommendedInput": "midi",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -471,10 +549,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "keyboard",
       "input": "midi",
       "recommendedInput": "midi",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -492,10 +571,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -513,16 +593,22 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
           "id": "concert",
           "name": "实音 / C 调",
           "transpose": 0
+        },
+        {
+          "id": "octave",
+          "name": "高八度发声",
+          "transpose": 12
         }
       ]
     },
@@ -534,10 +620,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -555,16 +642,22 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "plucked",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
           "id": "concert",
           "name": "实音 / C 调",
           "transpose": 0
+        },
+        {
+          "id": "octave",
+          "name": "低八度发声",
+          "transpose": -12
         }
       ]
     },
@@ -576,16 +669,37 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
           "id": "concert",
           "name": "实音 / C 调",
           "transpose": 0
+        },
+        {
+          "id": "bb-soprano",
+          "name": "降 B 调高音",
+          "transpose": -2
+        },
+        {
+          "id": "eb-alto",
+          "name": "降 E 调中音",
+          "transpose": -9
+        },
+        {
+          "id": "bb-tenor",
+          "name": "降 B 调次中音",
+          "transpose": -14
+        },
+        {
+          "id": "eb-baritone",
+          "name": "降 E 调上低音",
+          "transpose": -21
         }
       ]
     },
@@ -597,10 +711,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "bowed",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -618,10 +733,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "plucked",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -639,10 +755,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "plucked",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -660,10 +777,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "plucked",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -681,10 +799,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -702,10 +821,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "bowed",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -723,10 +843,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "wind",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {
@@ -744,10 +865,11 @@
       "minHz": 27.5,
       "maxHz": 4186.00904481,
       "windowSize": 8192,
+      "family": "generic",
       "input": "microphone",
       "recommendedInput": "microphone",
       "realtimeEngine": "mpm",
-      "recordingEngine": "basic-pitch",
+      "recordingEngine": "notewise-fusion",
       "defaultVariant": "concert",
       "variants": [
         {

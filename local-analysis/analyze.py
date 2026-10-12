@@ -95,6 +95,9 @@ def analyze(path: Path, home: Path, options: dict | None = None) -> dict:
     a4 = float(options.get("a4", 440))
     if not 400 <= a4 <= 480:
         raise ValueError("A4 must be 400–480 Hz")
+    if options.get("engine") == "notewise-fusion":
+        from fusion import analyze_fusion
+        return analyze_fusion(path, home, seconds, options, analyze)
     if options.get("engine", "basic-pitch") != "basic-pitch":
         from mono_analysis import analyze_mono
         return analyze_mono(path, home, seconds, options)

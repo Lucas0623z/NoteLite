@@ -89,6 +89,10 @@ jobs:
           pnpm --dir figma-ui test
           pnpm --dir figma-ui build
           python3 apple/scripts/prepare-figma-ui.py
+          node apple/scripts/prepare-notewise-profiles.mjs
+          python3 apple/scripts/prepare-notewise-model.py
+          python3 apple/scripts/prepare-release-features.py --check
+          python3 -B apple/release/legal_resources.py prepare
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

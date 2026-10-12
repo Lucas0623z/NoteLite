@@ -13,7 +13,7 @@ typedef struct {
     int active, midi, candidate, frames, quiet_frames, unreliable_frames;
     int pending_attack, uncertainty, unstable_frames;
     uint64_t id, uncertainty_id;
-    double a4, onset_ms, candidate_ms, candidate_evidence_ms, confidence_sum, cents_sum;
+    double a4, sample_rate, onset_ms, candidate_ms, candidate_evidence_ms, confidence_sum, cents_sum;
     double timing_confidence, candidate_timing_confidence;
     double last_frequency, last_confidence, last_cents, uncertainty_ms, unstable_ms, peak_level;
     unsigned measurements, updates;

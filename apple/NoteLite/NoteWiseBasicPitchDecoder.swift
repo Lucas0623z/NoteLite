@@ -33,6 +33,7 @@ struct NoteWiseRecordedTranscription: Codable, Sendable {
     let detectorVersion: String
     let supportedPitchRange: [String: Int]
     let warnings: [String]
+    var fusionDiagnostics: NoteWiseFusionDiagnostics? = nil
 
     var dictionary: [String: Any] {
         // This fixed Codable structure contains only JSON-compatible scalars.

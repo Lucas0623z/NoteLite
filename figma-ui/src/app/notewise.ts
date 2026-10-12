@@ -1,7 +1,9 @@
 import { createUUID, isNativeCloud, nativeRequest } from "./cloud.ts";
 import type { PracticeOwner } from "./practice-owner.ts";
-import { createScoreTimeline, noteKey, type NoteKey } from "./score-position.ts";
-import { resolveInstrument, soundingMidi } from "./instrument-profiles.ts";
+import { noteKey, type NoteKey } from "./score-position.ts";
+import { selectPerformanceSources } from "./engine-selection.ts";
+import type { NoteWiseEnginePlan } from "../../../practice-web/src/engine-policy.js";
+import { resolveInstrument, resolveProfile, soundingMidi } from "./instrument-profiles.ts";
 
 export type InputKind = "timer" | "midi" | "microphone";
 export type NoteWiseMode = "follow" | "strict" | "wait";
@@ -23,18 +25,22 @@ export type NoteWiseAnalysis = {
   uncertainty: { timeMs: number; offsetMs?: number; reason: string }[]; completed: boolean; terminal: boolean; performanceDurationMs: number;
   recording?: { takeId: string; available: boolean; mime?: string; durationMs?: number; sampleRate?: number; sampleCount?: number; size?: number; interrupted?: boolean };
 };
-export type NoteWiseSettings = { mode: NoteWiseMode; inputKind: Exclude<InputKind,"timer">; bpm: number; tuning: number; first: number; last: number; part: string; scoreRevision?: number; instrument?: string; instrumentVariant?: string };
+export type NoteWiseSettings = { mode: NoteWiseMode; inputKind: Exclude<InputKind,"timer">; bpm: number; tuning: number; first: number; last: number; part: string; scoreRevision?: number; instrument?: string; instrumentVariant?: string; enginePlan?:NoteWiseEnginePlan };
 export type NoteWiseFeedback = { position: NoteKey[]; noteStates: { key: NoteKey; state: "correct" | "wrong" | "pending" }[]; correct: number; wrong: number; pending: number; message: string; complete: boolean };
 
-export function expectedPerformance(xml: string, settings: NoteWiseSettings): ExpectedNote[] {
-  const timeline = createScoreTimeline(xml), ratio=timeline.initialTempo/settings.bpm, instrument=resolveInstrument({},settings.instrument||"piano",{variant:settings.instrumentVariant});
-  const selected=timeline.notes.filter(n=>n.key.measureIndex>=settings.first-1 && n.key.measureIndex<=settings.last-1 && (settings.part==="全部声部" || n.key.partId===settings.part));
+export function preparePerformance(xml:string,settings:NoteWiseSettings) {
+  const {timeline,notes:selected,instruments,plan}=selectPerformanceSources(xml,settings);
+  const ratio=timeline.initialTempo/settings.bpm;
   if (!selected.length) throw new Error("所选小节或声部没有可评估的有音高音符。");
   if (selected.length>10000) throw new Error("练习范围过长，请分段练习。");
   const offset=Math.min(...selected.map(n=>n.start));
-  return selected.map(n=>({ ...n.key, sourceNoteId:noteKey(n.key), occurrenceId:`${noteKey(n.key)}@${n.occurrenceOrdinal||1}`, occurrenceOrdinal:n.occurrenceOrdinal||1,
+  const expected:ExpectedNote[]=selected.map(n=>{ const instrument=instruments.get(n)!;return { ...n.key, sourceNoteId:noteKey(n.key), occurrenceId:`${noteKey(n.key)}@${n.occurrenceOrdinal||1}`, occurrenceOrdinal:n.occurrenceOrdinal||1,
     midi:soundingMidi(n,instrument),writtenMidi:n.writtenMidi??n.midi,step:n.step||"",alter:n.alter||0,octave:n.octave??Math.floor(n.midi/12)-1,transpose:n.transposeExplicit?(n.transpose||0):instrument.transpose,transposeExplicit:!!n.transposeExplicit,
-    voice:n.voice||"1",staff:n.staff||"1",startMs:(n.start-offset)*1000*ratio,durationMs:(n.end-n.start)*1000*ratio,onsetBeat:n.onsetBeat??0,durationBeat:n.durationBeat??0 }));
+    voice:n.voice||"1",staff:n.staff||"1",startMs:(n.start-offset)*1000*ratio,durationMs:(n.end-n.start)*1000*ratio,onsetBeat:n.onsetBeat??0,durationBeat:n.durationBeat??0 };});
+  return {expected,plan};
+}
+export function expectedPerformance(xml:string,settings:NoteWiseSettings):ExpectedNote[] {
+  return preparePerformance(xml,settings).expected;
 }
 export function validActualEvent(value: unknown): value is ActualEvent {
   if (!value || typeof value!=="object") return false;
@@ -55,16 +61,19 @@ export class NoteWiseMatcher {
   private attacks=new Map<string,ActualEvent>();
   private continuous=new Map<string,{time:number;cents:number}[]>();
   private interrupted=false;
-  private feedback:(value:NoteWiseFeedback)=>void;
-  constructor(expected:ExpectedNote[], settings:NoteWiseSettings, identity:{takeId:string;sourceScoreSha256:string}, feedback:(value:NoteWiseFeedback)=>void=()=>{}) {
+  private feedback?: (value:NoteWiseFeedback)=>void;
+  private expectedBySource=new Map<string,ExpectedNote>();
+  private expectedByOccurrence=new Map<string,ExpectedNote>();
+  constructor(expected:ExpectedNote[], settings:NoteWiseSettings, identity:{takeId:string;sourceScoreSha256:string}, feedback?: (value:NoteWiseFeedback)=>void) {
     this.feedback=feedback;
     const instrument=resolveInstrument({},settings.instrument||"piano",{variant:settings.instrumentVariant});
     const attemptId=`${identity.takeId}:1`;
     this.report={schemaVersion:2,contract:"notewise-history-1",status:"analysed",source:"client-reported",verifiedByServer:false,takeId:identity.takeId,eventId:identity.takeId,sourceScoreSha256:identity.sourceScoreSha256,scoreRevision:settings.scoreRevision||1,inputKind:settings.inputKind,
-      instrument:{profileId:instrument.profile.id,variant:instrument.variant,transpose:instrument.transpose,source:"manual"},detectorVersion:settings.inputKind==="midi"?"midi-stream-2":"native-mpm-yin-1",matcherVersion:"online-occurrence-2",judgeRulesVersion:"active-feedback-2",normalizerVersion:"musicxml-repeat-tie-2",mode:settings.mode,bpm:settings.bpm,tuning:settings.tuning,
+      ...(settings.instrument==="auto"?{}:{instrument:{profileId:instrument.profile.id,variant:instrument.variant,transpose:instrument.transpose,source:"manual" as const}}),detectorVersion:settings.inputKind==="midi"?"midi-stream-2":"native-mpm-yin-1",matcherVersion:"notewise-fusion-online-1",judgeRulesVersion:"active-feedback-2",normalizerVersion:"musicxml-repeat-tie-2",mode:settings.mode,bpm:settings.bpm,tuning:settings.tuning,
       captureClock:{source:settings.inputKind==="midi"?"host-monotonic":"audio-sample",unit:"ms",timingCalibrated:false},capabilities:{pitch:true,onset:true,duration:true,intonation:settings.inputKind==="microphone",polyphony:settings.inputKind==="midi",recording:settings.inputKind==="microphone"},
       attempts:[{attemptId,startMs:0,endMs:null,interrupted:false}],expected:structuredClone(expected),actualEvents:[],opportunities:[],errors:[],coverageByDimension:{},uncertainty:[],completed:false,terminal:false,performanceDurationMs:0};
-    for (const n of expected.sort((a,b)=>a.startMs-b.startMs)) {
+    for(const n of this.report.expected){if(!this.expectedBySource.has(n.sourceNoteId))this.expectedBySource.set(n.sourceNoteId,n);this.expectedByOccurrence.set(n.occurrenceId,n);}
+    for (const n of [...expected].sort((a,b)=>a.startMs-b.startMs)) {
       let group=this.groups[this.groups.length-1];
       if (!group || Math.abs(group.startMs-n.startMs)>1) { group={startMs:n.startMs,notes:[],opportunities:[]}; this.groups.push(group); }
       group.notes.push(n);
@@ -125,7 +134,7 @@ export class NoteWiseMatcher {
     const o=this.noteOpportunity.get(e.eventId),attack=this.attacks.get(e.eventId);
     if (!o || !attack) return;
     if (!e.releaseReliable || this.report.mode!=="strict" || this.report.attempts[0].interrupted || attack.timingConfidence<.9 || e.timingConfidence<.9) { o.dimensions.duration=unavailable(!e.releaseReliable||this.report.attempts[0].interrupted?"释放或时间来源跨越暂停、停止或断开":"自由跟谱的时值不按目标速度评分"); return; }
-    const expected=this.report.expected.find(n=>n.occurrenceId===o.occurrenceId)!, delta=e.timeMs-attack.timeMs-expected.durationMs;
+    const expected=this.expectedByOccurrence.get(o.occurrenceId)!, delta=e.timeMs-attack.timeMs-expected.durationMs;
     o.dimensions.duration={eligible:true,outcome:Math.abs(delta)>Math.max(160,expected.durationMs*.3)?"wrong":"correct",error:delta};
     if (o.dimensions.duration.outcome==="wrong") this.error("rhythm",delta<0?"short":"long",o,e);
   }
@@ -146,26 +155,29 @@ export class NoteWiseMatcher {
     for(const o of this.report.opportunities)if(o.entered&&!o.terminal){o.terminal=true;if(!o.completed){o.outcome="pending";o.dimensions.pitch={eligible:true,outcome:"pending",reason:"本次在此机会结束，不能确定漏音"};}}
     this.updateCoverage();return structuredClone(this.report);
   }
-  private updateCoverage(){for(const d of ["pitch","onset","duration","intonation"] as const){const values=this.report.opportunities.map(o=>o.dimensions[d]).filter(v=>v.eligible);this.report.coverageByDimension[d]={eligible:values.length,evaluated:values.filter(v=>["correct","wrong"].includes(v.outcome)).length,failed:values.filter(v=>v.outcome==="wrong").length,pending:values.filter(v=>v.outcome==="pending").length};}if(this.report.opportunities.some(o=>o.entered&&o.outcome==="pending"))this.report.status="uncertain";}
-  private publish(message:string){this.updateCoverage();const current=this.groups[this.index];const notes=new Map<string,{key:NoteKey;state:"correct"|"wrong"|"pending"}>();for(const o of this.report.opportunities.filter(o=>o.entered)){for(const id of o.sourceNoteIds){const n=this.report.expected.find(n=>n.sourceNoteId===id);if(n)notes.set(id,{key:{partId:n.partId,measureIndex:n.measureIndex,noteIndex:n.noteIndex},state:o.outcome==="correct"?"correct":o.outcome==="wrong"||o.outcome==="missed"?"wrong":"pending"});}}this.feedback({position:current?.notes.map(n=>({partId:n.partId,measureIndex:n.measureIndex,noteIndex:n.noteIndex}))||[],noteStates:[...notes.values()],correct:this.report.opportunities.filter(o=>o.firstTryCorrect).length,wrong:this.report.errors.filter(e=>e.type!=="uncertain").length,pending:this.report.errors.filter(e=>e.type==="uncertain").length,message,complete:this.report.completed});}
+  private updateCoverage(){for(const d of ["pitch","onset","duration","intonation"] as const){const values=this.report.opportunities.map(o=>o.dimensions[d]).filter(v=>v.eligible);this.report.coverageByDimension[d]={eligible:values.length,evaluated:values.filter(v=>["correct","wrong"].includes(v.outcome)).length,failed:values.filter(v=>v.outcome==="wrong").length,pending:values.filter(v=>v.outcome==="pending").length};}this.report.status=this.report.uncertainty.length||this.report.opportunities.some(o=>o.entered&&o.outcome==="pending")?"uncertain":"analysed";}
+  private publish(message:string){if(!this.feedback)return;this.updateCoverage();const current=this.groups[this.index];const notes=new Map<string,{key:NoteKey;state:"correct"|"wrong"|"pending"}>();for(const o of this.report.opportunities.filter(o=>o.entered)){for(const id of o.sourceNoteIds){const n=this.expectedBySource.get(id);if(n)notes.set(id,{key:{partId:n.partId,measureIndex:n.measureIndex,noteIndex:n.noteIndex},state:o.outcome==="correct"?"correct":o.outcome==="wrong"||o.outcome==="missed"?"wrong":"pending"});}}this.feedback({position:current?.notes.map(n=>({partId:n.partId,measureIndex:n.measureIndex,noteIndex:n.noteIndex}))||[],noteStates:[...notes.values()],correct:this.report.opportunities.filter(o=>o.firstTryCorrect).length,wrong:this.report.errors.filter(e=>e.type!=="uncertain").length,pending:this.report.errors.filter(e=>e.type==="uncertain").length,message,complete:this.report.completed});}
 }
 export const midiName=(midi:number)=>`${["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"][midi%12]}${Math.floor(midi/12)-1}`;
 export async function scoreDigest(xml:string):Promise<string>{ if(isNativeCloud())return(await nativeRequest<{sha256:string}>("notewise/score-digest",{musicxml:xml})).sha256; const value=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(xml));return Array.from(new Uint8Array(value),b=>b.toString(16).padStart(2,"0")).join(""); }
 
 type RecordedTranscription={notes:{id:string;midi:number;onsetMs:number;offsetMs:number;confidence:number;cents?:number;centsEvidence:string;releaseReliable:boolean}[];uncertaintyIntervals:{onsetMs:number;offsetMs:number;reason:string}[];sampleRate:number;durationMs:number;detectorVersion:string;warnings:string[]};
-export async function refineRecording(original:NoteWiseAnalysis):Promise<NoteWiseAnalysis>{
+export async function refineRecording(original:NoteWiseAnalysis,musicxml?:string):Promise<NoteWiseAnalysis>{
   if(!original.recording?.available)return original;
-  const detected=await nativeRequest<RecordedTranscription>("notewise/refine",{takeId:original.takeId,tuning:original.tuning},300000);
-  const settings:NoteWiseSettings={inputKind:"microphone",mode:original.mode,bpm:original.bpm,tuning:original.tuning,first:1,last:Number.MAX_SAFE_INTEGER,part:"全部声部",scoreRevision:original.scoreRevision,instrument:original.instrument?.profileId,instrumentVariant:original.instrument?.variant};
+  const ids=[...new Set(original.expected.map(n=>n.partId))];
+  const settings:NoteWiseSettings={inputKind:"microphone",mode:original.mode,bpm:original.bpm,tuning:original.tuning,first:Math.min(...original.expected.map(n=>n.measureIndex))+1,last:Math.max(...original.expected.map(n=>n.measureIndex))+1,part:ids.length===1?ids[0]:"全部声部",scoreRevision:original.scoreRevision,instrument:original.instrument?.profileId||(musicxml?"auto":"piano"),instrumentVariant:original.instrument?.variant};
+  const plan=musicxml?preparePerformance(musicxml,settings).plan:undefined;
+  const detected=await nativeRequest<RecordedTranscription>("notewise/refine",{takeId:original.takeId,tuning:original.tuning,instrument:plan?.instrumentIds[0]||original.instrument?.profileId||"piano",polyphonic:plan?.texture==="poly"||(!plan&&(original.capabilities.polyphony||["keyboard","plucked"].includes(resolveProfile(original.instrument?.profileId||"piano").family)))},300000);
+  const polyphonic=detected.detectorVersion==='basic-pitch-coreml-0.4.0';
   const matcher=new NoteWiseMatcher(structuredClone(original.expected),settings,{takeId:original.takeId,sourceScoreSha256:original.sourceScoreSha256});
-  matcher.report.detectorVersion=detected.detectorVersion;matcher.report.capabilities.polyphony=true;matcher.report.capabilities.intonation=false;
+  matcher.report.detectorVersion=detected.detectorVersion;matcher.report.capabilities.polyphony=polyphonic;matcher.report.capabilities.intonation=false;
   if(original.attempts.some(a=>a.interrupted)){matcher.pause();matcher.resume();}
   const events:ActualEvent[]=[];
   for(const n of detected.notes){events.push({eventId:`review-${n.id}`,type:"on",midi:n.midi,timeMs:n.onsetMs,confidence:n.confidence,timingConfidence:.75,cents:n.cents,centsEvidence:n.centsEvidence,sampleRate:detected.sampleRate});events.push({eventId:`review-${n.id}`,type:"off",midi:n.midi,timeMs:n.offsetMs,confidence:n.confidence,timingConfidence:.75,releaseReliable:n.releaseReliable,cents:n.cents,centsEvidence:n.centsEvidence,sampleRate:detected.sampleRate});}
   for(const u of detected.uncertaintyIntervals)events.push({eventId:createUUID(),type:"uncertainty",timeMs:u.onsetMs,offsetMs:u.offsetMs,confidence:0,timingConfidence:0,reason:u.reason});
   if(events.length>20000)throw new Error("录后音符事件超过可复核上限，请分段练习；实时记录已保留。");
   for(const e of events.sort((a,b)=>a.timeMs-b.timeMs||(a.type==="off"?-1:1)))if(!matcher.accept(e))throw new Error("录后结果含重复或无效事件，实时记录已保留。");
-  const report=matcher.finish(detected.durationMs,original.attempts.some(a=>a.interrupted));report.detectorVersion=detected.detectorVersion;report.capabilities.polyphony=true;report.capabilities.intonation=false;report.recording=original.recording;
+  const report=matcher.finish(detected.durationMs,original.attempts.some(a=>a.interrupted));report.detectorVersion=detected.detectorVersion;report.capabilities.polyphony=polyphonic;report.capabilities.intonation=false;report.recording=original.recording;
   // Coarse model contour does not establish precise intonation or calibrated attacks.
   report.captureClock={source:"audio-sample",unit:"ms",timingCalibrated:false,sampleRate:detected.sampleRate};
   return report;
@@ -182,7 +194,12 @@ export class NoteWiseInput {
   constructor(takeId:string,accept:(value:ActualEvent)=>void,interrupted:(message:string)=>void,owner?:PracticeOwner){this.takeId=takeId;this.accept=accept;this.interrupted=interrupted;this.owner=owner?{...owner}:undefined;}
   private payload(){return{takeId:this.takeId,...(this.owner?{expectedUserId:this.owner.owner,expectedSessionId:this.owner.sessionId}:{})};}
   private receive=(message:Event)=>{const e=(message as CustomEvent).detail;if(!this.active||e?.type!=="notewiseInput"||e.takeId!==this.takeId||!Number.isInteger(e.sequence)||e.sequence<=this.sequence)return;this.sequence=e.sequence;if(e.status==="interrupted")this.interrupted(typeof e.message==="string"?e.message:"演奏输入中断");else if(validActualEvent(e.event))this.accept(e.event);};
-  async start(settings:NoteWiseSettings,instrument:string){if(!isNativeCloud())throw new Error("请在 Apple 应用中连接 MIDI 或使用麦克风；浏览器可继续自由计时。");const request=++this.request;this.active=true;window.addEventListener("notelite-cloud-event",this.receive);try{const result=await nativeRequest("notewise/start",{...this.payload(),inputKind:settings.inputKind,tuning:settings.tuning,instrument},60000);if(request!==this.request){await nativeRequest("notewise/stop",this.payload());throw new Error("开始演奏输入已取消。");}return result;}catch(error){this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);throw error;}}
+  async start(settings:NoteWiseSettings,instrument:string){if(!isNativeCloud())throw new Error("请在 Apple 应用中连接 MIDI 或使用麦克风；浏览器可继续自由计时。");const request=++this.request;this.active=true;window.addEventListener("notelite-cloud-event",this.receive);try{const result=await nativeRequest("notewise/start",{...this.payload(),inputKind:settings.inputKind,tuning:settings.tuning,instrument:settings.enginePlan?.instrumentIds[0]||instrument,polyphonic:settings.enginePlan?.texture==="poly"},60000);if(request!==this.request){await nativeRequest("notewise/stop",this.payload());throw new Error("开始演奏输入已取消。");}return result;}catch(error){this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);throw error;}}
   async pause(){await nativeRequest("notewise/pause",this.payload());}
-  async stop(){++this.request;this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);return nativeRequest<NonNullable<NoteWiseAnalysis["recording"]>>("notewise/stop",this.payload());}
+  async stop(discardEvents=false){
+    const request=++this.request;
+    if(discardEvents){this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);}
+    try{return await nativeRequest<NonNullable<NoteWiseAnalysis["recording"]>>("notewise/stop",this.payload());}
+    finally{if(request===this.request){this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);}}
+  }
 }

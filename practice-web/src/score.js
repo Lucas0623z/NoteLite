@@ -1,4 +1,4 @@
-import {inferInstrumentMetadata, resolveInstrument, soundingMidi} from './instruments.js';
+import {inferInstrumentMetadata, resolveInstrumentForNote, soundingMidi} from './instruments.js';
 
 const children = (node, name) => Array.from(node?.childNodes || []).filter(n => n.nodeType === 1 && (!name || n.localName === name || n.nodeName === name));
 const child = (node,name) => children(node,name)[0];
@@ -11,7 +11,7 @@ export const noteName = midi => ['C','C♯','D','E♭','E','F','F♯','G','A♭'
 export function parseScore(xml, Parser = globalThis.DOMParser) {
   const doc = new Parser().parseFromString(xml,'application/xml');
   const root = doc.documentElement;
-  if (root.nodeName !== 'score-partwise' || doc.getElementsByTagName('parsererror').length) throw new Error('请选择有效的 MusicXML 乐谱（score-partwise）。');
+  if (root.localName !== 'score-partwise' || doc.getElementsByTagName('parsererror').length) throw new Error('请选择有效的 MusicXML 乐谱（score-partwise）。');
   const catalog = new Map(children(child(root,'part-list'),'score-part').map(p=>[p.getAttribute('id'),p]));
   const warnings = new Set();
   const issues=[];
@@ -23,12 +23,17 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
     const instrumentAbbreviations=children(meta,'score-instrument').map(i=>text(i,'instrument-abbreviation')).filter(Boolean);
     const midiInstrument=children(meta,'midi-instrument').find(i=>child(i,'midi-program'));
     const program=num(midiInstrument,'midi-program',0), programExplicit=!!child(midiInstrument,'midi-program');
-    let divisions=1, beats=4, beatType=4, transpose=0, transposeExplicit=false, ties=new Map(), noteIndex=0,knownTime=false;
+    const instruments=children(meta,'score-instrument').map(i=>{
+      const midi=children(meta,'midi-instrument').find(m=>m.getAttribute('id')===i.getAttribute('id'));
+      return {id:i.getAttribute('id'),name:text(i,'instrument-name'),abbreviation:text(i,'instrument-abbreviation'),
+        program:num(midi,'midi-program',0),programExplicit:!!child(midi,'midi-program')};
+    });
+    let divisions=1, beats=4, beatType=4, transpose=0, transposeExplicit=!!child(child(root,'defaults'),'concert-score'), ties=new Map(), noteIndex=0,knownTime=false;
     const staffTransposes=new Map();
     for (const [mi,measure] of children(part,'measure').entries()) {
       let cursor=0,maxEnd=0,chordStart=0;
       for (const item of children(measure)) {
-        if(item.nodeName==='attributes') {
+        if(item.localName==='attributes') {
           divisions=num(item,'divisions',divisions);
           if(!(divisions>0)) throw new Error('乐谱中的 divisions 必须大于零。');
           const time=child(item,'time');
@@ -37,9 +42,9 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
             const value=num(trans,'chromatic')+12*num(trans,'octave-change'),staff=trans.getAttribute('number');
             if(staff)staffTransposes.set(staff,value);else{transpose=value;transposeExplicit=true;staffTransposes.clear();}
           }
-        } else if(item.nodeName==='backup') cursor-=num(item,'duration')/divisions;
-        else if(item.nodeName==='forward'){cursor+=num(item,'duration')/divisions;maxEnd=Math.max(maxEnd,cursor);}
-        else if(item.nodeName==='note') {
+        } else if(item.localName==='backup') cursor-=num(item,'duration')/divisions;
+        else if(item.localName==='forward'){cursor+=num(item,'duration')/divisions;maxEnd=Math.max(maxEnd,cursor);}
+        else if(item.localName==='note') {
           const ni=noteIndex++, duration=num(item,'duration')/divisions, chord=!!child(item,'chord');
           const onset=chord?chordStart:cursor;
           if(!chord)chordStart=cursor;
@@ -51,9 +56,10 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
             const transposeSemitones=staffTransposes.get(staff)??transpose, noteTransposeExplicit=staffTransposes.has(staff)||transposeExplicit;
             const midi=writtenMidi+transposeSemitones;
             if(!Number.isInteger(midi)||midi<0||midi>127)throw new Error('暂不支持微分音或超出 MIDI 范围的乐谱。');
-            const key=`${voice}/${staff}/${midi}`, types=children(item,'tie').map(t=>t.getAttribute('type'));
+            const instrumentIds=children(item,'instrument').map(i=>i.getAttribute('id')).filter(Boolean);
+            const key=`${voice}/${staff}/${midi}/${instrumentIds.join(',')}`, types=children(item,'tie').map(t=>t.getAttribute('type'));
             if(types.includes('stop') && ties.has(key)) {ties.get(key).duration+=duration;if(!types.includes('start'))ties.delete(key);}
-            else {const n={id:`${id}:${ni}`,part:id,mi,measure:measure.getAttribute('number')||String(mi+1),beat:onset*beatType/4+1,onset,duration,midi,writtenMidi,transposeSemitones,transposeExplicit:noteTransposeExplicit,voice,staff,xmlIndex:ni};notes.push(n);if(types.includes('start'))ties.set(key,n);}
+            else {const n={id:`${id}:${ni}`,part:id,mi,measure:measure.getAttribute('number')||String(mi+1),beat:onset*beatType/4+1,onset,duration,midi,writtenMidi,transposeSemitones,transposeExplicit:noteTransposeExplicit,voice,staff,instrumentIds,xmlIndex:ni};notes.push(n);if(types.includes('start'))ties.set(key,n);}
           } else if(child(item,'unpitched')) warnings.add('检测到无固定音高的打击乐：暂不支持音高评分。');
           if(!chord)cursor+=duration;
           maxEnd=Math.max(maxEnd,onset+duration,cursor);
@@ -69,7 +75,8 @@ export function parseScore(xml, Parser = globalThis.DOMParser) {
       lengths.push((implicit||pickup)&&maxEnd>0?maxEnd:knownTime?nominal:Math.max(maxEnd,nominal));
       meters.push({beats,beatType,number:measure.getAttribute('number')||String(mi+1)});
     }
-    return {id,name,abbreviation,instrumentName:instrumentNames[0]||'',instrumentNames,instrumentAbbreviations,program,programExplicit,notes,lengths,meters,transpose};
+    return {id,name,abbreviation,instrumentName:instrumentNames[0]||'',instrumentNames,instrumentAbbreviations,instruments,program,programExplicit,notes,lengths,meters,transpose,
+      concertScore:!!child(child(root,'defaults'),'concert-score')};
   });
   const lengths=Array.from({length:Math.max(0,...parts.map(p=>p.lengths.length))},(_,i)=>Math.max(...parts.map(p=>p.lengths[i]||0)));
   let offset=0;const starts=lengths.map(l=>{const start=offset;offset+=l;return start;});
@@ -94,8 +101,8 @@ export function selectGroups(score, partId, from=1, to=score.lengths.length, opt
   const notes=score.parts.filter(p=>partId==='all'||p.id===partId).flatMap(p=>{
     const settings=options.byPart?.[p.id]||options;
     if(!settings.instrument&&!settings.profileId&&!settings.id&&settings.transpose===undefined)return p.notes;
-    const instrument=resolveInstrument(p,settings.instrument||settings.profileId||settings.id||'auto',settings);
     return p.notes.map(n=>{
+      const instrument=resolveInstrumentForNote(p,n,settings.instrument||settings.profileId||settings.id||'auto',settings);
       const midi=soundingMidi(n,instrument);
       if(!Number.isInteger(midi)||midi<0||midi>127)throw new Error('选择的乐器移调后，音符超出 MIDI 范围。');
       return midi===n.midi?n:{...n,midi,manualTranspose:instrument.transpose};
@@ -108,6 +115,6 @@ export function selectGroups(score, partId, from=1, to=score.lengths.length, opt
 
 export function isPolyphonic(groups) {
   let end=-Infinity;
-  for(const g of groups) {if(g.notes.length>1||g.onset<end-0.04)return true;end=Math.max(...g.notes.map(n=>n.onset+n.duration));}
+  for(const g of groups) {if(g.notes.length>1||g.onset<end-0.0001)return true;end=Math.max(...g.notes.map(n=>n.onset+n.duration));}
   return false;
 }

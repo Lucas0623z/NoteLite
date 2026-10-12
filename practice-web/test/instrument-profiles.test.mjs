@@ -16,7 +16,7 @@ test('all architecture instruments expose bounded independent sounding ranges an
     assert.ok(p.minMidi < p.maxMidi && p.minHz > 0 && p.minHz < p.maxHz, p.id);
     assert.ok([4096,8192].includes(p.windowSize),p.id);
     assert.equal(p.realtimeEngine,'mpm');
-    assert.equal(p.recordingEngine,'basic-pitch');
+    assert.equal(p.recordingEngine,'notewise-fusion');
   }
   assert.equal(resolveProfile('piano').recommendedInput,'midi');
   for(const id of ['cello','contrabass','bassoon','horn','trombone','tuba','euphonium']) assert.equal(resolveProfile(id).windowSize,8192,id);

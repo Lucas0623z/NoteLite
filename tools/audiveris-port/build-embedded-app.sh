@@ -16,6 +16,7 @@ command -v node >/dev/null
 node "$repo/apple/scripts/prepare-notewise-profiles.mjs"
 python3 "$repo/apple/scripts/prepare-notewise-model.py"
 python3 "$repo/apple/scripts/prepare-release-features.py" --check
+python3 -B "$repo/apple/release/legal_resources.py" check
 python3 -B "$repo/tools/audiveris-port/test_embedded_notewise_composition.py"
 embedding=$(cd "$embedding" && pwd)
 mkdir -p "$output"
@@ -127,6 +128,7 @@ printf '%s\n' "$project" > "$output/evidence/project-location.txt"
 ) 2>&1 | tee "$output/evidence/build.log"
 product="$work/DerivedData/Build/Products/Release-$sdk/NoteLite.app"
 test -d "$product"
+python3 -B "$repo/apple/release/legal_resources.py" verify --resources "$product"
 if [ "$sdk" = iphonesimulator ]; then codesign --force --sign - "$product"; fi
 
 # Verify every embedded byte against the resources used by the acceptance probe,

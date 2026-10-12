@@ -23,6 +23,46 @@ import static org.junit.Assume.assumeTrue;
 
 /** Exercises failed recording joins and real local score preparation at the session boundary. */
 public class PracticeRuntimeTest {
+    @Test public void identicalPitchUnisonAndShortOverlapRemainPolyphonicEvents() throws Exception{
+        var method=PracticeRuntime.class.getDeclaredMethod("polyphonic",List.class);method.setAccessible(true);
+        Map<String,Object> first=PracticeEngine.fields("midi",60,"onset",0,"duration",1.02);
+        Map<String,Object> second=PracticeEngine.fields("midi",62,"onset",1,"duration",1);
+        assertEquals(Boolean.TRUE,method.invoke(null,List.of(PracticeEngine.fields("onset",0,"notes",List.of(first)),PracticeEngine.fields("onset",1,"notes",List.of(second)))));
+        assertEquals(Boolean.TRUE,method.invoke(null,List.of(PracticeEngine.fields("onset",0,"notes",List.of(first,first)))));
+        assertEquals(Boolean.FALSE,method.invoke(null,List.of(PracticeEngine.fields("onset",0,"notes",List.of(PracticeEngine.fields("midi",60,"onset",0,"duration",1))),PracticeEngine.fields("onset",1,"notes",List.of(second)))));
+    }
+    @Test public void realFusionIgnoresClientPolyphonyAndSavesReportWhenOptionalBaselineFails() throws Exception{
+        assumeTrue("Install actual fusion runtime",LocalAudioAnalysis.capabilities().getOrDefault("notewise-fusion",false));
+        byte[] source=new String(score(true,false),StandardCharsets.UTF_8).replace("Piano","Flute").getBytes(StandardCharsets.UTF_8);
+        PracticeRuntime runtime=new PracticeRuntime(source,"{}");
+        byte[] wav=PracticeWave.reference(List.of(PracticeEngine.fields("onset",0,"notes",List.of(
+            PracticeEngine.fields("midi",60,"onset",0,"duration",2),PracticeEngine.fields("midi",64,"onset",0,"duration",2)))),100,440,0);
+        try{
+            Map<String,Object> options=new LinkedHashMap<>(analysisOptions("notewise-fusion"));options.put("baseline","unavailable-test-baseline");
+            options.put("polyphonic",false);options.put("normalizedParts",List.of(Map.of("instrument","voice","reliable",true)));
+            options.put("plan",Map.of("mode","mono","primary","pyin"));options.put("minHz",999);options.put("maxHz",1000);
+            Map<String,Object> report=runtime.analyze(wav,options),trace=PracticeJson.object(report.get("transcription"));
+            assertEquals("notewise-fusion",trace.get("engine"));assertFalse(((List<?>)trace.get("notes")).isEmpty());
+            Map<String,Object> fusion=PracticeJson.object(trace.get("fusion")),plan=PracticeJson.object(fusion.get("plan"));
+            assertEquals("basic-pitch",plan.get("primary"));assertEquals(Boolean.TRUE,plan.get("polyphonic"));assertEquals(List.of("flute"),plan.get("instrumentIds"));
+            assertEquals(Boolean.FALSE,fusion.get("expectedScoreNotesUsedByDetectors"));
+            assertEquals(Boolean.FALSE,PracticeJson.object(PracticeJson.object(report.get("baseline")).get("metadata")).get("evaluated"));
+            assertTrue(String.valueOf(report.get("warning")).contains("主分析报告已保存"));assertFalse(report.containsKey("analysisPending"));
+            String id=(String)report.get("takeId");assertArrayEquals(wav,Files.readAllBytes(runtime.store().recording(id)));
+            assertEquals("notewise-fusion",runtime.store().report(id).get("engine"));assertEquals(1,runtime.store().list().size());
+        }finally{runtime.close();}
+    }
+    @Test public void realScoreNormalizationRejectsUnknownInstrumentAndUnconfirmedTransposingNotation() throws Exception{
+        assumeTrue("Install Partitura",LocalAudioAnalysis.capabilities().getOrDefault("partitura",false));
+        for(String instrument:List.of("drumkit","auto")){
+            PracticeRuntime runtime=new PracticeRuntime(new String(score(false,false),StandardCharsets.UTF_8).replace("Piano","Clarinet").getBytes(StandardCharsets.UTF_8),"{}");
+            try{
+                Map<String,Object> options=new LinkedHashMap<>(analysisOptions("notewise-fusion"));options.put("instrument",instrument);
+                assertThrows(IOException.class,()->runtime.analyze(audio(8000,800,0),options));
+                assertThrows(IOException.class,()->runtime.start(options));assertTrue(runtime.store().list().isEmpty());
+            }finally{runtime.close();}
+        }
+    }
     private Path directory;
     private String previousHome;
 

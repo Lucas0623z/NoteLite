@@ -8,6 +8,25 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class RecordedAlignmentTest {
+    @Test public void absentConfidenceDoesNotTurnAnUnmeasuredNoteIntoCorrect(){
+        Map<String,Object> missing=note("unknown",60,0);missing.remove("confidence");
+        for(Map<String,Object> sample:List.of(missing,missingWithType(missing))){
+            Map<String,Object> report=RecordedAlignment.analyze(line(60),config("free"),List.of(sample));
+            assertEquals(0L,report.get("firstTryCorrect"));
+            assertEquals("unjudged",resultNote(report,0,60).get("judgment"));
+        }
+    }
+    private static Map<String,Object> missingWithType(Map<String,Object> note){Map<String,Object> typed=new java.util.LinkedHashMap<>(note);typed.put("type","note-on");typed.put("id","typed");typed.put("onsetMs",0);typed.put("timeMs",0);return typed;}
+    @Test public void invalidConfidenceRejectedAndStrongFusionDisagreementRemainsUnjudged(){
+        for(Object confidence:List.of(-.1,1.1,Double.NaN,Double.POSITIVE_INFINITY,"1")){
+            Map<String,Object> invalid=note("bad",60,0);invalid.put("confidence",confidence);
+            assertThrows(IllegalArgumentException.class,()->RecordedAlignment.analyze(line(60),config("free"),List.of(invalid)));
+        }
+        Map<String,Object> disputed=note("disputed",60,0);disputed.put("reviewRequired",true);disputed.put("reason","detector-disagreement");
+        Map<String,Object> report=RecordedAlignment.analyze(line(60),config("free"),data("notes",List.of(disputed),
+                "uncertaintyIntervals",List.of(data("onset",0,"duration",.25,"reason","detector-disagreement"))));
+        assertEquals(0L,report.get("firstTryCorrect"));assertEquals("unjudged",resultNote(report,0,60).get("judgment"));
+    }
     private static Map<String,Object> data(Object... fields){return PracticeEngine.fields(fields);}
     private static PracticeTimeline line(int... pitches){
         List<Map<String,Object>> groups=new ArrayList<>();

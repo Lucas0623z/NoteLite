@@ -60,7 +60,7 @@ public final class LocalAudioAnalysis
 
     public static Map<String, Boolean> capabilities () {
         Optional<Runtime> installed = findRuntime();
-        if (installed.isEmpty()) return Map.of("basic-pitch", false, "pyin", false, "crepe", false, "aubio", false, "partitura", false, "parangonar", false, "nakamura", false);
+        if (installed.isEmpty()) return Map.of("notewise-fusion", false, "basic-pitch", false, "pyin", false, "crepe", false, "aubio", false, "partitura", false, "parangonar", false, "nakamura", false);
         Map<String, Boolean> result = new LinkedHashMap<>();
         Path home = installed.get().helper().getParent();
         for (String engine : List.of("basic-pitch", "pyin", "crepe", "aubio", "partitura", "parangonar", "nakamura"))
@@ -71,8 +71,11 @@ public final class LocalAudioAnalysis
                 case "partitura", "parangonar" -> Files.isRegularFile(home.resolve("score_tools.py"));
                 case "nakamura" -> List.of("SprToFmt3x", "Fmt3xToHmm", "ScorePerfmMatcher", "ErrorDetection", "RealignmentMOHMM", "MatchToCorresp")
                         .stream().allMatch(name -> Files.isRegularFile(home.resolve("native/nakamura/"+name+".exe")));
-                default -> true;
+                default -> Files.isRegularFile(home.resolve("models/basic-pitch.onnx"));
             });
+        result.put("notewise-fusion",Files.isRegularFile(home.resolve("fusion.py"))
+                &&Files.isRegularFile(home.resolve("NoteWiseProfiles.json"))&&result.get("partitura")
+                &&smokePassed(installed.get().marker(),"notewise-fusion")&&(result.get("pyin")||result.get("basic-pitch")));
         return result;
     }
 
@@ -115,8 +118,9 @@ public final class LocalAudioAnalysis
         home = home.toAbsolutePath().normalize();
         Runtime runtime = new Runtime(home.resolve("python/python.exe"), home.resolve("analyze.py"),
                 home.resolve("models/basic-pitch.onnx"), home.resolve("runtime-ready.json"));
-        return List.of(runtime.python, runtime.helper, runtime.model, runtime.marker).stream().allMatch(Files::isRegularFile)
-                && smokePassed(runtime.marker(), "basic-pitch")
+        return List.of(runtime.python, runtime.helper, runtime.marker).stream().allMatch(Files::isRegularFile)
+                && ((Files.isRegularFile(runtime.model)&&smokePassed(runtime.marker(), "basic-pitch"))
+                ||(Files.isRegularFile(home.resolve("mono_analysis.py"))&&smokePassed(runtime.marker(), "pyin")))
                 ? Optional.of(runtime) : Optional.empty();
     }
 
@@ -247,7 +251,7 @@ public final class LocalAudioAnalysis
         try {
             Object parsed = new Json(new String(result, StandardCharsets.UTF_8)).parse();
             if (!(parsed instanceof Map<?, ?> root) || !Integer.valueOf(1).equals(integer(root.get("schemaVersion")))
-                    || !List.of("basic-pitch", "pyin", "crepe", "aubio").contains(root.get("engine")) || !(root.get("notes") instanceof List<?> notes) || notes.size() > 20000)
+                    || !List.of("notewise-fusion", "basic-pitch", "pyin", "crepe", "aubio").contains(root.get("engine")) || !(root.get("notes") instanceof List<?> notes) || notes.size() > 20000)
                 throw new IllegalArgumentException("Unsupported schema");
             double seconds = number(root.get("seconds"));
             if (seconds <= 0 || seconds > 600) throw new IllegalArgumentException("Duration");
@@ -260,6 +264,24 @@ public final class LocalAudioAnalysis
                         || confidence < 0 || confidence > 1) throw new IllegalArgumentException("Invalid note event");
                 last = onset;
                 if (note.containsKey("cents") && Math.abs(number(note.get("cents"))) > 100) throw new IllegalArgumentException("Cents");
+            }
+            if(root.get("uncertaintyIntervals") instanceof List<?> intervals)for(Object value:intervals){
+                if(!(value instanceof Map<?,?> interval))throw new IllegalArgumentException("Uncertainty");
+                double onset=number(interval.get("onset")),duration=number(interval.get("duration"));
+                if(onset<0||duration<=0||onset+duration>seconds+.001)throw new IllegalArgumentException("Uncertainty time");
+            }
+            if("notewise-fusion".equals(root.get("engine"))){
+                if(!(root.get("fusion") instanceof Map<?,?> fusion)||!"notewise-fusion-1".equals(fusion.get("policyVersion"))
+                    ||!Boolean.FALSE.equals(fusion.get("expectedScoreNotesUsedByDetectors"))
+                    ||!(fusion.get("plan") instanceof Map<?,?> plan)||!"notewise-fusion-1".equals(plan.get("policyVersion"))
+                    ||!(plan.get("requiresConfirmation") instanceof List<?> required)||!required.isEmpty()
+                    ||!(fusion.get("detectors") instanceof Map<?,?> detectors)||!detectors.containsKey(plan.get("primary")))
+                    throw new IllegalArgumentException("Fusion evidence");
+                for(var detector:detectors.entrySet()){
+                    if(!List.of("basic-pitch","pyin","crepe").contains(detector.getKey())||!(detector.getValue() instanceof Map<?,?> trace)
+                        ||!detector.getKey().equals(trace.get("engine")))throw new IllegalArgumentException("Fusion detector");
+                    validateResult(encode(trace));
+                }
             }
         } catch (IllegalArgumentException ex) { throw new IOException("本地听音引擎返回了无效的音符结果。", ex); }
     }

@@ -41,6 +41,10 @@ targets:
       - path: FigmaUI
         type: folder
         buildPhase: resources
+      - path: Legal
+        type: folder
+        buildPhase: resources
+        excludes: [".gitignore"]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lucas0623z.yinban
@@ -96,6 +100,10 @@ targets:
       - path: FigmaUI
         type: folder
         buildPhase: resources
+      - path: Legal
+        type: folder
+        buildPhase: resources
+        excludes: [".gitignore"]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.notelite.mac

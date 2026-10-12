@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {attributesXML,noteXML,scoreXML} from "./xml-dom.ts";
-import {expectedPerformance,NoteWiseMatcher,validActualEvent,type ActualEvent,type NoteWiseSettings} from "../src/app/notewise.ts";
+import {expectedPerformance,NoteWiseMatcher,NoteWiseInput,validActualEvent,type ActualEvent,type NoteWiseSettings} from "../src/app/notewise.ts";
 const settings:NoteWiseSettings={inputKind:"midi",mode:"follow",bpm:60,tuning:440,first:1,last:1,part:"全部声部"};
 const xml=(body:string)=>scoreXML(`<measure number="1">${attributesXML(1,"4")}<sound tempo="60"/>${body}</measure>`);
 const identity={takeId:"11111111-1111-4111-8111-111111111111",sourceScoreSha256:"a".repeat(64)};
@@ -78,4 +78,33 @@ test("long uncertainty intervals retain their end and keep every covered opportu
  const m=new NoteWiseMatcher(expectedPerformance(xml(noteXML()+noteXML(1,"","D")+noteXML(1,"","E")),settings),settings,identity);
  m.accept(event(0,0,"noise",{type:"uncertainty",offsetMs:5000,confidence:0,timingConfidence:0,reason:"model-noise"}));m.accept(event(64,3000));const r=m.finish(4000);
  assert.equal(r.actualEvents[0].offsetMs,5000);assert.equal(r.uncertainty[0].offsetMs,5000);assert.deepEqual(r.opportunities.slice(0,2).map(o=>o.outcome),["pending","pending"]);
+});
+
+test("normal stop receives the native final release before finishing; cancellation and late events detach",async()=>{
+ const saved=globalThis.window;
+ const nativeWindow=new EventTarget();
+ let stopping:{requestId:string}|undefined;
+ Object.assign(nativeWindow,{webkit:{messageHandlers:{noteLiteCloud:{postMessage(message:{requestId:string;action:string}){
+   if(message.action==="notewise/stop")stopping=message;
+   else queueMicrotask(()=>window.NoteLiteCloudNative!.resolve(message.requestId,{ok:true,result:{connected:true}}));
+ }}}}});
+ globalThis.window=nativeWindow as Window&typeof globalThis;
+ try{
+   for(const discard of [false,true]){
+     const matcher=new NoteWiseMatcher(expectedPerformance(xml(noteXML()),settings),{...settings,mode:"strict"},identity);
+     const input=new NoteWiseInput(identity.takeId,e=>matcher.accept(e),()=>{});
+     await input.start(settings,"piano");
+     const emit=(sequence:number,e:ActualEvent)=>window.NoteLiteCloudNative!.event({type:"notewiseInput",takeId:identity.takeId,sequence,event:e});
+     emit(1,event(60,100,"held"));
+     const stopped=input.stop(discard);
+     emit(2,event(60,1100,"held",{type:"off",releaseReliable:true}));
+     window.NoteLiteCloudNative!.resolve(stopping!.requestId,{ok:true,result:{available:false}});
+     await stopped;
+     emit(3,event(62,1200,"late"));
+     const report=matcher.finish(1200);
+     assert.equal(report.actualEvents.length,discard?1:2);
+     assert.equal(report.opportunities[0].dimensions.duration.eligible,!discard);
+     if(!discard)assert.equal(report.opportunities[0].dimensions.duration.outcome,"correct");
+   }
+ }finally{globalThis.window=saved;}
 });

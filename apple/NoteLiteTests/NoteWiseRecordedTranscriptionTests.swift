@@ -277,7 +277,116 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
         return diagnostics
     }
 
-    private enum SyntheticSignal { case music, softMusic, digitalSilence, quietDither, loudNoise }
+    func testActualFusionMonophonicDSPAndBundledModelIndependentlyConfirmRepeatedNotes() async throws {
+        let recording = try syntheticRecording(signal: .monophonicMusic)
+        defer { try? FileManager.default.removeItem(at: recording) }
+        let actual = try await NoteWiseFusionTranscriber().transcribe(recordingURL: recording,
+            instrument: "clarinet", polyphonic: false)
+        let diagnostics = try XCTUnwrap(actual.fusionDiagnostics)
+        XCTAssertEqual(actual.detectorVersion, "native-mpm-yin-1")
+        XCTAssertEqual(actual.sampleRate, 44100)
+        XCTAssertEqual(diagnostics.route, "monophonic-recording")
+        XCTAssertEqual(diagnostics.instrument, "clarinet")
+        XCTAssertGreaterThan(diagnostics.primaryCandidates, 0, "The actual shared DSP must run")
+        XCTAssertGreaterThan(diagnostics.secondaryCandidates, 0, "The actual independent model must run")
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0)
+        XCTAssertTrue(diagnostics.secondaryAvailable)
+        for (pitch, onset) in [(60, 1000.0), (62, 3000.0), (60, 4500.0)] {
+            XCTAssertTrue(actual.notes.contains { $0.midi == pitch && abs($0.onsetMs - onset) < 150 },
+                "Independent native/model evidence must confirm MIDI \(pitch) near \(onset): \(actual.notes)")
+        }
+        XCTAssertTrue(actual.notes.allSatisfy { $0.confidence >= 0.9 && $0.centsEvidence == "continuous-mpm-yin" })
+        XCTAssertEqual(actual.supportedPitchRange, ["minimumMIDI": 34, "maximumMIDI": 103])
+        attachFusion(actual, name: "NoteWise-actual-fusion-monophonic-dsp-and-model")
+    }
+    func testActualFusionPolyphonicRouteRetainsChordAndUsesConfirmedViolinRange() async throws {
+        let recording = try syntheticRecording(signal: .music)
+        defer { try? FileManager.default.removeItem(at: recording) }
+        let fusion = NoteWiseFusionTranscriber()
+        let actual = try await fusion.transcribe(recordingURL: recording,
+            instrument: "violin", polyphonic: true)
+        let diagnostics = try XCTUnwrap(actual.fusionDiagnostics)
+        XCTAssertEqual(actual.detectorVersion, "basic-pitch-coreml-0.4.0")
+        XCTAssertEqual(diagnostics.route, "polyphonic-recording")
+        XCTAssertEqual(diagnostics.instrument, "violin")
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0)
+        XCTAssertEqual(actual.supportedPitchRange, ["minimumMIDI": 55, "maximumMIDI": 108])
+        for pitch in [60, 64, 67] {
+            XCTAssertTrue(actual.notes.contains { $0.midi == pitch && abs($0.onsetMs - 1000) < 150 })
+        }
+        XCTAssertTrue(actual.notes.allSatisfy { (55...108).contains($0.midi) })
+        attachFusion(actual, name: "NoteWise-actual-fusion-polyphonic-violin-range")
+        let keyboard = try await fusion.transcribe(recordingURL: recording, instrument: "piano", polyphonic: false)
+        XCTAssertEqual(keyboard.fusionDiagnostics?.route, "polyphonic-recording",
+            "The keyboard family must automatically route chords even with an old false polyphonic hint")
+        XCTAssertGreaterThan(try XCTUnwrap(keyboard.fusionDiagnostics).modelPredictionCount, 0)
+        for pitch in [60, 64, 67] {
+            XCTAssertTrue(keyboard.notes.contains { $0.midi == pitch && abs($0.onsetMs - 1000) < 150 })
+        }
+        attachFusion(keyboard, name: "NoteWise-actual-fusion-keyboard-auto-route")
+    }
+    func testActualFusionSilenceAndCancellationCannotBecomeConfirmedNotes() async throws {
+        let recording = try syntheticRecording(signal: .digitalSilence)
+        defer { try? FileManager.default.removeItem(at: recording) }
+        let actual = try await NoteWiseFusionTranscriber().transcribe(recordingURL: recording,
+            instrument: "flute", polyphonic: false)
+        XCTAssertTrue(actual.notes.isEmpty)
+        XCTAssertTrue(actual.uncertaintyIntervals.isEmpty)
+        XCTAssertGreaterThan(try XCTUnwrap(actual.fusionDiagnostics).modelPredictionCount, 0)
+        let task = Task { try await NoteWiseFusionTranscriber().transcribe(recordingURL: recording,
+            instrument: "flute", polyphonic: false) }
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Cancellation must preserve the prior practice version, not return an empty success") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+    func testActualFusionOutOfInstrumentRangeIsRetainedAsUncertainty() async throws {
+        let recording = try syntheticRecording(signal: .belowViolinRange)
+        defer { try? FileManager.default.removeItem(at: recording) }
+        let actual = try await NoteWiseFusionTranscriber().transcribe(recordingURL: recording,
+            instrument: "violin", polyphonic: true)
+        let diagnostics = try XCTUnwrap(actual.fusionDiagnostics)
+        XCTAssertGreaterThan(diagnostics.modelPredictionCount, 0)
+        XCTAssertGreaterThan(diagnostics.primaryCandidates, 0, "Actual full-range model must hear the low candidates")
+        XCTAssertTrue(actual.notes.isEmpty, "Out-of-profile notes cannot become confirmed violin performance")
+        for onset in [1000.0, 3000.0, 4500.0] {
+            XCTAssertTrue(actual.uncertaintyIntervals.contains { abs($0.onsetMs - onset) < 150 })
+        }
+        XCTAssertEqual(actual.supportedPitchRange, ["minimumMIDI": 55, "maximumMIDI": 108])
+        attachFusion(actual, name: "NoteWise-actual-fusion-out-of-range-uncertainty")
+    }
+    func testFusionConflictingPitchAndModelOnlyCandidatesRemainUncertain() throws {
+        let note = NoteWiseRecordedNote(id: "primary", midi: 60, modelMIDI: 60,
+            onsetMs: 100, offsetMs: 700, durationMs: 600, confidence: 0.99, cents: 0,
+            centsEvidence: "continuous-mpm-yin", releaseReliable: true)
+        let conflicting = NoteWiseRecordedNote(id: "secondary", midi: 61, modelMIDI: 61,
+            onsetMs: 110, offsetMs: 710, durationMs: 600, confidence: 0.8, cents: 0,
+            centsEvidence: "coarse-basic-pitch-contour", releaseReliable: true)
+        let profile = try NoteWiseInstrumentProfiles.resolve("clarinet")
+        func result(_ notes: [NoteWiseRecordedNote], detector: String) -> NoteWiseRecordedTranscription {
+            NoteWiseRecordedTranscription(notes: notes, uncertaintyIntervals: [], sampleRate: 44100,
+                sampleCount: 44100, durationMs: 1000, tuning: 440, modelVersion: "0.4.0",
+                detectorVersion: detector, supportedPitchRange: ["minimumMIDI": 34, "maximumMIDI": 103], warnings: [])
+        }
+        let fusion = NoteWiseFusionTranscriber()
+        let primary = result([note], detector: "native-mpm-yin-1")
+        let secondary = result([conflicting], detector: "basic-pitch-coreml-0.4.0")
+        let conflict = try fusion.reconcile(primary, secondary: secondary, profile: profile)
+        XCTAssertTrue(conflict.notes.isEmpty)
+        XCTAssertEqual(conflict.uncertaintyIntervals.count, 2)
+        let onlyModel = try fusion.reconcile(result([], detector: "native-mpm-yin-1"),
+            secondary: secondary, profile: profile)
+        XCTAssertTrue(onlyModel.notes.isEmpty)
+        XCTAssertEqual(onlyModel.uncertaintyIntervals.count, 1)
+        XCTAssertThrowsError(try fusion.reconcile(primary, secondary: secondary, profile: profile,
+            checkCancellation: { throw CancellationError() })) { XCTAssertTrue($0 is CancellationError) }
+    }
+    private func attachFusion(_ value: NoteWiseRecordedTranscription, name: String) {
+        guard let data = try? JSONEncoder().encode(value) else { XCTFail("Fusion evidence must encode"); return }
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
+    private enum SyntheticSignal { case music, monophonicMusic, belowViolinRange, softMusic, digitalSilence, quietDither, loudNoise }
 
     private func syntheticRecording(signal: SyntheticSignal) throws -> URL {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("notewise-synthetic-\(UUID().uuidString).wav")
@@ -301,12 +410,14 @@ final class NoteWiseRecordedTranscriptionTests: XCTestCase {
                 noiseState = noiseState &* 1664525 &+ 1013904223
                 let right = Int(noiseState >> 16)
                 value = Double(left - right) / 65536 * (signal == .loudNoise ? 0.5 : 2.0 / 32768)
-            } else if signal == .music || signal == .softMusic {
+            } else if signal == .music || signal == .softMusic || signal == .monophonicMusic || signal == .belowViolinRange {
                 for (start, duration, pitches) in attacks {
                     let elapsed = time - start
                     guard elapsed >= 0 && elapsed < duration else { continue }
                     let envelope = min(1, elapsed / 0.015) * exp(-elapsed * 1.7) * min(1, (duration - elapsed) / 0.08)
-                    for pitch in pitches {
+                    let soundingPitches = signal == .belowViolinRange ? [pitches[0] - 12] :
+                        signal == .monophonicMusic ? Array(pitches.prefix(1)) : pitches
+                    for pitch in soundingPitches {
                         let angle = 2 * Double.pi * 440 * pow(2, Double(pitch - 69) / 12) * elapsed
                         value += envelope * (sin(angle) + 0.25 * sin(2 * angle) + 0.1 * sin(3 * angle)) * 0.16
                     }

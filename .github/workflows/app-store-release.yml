@@ -98,6 +98,10 @@ jobs:
           pnpm --dir figma-ui test
           pnpm --dir figma-ui build
           python3 apple/scripts/prepare-figma-ui.py
+          node apple/scripts/prepare-notewise-profiles.mjs
+          python3 apple/scripts/prepare-notewise-model.py
+          python3 apple/scripts/prepare-release-features.py --check
+          python3 -B apple/release/legal_resources.py prepare
       - name: Prepare complete native artifacts and validate accepted source before export
         env:
           GH_TOKEN: ${{ github.token }}

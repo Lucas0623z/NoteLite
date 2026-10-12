@@ -1,5 +1,6 @@
 import json
 import math
+import os
 from pathlib import Path
 import struct
 import sys
@@ -11,10 +12,13 @@ from mono_analysis import analyze_mono, uncertain_frames
 import numpy as np
 
 
+RUNTIME_HOME=Path(os.environ.get("NOTELITE_TEST_ANALYSIS_HOME",str(Path(__file__).parent/"runtime")))
+
+
 class ActualEngineTest(unittest.TestCase):
     def test_real_basic_pitch_preserves_repeated_polyphonic_chords_after_evidence_processing(self):
         from analyze import analyze
-        home=(Path(__file__).parent/"runtime").resolve();rate=22050;seconds=3
+        home=RUNTIME_HOME.resolve();rate=22050;seconds=3
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/"repeated-chords.wav"
             times=np.arange(rate*seconds)/rate
@@ -42,7 +46,7 @@ class ActualEngineTest(unittest.TestCase):
                 times=np.arange(rate*seconds)/rate
                 signal=np.where((times>=.5)&(times<2.3),.23*np.sin(2*np.pi*27.5*times),0)
                 wav.writeframes((signal*32767).astype('<i2').tobytes())
-            output=analyze_mono(path,Path(__file__).parent/"runtime",seconds,{"engine":"pyin","minHz":24,"maxHz":100})
+            output=analyze_mono(path,RUNTIME_HOME,seconds,{"engine":"pyin","minHz":24,"maxHz":100})
             self.assertEqual(22050,output["configuration"]["sampleRate"])
             self.assertGreaterEqual(output["configuration"]["window"],4*22050/24)
             self.assertTrue(any(n["midi"]==21 and n["duration"]>1 for n in output["notes"]),output["notes"])
@@ -57,7 +61,7 @@ class ActualEngineTest(unittest.TestCase):
         self.assertLess(intervals[0]["onset"]+intervals[0]["duration"],.75)
 
     def test_real_pyin_and_official_crepe_cpu_measure_detuned_note_and_release(self):
-        home=Path(__file__).parent/"runtime"
+        home=RUNTIME_HOME
         self.assertTrue((home/"models/crepe-tiny.onnx").is_file(),"Install runtime before actual engine tests")
         rate=22050;seconds=3
         with tempfile.TemporaryDirectory() as directory:

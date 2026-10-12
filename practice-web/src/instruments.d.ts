@@ -1,6 +1,12 @@
 export type InstrumentVariant = { id: string; name: string; transpose: number };
-export type InstrumentProfile = { id: string; name: string; minMidi: number; maxMidi: number; minHz: number; maxHz: number; windowSize: number; defaultVariant: string; variants: readonly InstrumentVariant[]; input: string; recommendedInput: string };
+export type InstrumentProfile = { id: string; name: string; family:string; minMidi: number; maxMidi: number; minHz: number; maxHz: number; windowSize: number; defaultVariant: string; variants: readonly InstrumentVariant[]; input: string; recommendedInput: string; realtimeEngine:string;recordingEngine:string };
+export type ResolvedInstrument = InstrumentProfile & {profile:InstrumentProfile;profileId:string|null;source:string;reliable:boolean;manual:boolean;variant:string;transpose:number;transpositionConfirmed:boolean};
+export type ScoreInstrumentPart = {id:string;name:string;abbreviation?:string;instrumentNames?:string[];instrumentAbbreviations?:string[];program?:number;programExplicit?:boolean;concertScore?:boolean;instrumentConfirmed?:boolean;instruments?:{id:string;name:string;abbreviation?:string;program?:number;programExplicit?:boolean}[];notes?:{instrumentIds?:string[];transposeExplicit?:boolean}[]};
 export const INSTRUMENT_PROFILES: readonly InstrumentProfile[];
+export const ALL_INSTRUMENT_PROFILES: readonly InstrumentProfile[];
+export function knownInstrument(id:string):boolean;
 export function resolveProfile(id: string | { id?: string; profileId?: string }): InstrumentProfile;
-export function resolveInstrument(part: object, selected?: string, options?: { variant?: string; transpose?: number }): { profile: InstrumentProfile; name: string; source: string; reliable: boolean; manual: boolean; variant: string; transpose: number };
+export function resolveInstrument(part: object, selected?: string, options?: { variant?: string; transpose?: number }): ResolvedInstrument;
+export function resolveInstrumentForNote(part:object,note:object,selected?:string,options?:{variant?:string;transpose?:number}):ResolvedInstrument;
+export function readScoreInstruments(xml:string,Parser?:typeof DOMParser):{parts:ScoreInstrumentPart[];concertScore:boolean};
 export function soundingMidi(note: { midi: number; transposeExplicit?: boolean }, instrument: { transpose?: number }): number;

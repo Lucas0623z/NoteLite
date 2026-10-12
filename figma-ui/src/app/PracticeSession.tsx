@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPerformancePositionReceiver, createScoreTimeline, noteKey } from "./score-position";
 import type { NoteKey } from "./score-position";
 import { createScorePlayback, createWebAudioEngine } from "./score-playback";
@@ -6,16 +6,26 @@ import type { PlaybackState } from "./score-playback";
 import { account } from "./account";
 import { practiceRecords, PRACTICE_RECORD_EVENT, newPracticeEventId, type PracticeRecord } from "./practice-records";
 import { isNativeCloud, nativeRequest } from "./cloud";
-import { expectedPerformance, NoteWiseInput, NoteWiseMatcher, refineRecording, scoreDigest, type InputKind, type NoteWiseFeedback, type NoteWiseSettings } from "./notewise";
-import { INSTRUMENT_PROFILES, resolveProfile } from "./instrument-profiles";
+import { preparePerformance, NoteWiseInput, NoteWiseMatcher, refineRecording, scoreDigest, type InputKind, type NoteWiseFeedback, type NoteWiseSettings } from "./notewise";
+import { ALL_INSTRUMENT_PROFILES, readScoreInstruments, resolveInstrument, resolveInstrumentForNote, resolveProfile } from "./instrument-profiles";
 import { capturePracticeOwner, requirePracticeOwner, startOwnedPracticeInput, type PracticeOwner } from "./practice-owner";
 
 type Settings = { instrument: string; instrumentVariant: string; part: string; mode: string; input:InputKind; bpm: number; tuning: number; first: number; last: number; checked: boolean };
 
 export type PracticeSource = { kind: "official" | "personal"; scoreId: string; revision: number };
 export default function PracticeSession({ name, measures, parts, musicxml, scoreIdentity, recordIdentity = scoreIdentity, source, onPosition, onFeedback }: { name: string; measures: number; parts: string[]; musicxml: string; scoreIdentity: string; recordIdentity?: string; source?: PracticeSource; onPosition: (keys: NoteKey[]) => void; onFeedback?: (values:NoteWiseFeedback["noteStates"])=>void }) {
-  const [settings, setSettings] = useState<Settings>({ instrument: "piano", instrumentVariant:"concert", part: "全部声部", mode: "自由练习", input:"timer", bpm: 100, tuning: 440, first: 1, last: measures, checked: false });
+  const [settings, setSettings] = useState<Settings>({ instrument: "auto", instrumentVariant:"concert", part: "全部声部", mode: "自由练习", input:"timer", bpm: 100, tuning: 440, first: 1, last: measures, checked: false });
   const [draft, setDraft] = useState(settings);
+  const autoInstrumentLabel=useMemo(()=>{
+    try{
+      const meta=readScoreInstruments(musicxml);
+      const selected=meta.parts.filter(p=>draft.part==="全部声部"||draft.part===p.id||draft.part===p.name);
+      const values=selected.flatMap(p=>p.notes?.length?p.notes.map(n=>resolveInstrumentForNote(p,n)): [resolveInstrument(p)]);
+      if(!values.length||values.some(p=>!p.reliable))return "谱面未标明，需确认";
+      const names=[...new Set(values.map(p=>p.name))];
+      return names.length===1?names[0]:"多种乐器，需选择声部";
+    }catch{return "谱面信息待确认";}
+  },[musicxml,draft.part]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -58,10 +68,13 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
     if (current) {
       activeRecord.current = null;
       const elapsed = Math.max(0, Math.floor((current.elapsed + (current.anchor === null ? 0 : performance.now() - current.anchor)) / 1000));
-      let analysis=matcher.current?.finish(elapsed*1000,interrupted);
-      matcher.current=null;
+      const activeMatcher=matcher.current;
       const input=listening.current;listening.current=null;
-      if(input) { try { const recording=await input.stop();if(analysis)analysis.recording=recording; } catch { if(analysis)analysis.status="uncertain"; } }
+      let recording:import("./notewise").NoteWiseAnalysis["recording"],stopFailed=false;
+      if(input) { try { recording=await input.stop(); } catch { stopFailed=true; } }
+      let analysis=activeMatcher?.finish(elapsed*1000,interrupted);
+      if(matcher.current===activeMatcher)matcher.current=null;
+      if(analysis){if(recording)analysis.recording=recording;if(stopFailed)analysis.status="uncertain";}
       pendingSave.current = { owner: current.owner, input: { eventId: current.eventId, name: current.name, musicxml: current.musicxml, scoreIdentity: current.scoreIdentity, sourceKind: current.source?.kind || "local", scoreId: current.source?.scoreId, scoreRevision: current.source?.revision, mode:current.mode, durationSeconds: elapsed, startedAt: current.startedAt, endedAt: new Date().toISOString(), interrupted,...(analysis?{analysis}:{}) } };
     }
     const pending = pendingSave.current;
@@ -75,7 +88,7 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
       if(record.analysis?.schemaVersion===2 && record.analysis.recording?.available) {
         if(!interrupted)setNotice("练习已保存，正在本机复核录音中的和弦与复音；不会上传录音或调用 AI。");
         try {
-          const reviewed=await refineRecording(record.analysis as import("./notewise").NoteWiseAnalysis);
+          const reviewed=await refineRecording(record.analysis as import("./notewise").NoteWiseAnalysis,record.musicxml);
           const revised=await practiceRecords.reviseAnalysis(result,reviewed);
           if(!interrupted)setNotice(revised.pendingAnalysis?"录后复核已在本机保存，云端分析版本待确认。":"录后复核已保存；实时记录与复核版本分别保留，疑似结果可在记录中查看。");
         }catch(error){if(!interrupted)setNotice(`实时练习记录已保存。录后复核未完成：${error instanceof Error?error.message:"请稍后重试"}`);}
@@ -110,8 +123,10 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
       else if (playbackState === "paused") { await playback.current?.resume(); setNotice("正在试听 · 合成音色 · 指针跟随声音。"); }
       else {
         const timeline = createScoreTimeline(musicxml);
-        const instrument=resolveProfile(settings.instrument),variant=instrument.variants.find(v=>v.id===settings.instrumentVariant);
-        timeline.notes=timeline.notes.map(note=>({...note,midi:note.transposeExplicit?note.midi:(note.writtenMidi??note.midi)+(variant?.transpose||0)}));
+        if(settings.instrument!=="auto"){
+          const instrument=resolveProfile(settings.instrument),variant=instrument.variants.find(v=>v.id===settings.instrumentVariant);
+          timeline.notes=timeline.notes.map(note=>({...note,midi:note.transposeExplicit?note.midi:(note.writtenMidi??note.midi)+(variant?.transpose||0)}));
+        }
         feedbackCallback.current?.([]);
         setPerformanceConnected(false);
         await playback.current?.start(timeline, { bpm: settings.bpm, tuning: settings.tuning });
@@ -148,7 +163,10 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
         if(!matcher.current){
           const sourceScoreSha256=await scoreDigest(musicxml);
           requirePracticeOwner(owner,account.current);
-          matcher.current=new NoteWiseMatcher(expectedPerformance(musicxml,options),options,{takeId:eventId,sourceScoreSha256},value=>{setFeedback(value);positionCallback.current(value.position);feedbackCallback.current?.(value.noteStates);setPerformanceConnected(true);});
+          const prepared=preparePerformance(musicxml,options);options.enginePlan=prepared.plan;
+          matcher.current=new NoteWiseMatcher(prepared.expected,options,{takeId:eventId,sourceScoreSha256},value=>{setFeedback(value);positionCallback.current(value.position);feedbackCallback.current?.(value.noteStates);setPerformanceConnected(true);});
+        }else{
+          options.enginePlan=preparePerformance(musicxml,options).plan;
         }
         if(!input)input=new NoteWiseInput(eventId,e=>matcher.current?.accept(e),message=>{pause();setNotice(`${message}。练习已暂停，不会将中断判为漏音。`);},owner);
         listening.current=input;
@@ -156,7 +174,7 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
       }
       },async()=>{
         if(input){
-          const recording=await input.stop();
+          const recording=await input.stop(true);
           if(matcher.current)matcher.current.report.recording=recording;
           if(listening.current===input)listening.current=null;
         }
@@ -214,20 +232,20 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
       <form onSubmit={(event) => { event.preventDefault(); if (valid) { playback.current?.stop(); setSettings(draft); setSettingsOpen(false); setNotice("设置已更新。演奏按所选小节与声部跟谱；试听使用速度与调音。"); } }}>
         <header className="practice-settings-header"><h2 id="practice-settings-title">练习设置</h2><button type="submit" className="score-tool" disabled={!valid}>完成</button></header>
         <section className="score-tool-section"><h3>乐器与输入</h3>
-          <label className="score-field">乐器<select value={draft.instrument} onChange={(event) => {const id=event.currentTarget.value;setDraft({ ...draft, instrument:id,instrumentVariant:resolveProfile(id).defaultVariant });}}>{[...INSTRUMENT_PROFILES,resolveProfile("other")].map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-          {resolveProfile(draft.instrument).variants.length>1&&<label className="score-field">乐器调性<select value={draft.instrumentVariant} onChange={event=>setDraft({...draft,instrumentVariant:event.currentTarget.value})}>{resolveProfile(draft.instrument).variants.map(variant=><option key={variant.id} value={variant.id}>{variant.name}</option>)}</select></label>}
+          <label className="score-field">乐器<select disabled={!!activeRecord.current} value={draft.instrument} onChange={(event) => {const id=event.currentTarget.value;setDraft({ ...draft, instrument:id,instrumentVariant:resolveProfile(id).defaultVariant });}}><option value="auto">按谱面自动：{autoInstrumentLabel}</option>{ALL_INSTRUMENT_PROFILES.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+          {resolveProfile(draft.instrument).variants.length>1&&<label className="score-field">乐器调性<select disabled={!!activeRecord.current} value={draft.instrumentVariant} onChange={event=>setDraft({...draft,instrumentVariant:event.currentTarget.value})}>{resolveProfile(draft.instrument).variants.map(variant=><option key={variant.id} value={variant.id}>{variant.name}</option>)}</select></label>}
           <p>谱面已写明移调时按谱面实音；未写明时采用所选乐器调性。听音覆盖所选乐器的完整音域。</p>
-          <label className="score-field">练习声部<select value={draft.part} onChange={(event) => setDraft({ ...draft, part: event.currentTarget.value })}><option>全部声部</option>{parts.map((part) => <option key={part}>{part}</option>)}</select></label>
+          <label className="score-field">练习声部<select disabled={!!activeRecord.current} value={draft.part} onChange={(event) => setDraft({ ...draft, part: event.currentTarget.value })}><option>全部声部</option>{parts.map((part) => <option key={part}>{part}</option>)}</select></label>
           <label className="score-field">演奏输入<select disabled={!!activeRecord.current} value={draft.input} onChange={event=>setDraft({...draft,input:event.currentTarget.value as InputKind})}><option value="timer">自由练习 · 仅计时</option><option value="midi" disabled={!isNativeCloud()}>MIDI 乐器</option><option value="microphone" disabled={!isNativeCloud()}>麦克风 · 本地听音与录音</option></select></label>
           <p>{draft.input==="timer"?"仅计时，不采集你的演奏。":"点击开始练习后才连接演奏输入。麦克风录音保留在本机；未主动提交的练习不会分享给老师。"}</p>
         </section>
         <section className="score-tool-section"><h3>练习方式</h3>
           <label className="score-field">模式<select disabled={!!activeRecord.current} value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.currentTarget.value })}><option>自由练习</option><option disabled={draft.input==="timer"}>等我弹对</option><option disabled={draft.input==="timer"}>跟随节奏</option></select></label>
           <div className="practice-settings-grid">
-            <label className="score-field">速度 BPM<input type="number" min={30} max={240} required value={draft.bpm} onChange={(event) => setDraft({ ...draft, bpm: event.currentTarget.valueAsNumber })} /></label>
-            <label className="score-field">调音 A4 · Hz<input type="number" min={400} max={480} required value={draft.tuning} onChange={(event) => setDraft({ ...draft, tuning: event.currentTarget.valueAsNumber })} /></label>
-            <label className="score-field">起始小节<input type="number" min={1} max={measures} required value={draft.first} onChange={(event) => setDraft({ ...draft, first: event.currentTarget.valueAsNumber })} /></label>
-            <label className="score-field">结束小节<input type="number" min={draft.first} max={measures} required value={draft.last} onChange={(event) => setDraft({ ...draft, last: event.currentTarget.valueAsNumber })} /></label>
+            <label className="score-field">速度 BPM<input type="number" disabled={!!activeRecord.current} min={30} max={240} required value={draft.bpm} onChange={(event) => setDraft({ ...draft, bpm: event.currentTarget.valueAsNumber })} /></label>
+            <label className="score-field">调音 A4 · Hz<input type="number" disabled={!!activeRecord.current} min={400} max={480} required value={draft.tuning} onChange={(event) => setDraft({ ...draft, tuning: event.currentTarget.valueAsNumber })} /></label>
+            <label className="score-field">起始小节<input type="number" disabled={!!activeRecord.current} min={1} max={measures} required value={draft.first} onChange={(event) => setDraft({ ...draft, first: event.currentTarget.valueAsNumber })} /></label>
+            <label className="score-field">结束小节<input type="number" disabled={!!activeRecord.current} min={draft.first} max={measures} required value={draft.last} onChange={(event) => setDraft({ ...draft, last: event.currentTarget.valueAsNumber })} /></label>
           </div>
           {!valid && <p role="status">请检查速度、调音和小节范围。</p>}
         </section>

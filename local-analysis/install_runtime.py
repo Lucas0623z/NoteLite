@@ -146,8 +146,12 @@ def install(destination: Path, cache: Path, lockfile: Path, offline: bool, nativ
     import partitura, parangonar, librosa
     import onnxruntime
     onnxruntime.InferenceSession(str(crepe_model), providers=["CPUExecutionProvider"])
-    for name in ("mono_analysis.py", "crepe_onnx.py", "score_tools.py", "pitch_refinement.py", "runtime_smoke.py", "onset_evidence.py"):
+    for name in ("mono_analysis.py", "crepe_onnx.py", "score_tools.py", "fusion.py", "pitch_refinement.py", "runtime_smoke.py", "onset_evidence.py"):
         shutil.copy2(lockfile.with_name(name), destination/name)
+    from fusion import profile_registry
+    profile_registry(lockfile.parent)  # Validate the canonical version before packaging.
+    registry=lockfile.parent.parent/"apple"/"NoteLite"/"NoteWiseProfiles.json"
+    shutil.copy2(registry,destination/"NoteWiseProfiles.json")
     licenses = destination/"licenses"; licenses.mkdir(exist_ok=True)
     shutil.copy2(lockfile.with_name("vendor")/"crepe"/"LICENSE", licenses/"CREPE-MIT.txt")
     if not skip_native:
@@ -190,12 +194,19 @@ def install(destination: Path, cache: Path, lockfile: Path, offline: bool, nativ
         "engine": "basic-pitch", "version": "0.4.0", "python": "3.11.9", "runtime": "onnx",
         "modelSha256": lock["modelSha256"], "lockSha256": checksum(lockfile), "crepeModelSha256": checksum(crepe_model),
         "partitura": partitura.__version__, "parangonar": parangonar.__version__, "librosa": librosa.__version__,
+        "noteWisePolicyVersion":"notewise-fusion-1","noteWiseRegistrySha256":checksum(registry),
         "engines": ["basic-pitch", "pyin", "crepe"]+([] if skip_native else ["aubio"]),
         "alignmentBaselines": ["parangonar"]+([] if skip_native else ["nakamura"])
     }
     (destination/"runtime-manifest.json").write_text(json.dumps(metadata), encoding="utf8")
     from runtime_smoke import verify
     metadata["smoke"] = verify(destination, native=not skip_native)
+    # Fusion verifies real independent engines after their proofs exist. The
+    # readiness marker is published only once this combined boundary succeeds.
+    (destination/"runtime-manifest.json").write_text(json.dumps(metadata),encoding="utf8")
+    from runtime_smoke import verify_fusion
+    metadata["smoke"]["notewise-fusion"]=verify_fusion(destination)
+    metadata["engines"].insert(0,"notewise-fusion")
     (destination/"runtime-ready.json").write_text(json.dumps(metadata), encoding="utf8")
     print("Actual local audio engines and offline baselines verified and ready.")
 

@@ -154,67 +154,7 @@ final class NoteWisePolyphonicTranscriber: @unchecked Sendable {
     }
 
     private func readAudio(_ url: URL, cancellation: NoteWiseTranscriptionCancellation) throws -> [Float] {
-        guard url.isFileURL, url.pathExtension.lowercased() == "wav",
-              let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-              size > 44, size <= CloudAccountClient.maximumRecordingBytes else {
-            throw NoteWiseTranscriptionError.invalidRecording
-        }
-        let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
-        let source = file.processingFormat
-        let seconds = Double(file.length) / source.sampleRate
-        guard seconds > 0, seconds <= 600, (8000...96000).contains(source.sampleRate),
-              (1...2).contains(source.channelCount),
-              let destination = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                sampleRate: Double(NoteWiseBasicPitchDecoder.sampleRate), channels: 1, interleaved: false),
-              let converter = AVAudioConverter(from: source, to: destination) else {
-            throw NoteWiseTranscriptionError.invalidRecording
-        }
-        var samples: [Float] = []
-        samples.reserveCapacity(Int(ceil(seconds * destination.sampleRate)))
-        var callbackError: Error?
-        var iterations = 0
-        while true {
-            try cancellation.check()
-            iterations += 1
-            guard iterations <= 4096,
-                  let output = AVAudioPCMBuffer(pcmFormat: destination, frameCapacity: 16384) else {
-                throw NoteWiseTranscriptionError.invalidRecording
-            }
-            var conversionError: NSError?
-            let status = converter.convert(to: output, error: &conversionError) { requested, status in
-                if file.framePosition >= file.length { status.pointee = .endOfStream; return nil }
-                guard let input = AVAudioPCMBuffer(pcmFormat: source,
-                    frameCapacity: AVAudioFrameCount(min(requested, 16384))) else {
-                    status.pointee = .noDataNow; callbackError = NoteWiseTranscriptionError.invalidRecording; return nil
-                }
-                do {
-                    try file.read(into: input, frameCount: input.frameCapacity)
-                    guard input.frameLength > 0 else { status.pointee = .endOfStream; return nil }
-                    status.pointee = .haveData
-                    return input
-                } catch { callbackError = error; status.pointee = .noDataNow; return nil }
-            }
-            if let callbackError { throw callbackError }
-            if let conversionError { throw conversionError }
-            if output.frameLength > 0, let channel = output.floatChannelData?[0] {
-                let values = UnsafeBufferPointer(start: channel, count: Int(output.frameLength))
-                guard values.allSatisfy(\.isFinite) else { throw NoteWiseTranscriptionError.invalidRecording }
-                samples.append(contentsOf: values)
-            }
-            guard samples.count <= NoteWiseBasicPitchDecoder.sampleRate * 600 + 16 else {
-                throw NoteWiseTranscriptionError.invalidRecording
-            }
-            switch status {
-            case .endOfStream:
-                guard !samples.isEmpty else { throw NoteWiseTranscriptionError.invalidRecording }
-                // Some resamplers round up their final packet. Keep only the
-                // duration of the real recording, never decoder padding.
-                return Array(samples.prefix(Int(ceil(seconds * destination.sampleRate))))
-            case .error: throw NoteWiseTranscriptionError.invalidRecording
-            case .haveData, .inputRanDry: continue
-            @unknown default: throw NoteWiseTranscriptionError.invalidRecording
-            }
-        }
+        try NoteWiseRecordingReader.readModelPCM(url, checkCancellation: { try cancellation.check() })
     }
 
     private struct Activations {

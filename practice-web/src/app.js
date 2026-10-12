@@ -5,7 +5,9 @@ import {parseScore,selectGroups,inferInstrument,isPolyphonic,noteName} from './s
 import {PracticeSession,PitchGate} from './session.js';
 import {collectScoreNotes,colorScoreGroup,colorScoreNotes,resetScoreColors} from './score-colors.js';
 import {NativeInputBridge} from './native-bridge.js';
-import {INSTRUMENT_PROFILES,resolveInstrument} from './instruments.js';
+import {ALL_INSTRUMENT_PROFILES,resolveInstrument} from './instruments.js';
+import {planNoteWise} from './engine-policy.js';
+import {selectedWindowsInstruments} from './windows-engine-selection.js';
 import {WindowsAudioBridge,NativePitchGate} from './windows-audio.js';
 import {analyzeRecording} from './recorded-analysis.js';
 import {WindowsPracticeClient,displaySession} from './windows-practice.js';
@@ -53,8 +55,7 @@ function setPhase(next){
 function currentOptions(){return{part:$('part').value,from:Number($('from').value),to:Number($('to').value)};}
 function instrumentOptions(){return{instrument:$('instrument-choice').value,variant:$('instrument-variant').value};}
 function selectedInstrument(){return resolveInstrument(score?.parts.find(p=>p.id===$('part').value)||score?.parts[0],$('instrument-choice').value,{variant:$('instrument-variant').value});}
-function instrumentForPart(part){const options=$('part').value==='all'&&$('instrument-choice').value==='auto'?(instrumentPreferences.get(part.id)||{instrument:'auto'}):instrumentOptions();return resolveInstrument(part,options);}
-function resolvedSelected(){return score.parts.filter(p=>$('part').value==='all'||p.id===$('part').value).map(instrumentForPart);}
+function resolvedSelected(){return selectedWindowsInstruments(score,selection(),part=>$('part').value==='all'&&$('instrument-choice').value==='auto'?(instrumentPreferences.get(part.id)||{instrument:'auto'}):instrumentOptions());}
 function selection(){const o=currentOptions();if(!Number.isInteger(o.from)||!Number.isInteger(o.to)||o.from<1||o.to<o.from||o.to>score.lengths.length)throw new Error('请设置有效的小节范围。');const options=o.part==='all'&&$('instrument-choice').value==='auto'?{byPart:Object.fromEntries(instrumentPreferences)}:instrumentOptions();return selectGroups(score,o.part,o.from,o.to,engines.windows?options:undefined);}
 function inputHint(){
   const input=$('input').value,poly=isPolyphonic(groups);$('midi-device').hidden=bridge.available||input!=='midi'||!midiAccess;
@@ -349,8 +350,15 @@ function validateWindows(){
   if(!(options.bpm>=30&&options.bpm<=240&&options.a4>=415&&options.a4<=466))throw new Error('请使用 30–240 BPM，调音 A4 范围 415–466 Hz。');
   if(['microphone','recording'].includes(options.input)&&resolvedSelected().some(p=>!p.reliable)){openSettings('instrument-choice');throw new Error('谱面没有可靠的乐器信息，请先逐声部选择演奏乐器。');}
   if(options.input==='microphone'&&isPolyphonic(selected)){openSettings('input');throw new Error('所选声部含和弦或重叠音，请选单音声部、MIDI 或录后比对。');}
-  if(options.input==='recording'&&options.engine!=='basic-pitch'&&isPolyphonic(selected)){openSettings('recorded-engine');throw new Error('所选声部含和弦或重叠音，请先选择“单音与和弦”检测。');}
+  if(options.input==='recording'&&!['notewise-fusion','basic-pitch'].includes(options.engine)&&isPolyphonic(selected)){openSettings('recorded-engine');throw new Error('所选声部含和弦或重叠音，请先选择 NoteWise 自动融合或“单音与和弦”检测。');}
+  if(['microphone','recording'].includes(options.input)&&resolvedSelected().some(p=>p.transpositionConfirmed===false)){openSettings('instrument-choice');throw new Error('请确认实际演奏乐器及实音／移调谱制。');}
+  if(options.engine==='notewise-fusion'&&options.input==='recording')validateFusionSelection();
   return options;
+}
+function validateFusionSelection(){
+  const plan=planNoteWise(resolvedSelected(),{phase:'recorded',inputKind:'recording',platform:'windows',polyphonic:isPolyphonic(selection())});
+  if(plan.requiresConfirmation.length){openSettings('instrument-choice');throw new Error('请先确认所选声部的乐器及实音／移调谱制，再使用 NoteWise 自动融合。');}
+  return plan;
 }
 let windowsSignature='';
 function applyWindows(snapshot){
@@ -415,7 +423,8 @@ async function finishWindows(showReview=true){
 }
 async function compareWindowsRecording(file=null){
   const options=validateWindows();if(file&&file.size>64*1024*1024)throw new Error('录音不能超过 64 MB。');
-  if(options.engine!=='basic-pitch'&&isPolyphonic(selection()))throw new Error('此检测用于单音，请选单音声部；和弦请使用“单音与和弦”。');
+  if(!['notewise-fusion','basic-pitch'].includes(options.engine)&&isPolyphonic(selection()))throw new Error('此检测用于单音，请选单音声部；和弦请使用 NoteWise 自动融合或“单音与和弦”。');
+  if(options.engine==='notewise-fusion')validateFusionSelection();
   analysisBusy=true;windowsPractice.stop();setPhase('loading');message('正在本机转录、跟谱并复核录音…');
   try{const params=new URLSearchParams({options:JSON.stringify({...options,input:'recording'})});if(!file)params.set('recorded','true');
     const response=await fetch(`analysis?${params}`,{method:'POST',headers:file?{'Content-Type':'application/octet-stream'}:undefined,body:file||undefined});const result=await response.json();if(!response.ok)throw new Error(result.error||'本地录后复核失败。');
@@ -483,8 +492,12 @@ else guard(async()=>{
   try{const capability=await fetch('engines.json');if(capability.ok)engines=await capability.json();}catch{}
   try{const metadata=await fetch('score-info.json');if(metadata.ok)scoreMetadata=await metadata.json();}catch{}
   if(engines.windows){
+    if(engines.capabilities?.['notewise-fusion']){
+      $('recorded-engine').add(new Option('NoteWise 自动融合 · 按乐器复核','notewise-fusion'),0);
+      $('recorded-engine').value='notewise-fusion';
+    }
     const existing=new Set(Array.from($('instrument-choice').options).map(o=>o.value));
-    for(const p of INSTRUMENT_PROFILES)if(!existing.has(p.id))$('instrument-choice').add(new Option(p.name,p.id),$('instrument-choice').options.length-1);
+    for(const p of ALL_INSTRUMENT_PROFILES)if(!existing.has(p.id))$('instrument-choice').add(new Option(p.name,p.id),$('instrument-choice').options.length-1);
     if(engines.nativeAudio&&engines.basicPitch)$('input').add(new Option('麦克风录后比对 · 单音与和弦','recording'));
     $('recorded-import').hidden=!engines.basicPitch;
     $('windows-privacy').hidden=false;

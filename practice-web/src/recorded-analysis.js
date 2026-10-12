@@ -15,7 +15,7 @@ export function analyzeRecording(groups, detectedNotes, {
     Number.isFinite(n.onset)&&n.onset>=0&&Number.isFinite(n.duration)&&n.duration>0)
     .sort((a,b)=>a.onset-b.onset||a.midi-b.midi);
   const firstOnset=groups[0].onset, beatSeconds=60/bpm;
-  const strong=n=>!Number.isFinite(n.confidence)||n.confidence>=confidenceThreshold;
+  const strong=n=>Number.isFinite(n.confidence)&&n.confidence>=confidenceThreshold&&n.confidence<=1&&n.reviewRequired!==true;
   const offset=offsetSeconds===undefined?(notes.find(strong)?.onset??notes[0]?.onset??0):offsetSeconds;
   if(!Number.isFinite(offset))throw new Error('无效的录音起点。');
   const errors=[],results=[],matched=new Map(),used=new Set(),usedWeak=new Set();

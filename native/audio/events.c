@@ -4,6 +4,13 @@
 #include <string.h>
 
 static double maxd(double a, double b) { return a > b ? a : b; }
+/* Derive the actual PCM clock from the detector frame. The CLI currently
+ * resamples to 48 kHz, but Apple also supplies 44.1/96 kHz device PCM. */
+static uint64_t sample_at(const nl_events *e, double milliseconds, uint64_t fallback)
+{
+    if (!isfinite(e->sample_rate) || e->sample_rate <= 0 || !isfinite(milliseconds)) return fallback;
+    return (uint64_t)llround(maxd(0, milliseconds) * e->sample_rate / 1000);
+}
 static void note(nl_events *e, const char *type, double at, uint64_t sample, const char *reason)
 {
     int off = strcmp(type, "note-off") == 0;
@@ -61,13 +68,15 @@ void nl_events_push(nl_events *e, const nl_pitch_frame *f)
     double raw, cents, at = f->end_time_ms;
     const char *unreliable_reason = NULL;
     uint64_t sample = f->end_sample_count;
+    if (f->end_time_ms > 0 && isfinite(f->end_time_ms) && f->end_sample_count > 0)
+        e->sample_rate = 1000.0 * (double)f->end_sample_count / f->end_time_ms;
     e->last_frequency = f->frequency; e->last_confidence = f->clarity;
     if (f->input_rms < .0005) {
         e->candidate = -1; e->frames = 0; e->pending_attack = 0;
         if (++e->quiet_frames >= 3) {
             double release = isfinite(f->quiet_time_ms) ? f->quiet_time_ms : at - 30;
-            if (e->active) { note(e, "note-off", release, (uint64_t)llround(maxd(0, release) * 48), "silence"); e->active = 0; }
-            if (e->uncertainty) uncertainty(e, release, (uint64_t)llround(maxd(0, release) * 48), 1);
+            if (e->active) { note(e, "note-off", release, sample_at(e, release, sample), "silence"); e->active = 0; }
+            if (e->uncertainty) uncertainty(e, release, sample_at(e, release, sample), 1);
             e->unreliable_frames = e->unstable_frames = 0;
         }
         return;
@@ -118,15 +127,15 @@ void nl_events_push(nl_events *e, const nl_pitch_frame *f)
     }
     if (++e->frames < 3) return;
     e->unstable_frames = 0;
-    if (e->uncertainty) uncertainty(e, e->candidate_evidence_ms, (uint64_t)llround(maxd(0, e->candidate_evidence_ms) * 48), 1);
+    if (e->uncertainty) uncertainty(e, e->candidate_evidence_ms, sample_at(e, e->candidate_evidence_ms, sample), 1);
     if (!e->active || e->midi != midi || e->pending_attack) {
         const char *reason = e->pending_attack ? "attack" : "pitch-change";
-        if (e->active) note(e, "note-off", e->candidate_ms, (uint64_t)llround(maxd(0, e->candidate_ms) * 48), e->pending_attack ? "rearticulation" : "pitch-change");
+        if (e->active) note(e, "note-off", e->candidate_ms, sample_at(e, e->candidate_ms, sample), e->pending_attack ? "rearticulation" : "pitch-change");
         e->active = 1; e->midi = midi; e->onset_ms = e->candidate_ms; ++e->id;
         e->timing_confidence = e->candidate_timing_confidence;
         e->measurements = e->updates = 0; e->cents_sum = e->confidence_sum = 0;
         e->peak_level = f->level_rms;
-        e->last_cents = cents; note(e, "note-on", e->onset_ms, (uint64_t)llround(maxd(0, e->onset_ms) * 48), reason);
+        e->last_cents = cents; note(e, "note-on", e->onset_ms, sample_at(e, e->onset_ms, sample), reason);
         e->pending_attack = 0;
     }
     e->last_cents = cents; e->cents_sum += cents; e->confidence_sum += f->clarity; ++e->measurements;
@@ -136,6 +145,7 @@ void nl_events_push(nl_events *e, const nl_pitch_frame *f)
 
 void nl_events_finish(nl_events *e, uint64_t samples, double rate)
 {
+    e->sample_rate = rate;
     double at = 1000 * samples / rate;
     if (e->active) { note(e, "note-off", at, samples, "stop"); e->active = 0; }
     if (e->uncertainty) uncertainty(e, at, samples, 1);

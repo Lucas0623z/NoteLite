@@ -5,6 +5,14 @@ const group=(onset,pitches)=>({onset,measure:String(Math.floor(onset/4)+1),mi:Ma
   notes:pitches.map((midi,i)=>({id:`${onset}-${i}`,midi,onset,duration:1,part:'P1'}))});
 const note=(midi,onset,duration=.4)=>({midi,onset,duration,confidence:.9});
 
+test('missing, invalid confidence and fusion disagreement are unjudged rather than correct',()=>{
+  for(const fields of [{confidence:undefined},{confidence:NaN},{confidence:1.1},{reviewRequired:true}]){
+    const result=analyzeRecording([group(0,[60])],[{...note(60,1),...fields}],{bpm:60});
+    assert.equal(result.firstTryCorrect,0);assert.equal(result.results[0].correct,0);
+    assert.equal(result.results[0].status,'uncertain');assert.equal(result.unjudged.length,1);
+  }
+});
+
 test('whole chord is required and missing tone retains original score identity',()=>{
   const report=analyzeRecording([group(0,[60,64,67])],[note(60,2),note(67,2.02)],{bpm:60});
   assert.equal(report.results[0].correct,2);assert.equal(report.firstTryCorrect,0);

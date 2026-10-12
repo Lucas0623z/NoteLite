@@ -43,6 +43,54 @@ def normalize(value, xml=accounts.SAMPLE_XML):
 
 
 class NormalizationTests(unittest.TestCase):
+    def test_service_variants_match_all_35_canonical_profiles_without_client_execution(self):
+        # Parse the committed data snapshot only. No JS import, eval or runtime
+        # subprocess is allowed when validating client-reported evidence.
+        snapshot = json.loads((Path(__file__).resolve().parents[2] / "apple/NoteLite/NoteWiseProfiles.json").read_text(encoding="utf-8"))
+        self.assertEqual(snapshot["schemaVersion"], 1)
+        self.assertEqual(len(snapshot["profiles"]), 35)
+        expected = {}
+        for profile in snapshot["profiles"]:
+            self.assertNotIn(profile["id"], expected)
+            variants = {}
+            for variant in profile["variants"]:
+                self.assertNotIn(variant["id"], variants)
+                self.assertIs(type(variant["transpose"]), int)
+                variants[variant["id"]] = variant["transpose"]
+            expected[profile["id"]] = variants
+        self.assertEqual(music.INSTRUMENT_VARIANTS, expected)
+
+    def test_added_instrument_choices_are_score_bound_and_keep_concert_compatibility(self):
+        additions = [("clavinet", "concert", 0), ("english-horn", "f", -7),
+                     ("piccolo", "octave", 12), ("guitar", "octave", -12), ("bass", "octave", -12),
+                     ("sax", "bb-soprano", -2), ("sax", "eb-alto", -9),
+                     ("sax", "bb-tenor", -14), ("sax", "eb-baritone", -21)]
+        for profile, variant, semitones in additions + [(p, "concert", 0) for p in {p for p, _, _ in additions}]:
+            with self.subTest(profile=profile, variant=variant):
+                raw = report()
+                raw["instrument"] = {"profileId": profile, "variant": variant, "transpose": semitones, "source": "manual"}
+                for note, op in zip(raw["expected"], raw["opportunities"]):
+                    note.update(midi=note["writtenMidi"] + semitones, transpose=semitones, transposeExplicit=False)
+                    op["expectedMidi"] += semitones
+                for event in raw["actualEvents"]:
+                    event["midi"] += semitones
+                result = normalize(raw)
+                self.assertEqual(result["schemaVersion"], 2)
+                self.assertEqual(result["expected"][0]["midi"], 60 + semitones)
+                self.assertEqual(result["coverageByDimension"]["pitch"]["failed"], 0)
+                self.assertFalse(result["verifiedByServer"])
+                self.assertEqual(normalize(result), result)
+                raw["instrument"]["transpose"] = semitones + 1
+                with self.assertRaises(ValueError): normalize(raw)
+                raw["instrument"].update(variant="undeclared-variant", transpose=semitones)
+                with self.assertRaises(ValueError): normalize(raw)
+                explicit = accounts.SAMPLE_XML.replace('</divisions>', '</divisions><transpose><chromatic>0</chromatic></transpose>')
+                raw = report(explicit)
+                raw["instrument"] = {"profileId": profile, "variant": variant, "transpose": semitones, "source": "manual"}
+                for note in raw["expected"]:
+                    note["transposeExplicit"] = True
+                self.assertEqual(normalize(raw, explicit)["expected"][0]["midi"], 60, "explicit concert XML must not be double-transposed")
+
     def test_correct_nonzero_capture_offset_denominators_and_actual_tempo(self):
         value = normalize(report(offset=3500))
         self.assertEqual(value["coverageByDimension"]["pitch"], {"eligible":4,"evaluated":4,"failed":0,"pending":0})

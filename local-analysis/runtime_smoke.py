@@ -7,6 +7,34 @@ import tempfile
 import wave
 
 
+def verify_fusion(home):
+    """Actual packaged models must agree without any expected-note input."""
+    from analyze import analyze
+    results={}
+    with tempfile.TemporaryDirectory(prefix="notewise-fusion-verify-") as directory:
+        rate,seconds=22050,3
+        for instrument,frequencies,poly in (("flute",[440*2**(.25/12)],False),("piano",[261.6256,329.6276,391.9954],True)):
+            path=Path(directory)/(instrument+".wav");samples=bytearray()
+            for i in range(rate*seconds):
+                t=i/rate;envelope=min(1,max(0,(t-.5)/.015),max(0,(2.3-t)/.03))
+                value=.45*envelope*sum(math.sin(2*math.pi*f*t) for f in frequencies)/len(frequencies)
+                samples.extend(struct.pack('<h',round(value*32767)))
+            with wave.open(str(path),'wb') as wav:
+                wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(rate);wav.writeframes(samples)
+            report=analyze(path,home,{"engine":"notewise-fusion","verified":True,"input":"recording","polyphonic":poly,
+                "normalizedParts":[{"id":"P1","instrument":instrument,"instrumentIds":[instrument],"reliable":True,
+                    "transpositionConfirmed":True,"instrumentMappingResolved":True,"requiresConfirmation":[]}]})
+            if report.get("fusion",{}).get("expectedScoreNotesUsedByDetectors") is not False or not report["notes"]:
+                raise ValueError("Actual NoteWise fusion boundary failed")
+            expected={60,64,67} if poly else {69}
+            if {n["midi"] for n in report["notes"]}!=expected:
+                raise ValueError("Actual NoteWise fusion acoustic identity verification failed")
+            if not poly and not any(n.get("fusionDecision",{}).get("status")=="agreement" for n in report["notes"]):
+                raise ValueError("Actual NoteWise independent mono detectors did not agree")
+            results[instrument]={"primary":report["fusion"]["plan"]["primary"],"notes":len(report["notes"]),"validatorStatus":report["fusion"]["validatorStatus"]}
+    return {"passed":True,"policyVersion":"notewise-fusion-1","actualModels":results}
+
+
 def verify(home: Path, native=True):
     from analyze import analyze
     from score_tools import normalize, align_parangonar, align_nakamura

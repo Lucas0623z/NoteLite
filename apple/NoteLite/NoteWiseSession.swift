@@ -13,9 +13,36 @@ protocol NoteWiseCapturing: AnyObject {
 }
 extension NativePracticeInput: NoteWiseCapturing {}
 
+/// The producer's serial PCM order is retained even if its MainActor Tasks run
+/// in another order. A normal stop synchronously drains this same small inbox
+/// after the native writer finishes; abort never delivers a detached inbox.
+private final class NoteWiseEventInbox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [[String: Any]] = []
+    func append(_ value: [String: Any]) { lock.lock(); values.append(value); lock.unlock() }
+    func drain() -> [[String: Any]] {
+        lock.lock(); defer { lock.unlock() }
+        let result = values; values.removeAll(keepingCapacity: true); return result
+    }
+}
+
+private enum NoteWiseCaptureResult: Sendable {
+    case unavailable
+    case recording(available: Bool, sampleRate: Double, sampleCount: UInt64,
+                   durationMs: Double, size: Int, interrupted: Bool)
+    var dictionary: [String: Any] {
+        switch self {
+        case .unavailable: return ["available":false]
+        case let .recording(available, rate, count, duration, size, interrupted):
+            return ["available":available,"sampleRate":rate,"sampleCount":count,
+                "durationMs":duration,"mime":"audio/wav","size":size,"interrupted":interrupted]
+        }
+    }
+}
+
 /// Detection and disk recording run on this serial native queue, never the UI or WebView.
 private final class NoteWiseAudioProcessor: @unchecked Sendable {
-    let queue = DispatchQueue(label: "com.notelite.notewise.capture", qos: .userInitiated)
+    let queue: DispatchQueue
     private var dsp: OpaquePointer?
     private var file: AVAudioFile?
     private var rate: Double = 0
@@ -32,8 +59,9 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
     private let url: URL
     private let event: @Sendable ([String: Any]) -> Void
     private let error: @Sendable (String) -> Void
-    init(url: URL, a4: Double, minimum: Double, maximum: Double, window: Int,
+    init(url: URL, a4: Double, minimum: Double, maximum: Double, window: Int, queue: DispatchQueue? = nil,
          event: @escaping @Sendable ([String: Any]) -> Void, error: @escaping @Sendable (String) -> Void) {
+        self.queue = queue ?? DispatchQueue(label: "com.notelite.notewise.capture", qos: .userInitiated)
         self.url=url; self.a4=a4; self.minimum=minimum; self.maximum=maximum; self.window=window; self.event=event; self.error=error
     }
     deinit { if let dsp { nw_destroy(dsp) } }
@@ -50,6 +78,11 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
             guard !failed else { return }
             do {
                 if dsp == nil {
+                    // A paused take keeps its WAV format and sample clock.
+                    // Check before overwriting rate when rebuilding the DSP.
+                    if file != nil, rate != format.sampleRate {
+                        throw NoteLiteError.server("录音采样率变化，已停止本次输入。请结束保存后重新开始。")
+                    }
                     rate = format.sampleRate
                     guard let detector = nw_create_profile(rate, a4, minimum, min(maximum, rate / 2 - 1), window) else { throw NoteLiteError.server("此采样率或乐器音域不能初始化听音，请更换声音输入。") }
                     dsp = detector
@@ -75,7 +108,7 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
             let type = String(cString: value.type), reason = String(cString: value.reason)
             var result: [String: Any] = ["type": type == "note-on" ? "on" : type == "note-off" ? "off" : type == "note-update" ? "update" : "uncertainty",
                 "eventId": "audio-\(Int(detectorOffsetMs))-\(value.id)", "timeMs": value.time_ms+detectorOffsetMs, "onsetMs": value.onset_ms+detectorOffsetMs,
-                "sampleCount": UInt64(max(0, (value.time_ms+detectorOffsetMs) * rate / 1000)), "sampleRate": rate,
+                "sampleCount": value.sample_count + UInt64(max(0, (detectorOffsetMs * rate / 1000).rounded())), "sampleRate": rate,
                 "confidence": value.confidence, "timingConfidence": value.timing_confidence, "reason": reason,
                 "releaseReliable": type == "note-off" && reason != "stop", "centsEvidence": "continuous-mpm-yin"]
             if value.midi >= 0 { result["midi"] = value.midi; result["cents"] = value.cents; result["frequency"] = value.frequency }
@@ -92,7 +125,7 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
             detectorOffsetMs = rate>0 ? 1000 * Double(count)/rate : 0
         }
     }
-    func finish() async -> [String: Any] {
+    func finish() async -> NoteWiseCaptureResult {
         await withCheckedContinuation { continuation in
             submissionLock.lock()
             defer { submissionLock.unlock() }
@@ -100,9 +133,9 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
             queue.async { [self] in
                 if let dsp { nw_finish(dsp); drain(); nw_destroy(dsp); self.dsp = nil }
                 file = nil
-                continuation.resume(returning: ["available": count > 0 && !failed, "sampleRate": rate,
-                    "sampleCount": count, "durationMs": rate > 0 ? 1000 * Double(count) / rate : 0,
-                    "mime": "audio/wav", "size": totalBytes, "interrupted": failed])
+                continuation.resume(returning: .recording(available: count > 0 && !failed, sampleRate: rate,
+                    sampleCount: count, durationMs: rate > 0 ? 1000 * Double(count) / rate : 0,
+                    size: totalBytes, interrupted: failed))
             }
         }
     }
@@ -112,6 +145,7 @@ private final class NoteWiseAudioProcessor: @unchecked Sendable {
 final class NoteWiseSession {
     private let input: NoteWiseCapturing
     private let takeStore: NoteWiseTakeStore
+    private let processingQueue: DispatchQueue?
     private var deletedScopes = Set<String>()
     private var processor: NoteWiseAudioProcessor?
     private var takeID: String?
@@ -123,11 +157,20 @@ final class NoteWiseSession {
     private var midiOffset: Double = 0
     private var activeMIDI: [String: String] = [:]
     private var connected = false
+    private struct TakeConfiguration: Equatable {
+        let inputKind: String
+        let tuning: Double
+        let instrument: String
+    }
+    private var takeConfiguration: TakeConfiguration?
+    private var inputInbox: NoteWiseEventInbox?
+    private var normalStop: (generation: UUID, task: Task<NoteWiseCaptureResult, Never>)?
     var event: (([String: Any]) -> Void)?
 
-    init(input: NoteWiseCapturing? = nil, recordingsDirectory: URL? = nil) {
+    init(input: NoteWiseCapturing? = nil, recordingsDirectory: URL? = nil, processingQueue: DispatchQueue? = nil) {
         self.input = input ?? NativePracticeInput()
         takeStore = NoteWiseTakeStore(directory: recordingsDirectory)
+        self.processingQueue = processingQueue
     }
     private func validate(_ id: String) throws -> String {
         try takeStore.identifier(id)
@@ -165,6 +208,13 @@ final class NoteWiseSession {
         sequence += 1
         event?(value.merging(["type": "notewiseInput", "takeId": takeID, "sequence": sequence]) { old, _ in old })
     }
+    private func flush(_ inbox: NoteWiseEventInbox, id: String, scope: String, generation: UUID) {
+        guard takeID == id, self.scope == scope, self.generation == generation else { return }
+        for value in inbox.drain() {
+            if value["status"] as? String == "interrupted" { input.stop() }
+            emit(value)
+        }
+    }
     func start(_ payload: [String: Any], scope: String) async throws -> [String: Any] {
         try requireAvailable(scope: scope)
         try Task.checkCancellation()
@@ -172,20 +222,37 @@ final class NoteWiseSession {
               ["midi", "microphone"].contains(kind), let a4=payload["tuning"] as? Double,
               a4.isFinite, (400...480).contains(a4) else { throw NoteLiteError.invalidResponse }
         let id=try validate(raw)
-        let profile=kind == "microphone" ? try NoteWiseInstrumentProfiles.resolve(payload["instrument"] as? String ?? "piano") : nil
-        if takeID != nil && (takeID != id || self.scope != scope) { _ = await stop() }
+        guard normalStop?.generation != generation else {
+            throw CloudOMRError(code: "take_stopping", message: "本次练习正在结束保存，请保存完成后重新开始。", status: 409)
+        }
+        if payload["instrument"] != nil && !(payload["instrument"] is String) { throw NoteLiteError.invalidResponse }
+        let profile=try NoteWiseInstrumentProfiles.resolve(payload["instrument"] as? String ?? "piano")
+        let configuration = TakeConfiguration(inputKind: kind, tuning: a4, instrument: profile.id)
+        if takeID == id && self.scope == scope && takeConfiguration != configuration {
+            throw CloudOMRError(code: "take_configuration_changed", message: "本次练习的输入、乐器和调音已经固定，请先结束保存，再更改设置。", status: 409)
+        }
+        if takeID != nil && (takeID != id || self.scope != scope) {
+            if self.scope == scope { _ = await stop() } else { _ = await abort() }
+        }
         try requireAvailable(scope: scope)
         try Task.checkCancellation()
         let current=generation
         if takeID == nil {
             try takeStore.register(id, scope: scope, inputKind: kind)
-            takeID=id; self.scope=scope; sequence=0; midiOffset=0; midiID=0
+            takeID=id; self.scope=scope; sequence=0; midiOffset=0; midiID=0; takeConfiguration=configuration
             if kind == "microphone" {
-                guard let profile else { throw NoteLiteError.invalidResponse }
+                let inbox = NoteWiseEventInbox(); inputInbox = inbox
                 processor = NoteWiseAudioProcessor(url: try takeStore.audioURL(id), a4: a4,
                     minimum: profile.frequency(profile.minMidi, tuning: a4), maximum: profile.frequency(profile.maxMidi, tuning: a4), window: profile.windowSize,
-                    event: { [weak self] value in Task { @MainActor [weak self] in guard let self,self.takeID==id,self.generation==current else{return};self.emit(["inputKind":"microphone", "event":value]) } },
-                    error: { [weak self] message in Task { @MainActor [weak self] in guard let self,self.takeID==id,self.generation==current else{return};self.input.stop();self.emit(["status":"interrupted", "message":message]) } })
+                    queue: processingQueue,
+                    event: { [weak self] value in
+                        inbox.append(["inputKind":"microphone", "event":value])
+                        Task { @MainActor [weak self] in self?.flush(inbox, id: id, scope: scope, generation: current) }
+                    },
+                    error: { [weak self] message in
+                        inbox.append(["status":"interrupted", "message":message])
+                        Task { @MainActor [weak self] in self?.flush(inbox, id: id, scope: scope, generation: current) }
+                    })
             }
         }
         if kind == "microphone" {
@@ -215,7 +282,7 @@ final class NoteWiseSession {
             self.emit(["status":"interrupted","message":message])
         }
         do { try await input.start(kind); try Task.checkCancellation() }
-        catch { if current == generation { _ = await stop() }; throw error }
+        catch { if current == generation { _ = await abort() }; throw error }
         guard current == generation else { throw CancellationError() }
         connected=true
         return ["connected":true,"takeId":id,"inputKind":kind,"detectorVersion":kind == "midi" ? "midi-stream-2" : "native-mpm-yin-1",
@@ -238,14 +305,37 @@ final class NoteWiseSession {
         input.stop(); input.onPCM = nil; input.onMIDI = nil; input.onError = nil
         generation = UUID()
         let writer = processor
-        processor = nil; takeID = nil; scope = ""; activeMIDI.removeAll()
+        processor = nil; inputInbox = nil; normalStop = nil; takeID = nil; takeConfiguration = nil; scope = ""; activeMIDI.removeAll()
         return writer
     }
-    func stop() async -> [String: Any] {
+    /// Cancelled starts, account changes and WebView termination detach first.
+    /// The old native queue may finish its file but cannot deliver to a new take.
+    func abort() async -> [String: Any] {
         let id=takeID
         let writer = detachCapture()
-        let result=await writer?.finish() ?? ["available":false]
-        return result.merging(["takeId":id ?? ""]) { old,_ in old }
+        let result=await writer?.finish() ?? .unavailable
+        return result.dictionary.merging(["takeId":id ?? ""]) { old,_ in old }
+    }
+    func stop() async -> [String: Any] {
+        guard let id = takeID else { return ["available":false,"takeId":""] }
+        let current = generation, owner = scope, inbox = inputInbox
+        let finishing: Task<NoteWiseCaptureResult, Never>
+        if let pending = normalStop, pending.generation == current { finishing = pending.task }
+        else {
+            connected = false
+            input.stop(); input.onPCM = nil; input.onMIDI = nil; input.onError = nil
+            let writer = processor
+            finishing = Task { await writer?.finish() ?? .unavailable }
+            normalStop = (current, finishing)
+        }
+        let result = await finishing.value
+        // Account deletion/abort can detach while the native queue is draining.
+        // A stale stop must neither publish its tail nor stop the new account.
+        if takeID == id, scope == owner, generation == current {
+            if let inbox { flush(inbox, id: id, scope: owner, generation: current) }
+            _ = detachCapture()
+        }
+        return result.dictionary.merging(["takeId":id]) { old,_ in old }
     }
     func recording(_ raw: String, scope: String) throws -> URL {
         try requireAvailable(scope: scope)

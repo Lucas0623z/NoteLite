@@ -25,8 +25,14 @@ UNITS = {"maxima": 32, "long": 16, "breve": 8, "whole": 4, "half": 2,
          "64th": .0625, "128th": .03125}
 # Same manual variant contract as practice-web/src/instruments.js. Kept local
 # in the service so reading an evidence snapshot cannot execute client code.
-INSTRUMENT_VARIANTS = {key: {"concert": 0} for key in ("piano", "violin", "viola", "cello", "harp", "flute", "bassoon", "oboe", "trombone", "tuba", "voice", "harpsichord", "english-horn", "bass", "organ", "accordion", "harmonica", "piccolo", "recorder", "guitar", "sax", "erhu", "guzheng", "pipa", "guqin", "suona", "strings", "winds", "other")}
+INSTRUMENT_VARIANTS = {key: {"concert": 0} for key in ("piano", "violin", "viola", "cello", "harp", "flute", "bassoon", "oboe", "trombone", "tuba", "voice", "harpsichord", "clavinet", "english-horn", "bass", "organ", "accordion", "harmonica", "piccolo", "recorder", "guitar", "sax", "erhu", "guzheng", "pipa", "guqin", "suona", "strings", "winds", "other")}
 INSTRUMENT_VARIANTS.update(contrabass={"octave": -12, "concert": 0}, clarinet={"bb": -2, "a": -3, "eb": 3, "concert": 0}, horn={"f": -7, "bb": -2, "concert": 0}, trumpet={"bb": -2, "concert": 0}, euphonium={"bass": 0, "bb-treble": -14})
+INSTRUMENT_VARIANTS.update({"english-horn": {"concert": 0, "f": -7},
+                            "piccolo": {"concert": 0, "octave": 12},
+                            "guitar": {"concert": 0, "octave": -12},
+                            "bass": {"concert": 0, "octave": -12},
+                            "sax": {"concert": 0, "bb-soprano": -2, "eb-alto": -9,
+                                    "bb-tenor": -14, "eb-baritone": -21}})
 
 
 def canonical(value):

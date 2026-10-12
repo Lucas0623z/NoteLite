@@ -86,7 +86,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     private var accountClients: [String: CloudAccountClient] = [:]
     private let accountDigests = CloudAccountDigestStore()
     private let noteWise = NoteWiseSession()
-    private let recordedTranscriber = NoteWisePolyphonicTranscriber()
+    private let recordedTranscriber = NoteWiseFusionTranscriber()
     private var filePanel: FigmaNativeFilePanel?
     private var javaScriptDialogCompletion: ((Bool) -> Void)?
     private var loaded = false
@@ -197,6 +197,14 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
               let requestID = body["requestId"] as? String, !requestID.isEmpty, requestID.count <= 128,
               let action = body["action"] as? String, action.count <= 80 else { return }
         let payload = body["payload"] as? [String: Any] ?? [:]
+        if action == FigmaLegalInformation.action {
+            guard let supplied = body["payload"] as? [String: Any],
+                  FigmaLegalInformation.permitsRead(isMainFrame: message.frameInfo.isMainFrame,
+                    frameURL: message.frameInfo.request.url, pageURL: webView.url, payload: supplied) else {
+                resolve(requestID, error: CloudOMRError(code: "invalid_request", message: "软件许可读取不接受文件或网络参数。"))
+                return
+            }
+        }
         if action == "request/cancel" {
             guard let target = payload["targetRequestId"] as? String, target != requestID, target.count <= 128 else { return }
             cancelRequest(target)
@@ -295,6 +303,9 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             requestAccountScopes[requestID] = scope
         }
         switch action {
+        case FigmaLegalInformation.action:
+            // Public bundle notices have no account credential or user scope.
+            return try FigmaLegalInformation.read(resources: Bundle.main.resourceURL, payload: payload)
         case "notewise/score-digest":
             let xml = try string(payload, "musicxml")
             guard xml.utf8.count <= 10 * 1024 * 1024 else { throw NoteLiteError.invalidResponse }
@@ -310,7 +321,8 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             } catch {
                 // A permission prompt may finish after logout or a new login.
                 // Detach only this old take; never stop the new account's input.
-                if let takeId = payload["takeId"] as? String, (try? noteWise.checkActive(takeId, scope: scope)) != nil { _ = await noteWise.stop() }
+                if !["take_configuration_changed", "take_stopping"].contains((error as? CloudOMRError)?.code ?? ""),
+                   let takeId = payload["takeId"] as? String, (try? noteWise.checkActive(takeId, scope: scope)) != nil { _ = await noteWise.abort() }
                 throw error
             }
         case "notewise/pause":
@@ -335,7 +347,14 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             let scope = try accountClient().credential()?.userID ?? "guest"
             let url = try noteWise.recording(string(payload,"takeId"),scope:origin+"|"+scope)
             guard let tuning=payload["tuning"] as? Double,tuning.isFinite,(400...480).contains(tuning) else { throw NoteLiteError.invalidResponse }
-            let result=try await recordedTranscriber.transcribe(recordingURL:url,tuning:tuning).dictionary
+            let instrument = payload["instrument"] as? String ?? "piano"
+            if payload["instrument"] != nil && !(payload["instrument"] is String) { throw NoteLiteError.invalidResponse }
+            let polyphonic: Bool
+            if let raw = payload["polyphonic"] {
+                guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { throw NoteLiteError.invalidResponse }
+                polyphonic = number.boolValue
+            } else { polyphonic = true }
+            let result=try await recordedTranscriber.transcribe(recordingURL:url,tuning:tuning,instrument:instrument,polyphonic:polyphonic).dictionary
             guard capturedOrigin==origin,(try accountClient().credential()?.userID ?? "guest")==scope else { throw CloudOMRError(code:"identity_changed",message:"账户已更新，请重新读取录音。",status:409) }
             return result
         case "notewise/recording/submit":
@@ -382,7 +401,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             if ["/login", "/register", "/logout"].contains(payload["path"] as? String ?? "") ||
                 ((payload["method"] as? String) == "DELETE" && (payload["path"] as? String)?.hasPrefix("/sessions/") == true) {
                 accountDigests.clear()
-                _ = await noteWise.stop()
+                _ = await noteWise.abort()
                 clearAudio()
             }
             return result
@@ -772,6 +791,22 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if navigationAction.navigationType == .linkActivated,
+           navigationAction.sourceFrame.isMainFrame,
+           FigmaResourceHandler.isTrusted(navigationAction.sourceFrame.request.url),
+           FigmaResourceHandler.isTrusted(webView.url),
+           FigmaLegalInformation.isPublicSourceLink(navigationAction.request.url),
+           let publicURL = navigationAction.request.url {
+            // Open only the exact public-source allowlist in the system browser;
+            // the external page never inherits this view's native bridge.
+            decisionHandler(.cancel)
+            #if os(iOS)
+            UIApplication.shared.open(publicURL)
+            #else
+            NSWorkspace.shared.open(publicURL)
+            #endif
+            return
+        }
         // A local original PDF can be displayed in a blob iframe. It never gets
         // the main-frame-only native bridge, and blob top-level navigation is denied.
         let localBlobFrame = navigationAction.request.url?.scheme == "blob" &&
@@ -836,7 +871,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        Task { _ = await noteWise.stop() }
+        Task { _ = await noteWise.abort() }
         requests.values.forEach { $0.cancel() }
         filePanel?.cancel(); filePanel = nil
         importContinuation?.resume(throwing: CancellationError()); importContinuation = nil

@@ -1,5 +1,6 @@
 import sys
 import json
+import os
 import subprocess
 from pathlib import Path
 import unittest
@@ -14,7 +15,81 @@ def note(step="C", duration=1, extra=""):
 def xml(body):return (PREFIX+body+SUFFIX).encode()
 
 
+RUNTIME_HOME=Path(os.environ.get("NOTELITE_TEST_ANALYSIS_HOME",str(Path(__file__).parent/"runtime")))
+
+
 class ScoreToolsTest(unittest.TestCase):
+    def test_concert_score_and_manual_override_confirm_without_double_transposition(self):
+        data=xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>')
+        concert=data.replace(b'<part-list>',b'<defaults><concert-score/></defaults><part-list>')
+        for options in ({},{"instrument":"clarinet","variant":"bb","transpose":-7}):
+            result=normalize(concert,options)
+            self.assertEqual(60,result["notes"][0]["midi"])
+            self.assertTrue(result["notes"][0]["transposeExplicit"])
+            self.assertTrue(result["parts"][0]["transpositionConfirmed"])
+        for options in ({"instrument":"auto","transpose":0},{"byPart":{"P1":{"instrument":"auto","transpose":-2}}}):
+            result=normalize(data,options)
+            self.assertEqual(60 if "transpose" in options else 58,result["notes"][0]["midi"])
+            self.assertTrue(result["parts"][0]["transpositionConfirmed"])
+        for explicit in (concert,data.replace(b'</attributes>',b'<transpose><chromatic>0</chromatic></transpose></attributes>')):
+            with self.assertRaisesRegex(ValueError,"Unknown instrument notation variant"):
+                normalize(explicit,{"instrument":"clarinet","variant":"invalid"})
+
+    def test_score_instrument_abbreviation_and_unknown_playback_piano_do_not_erase_identity(self):
+        body='<measure number="1">'+ATTR.format('<transpose><chromatic>0</chromatic></transpose>')+note("C",2,'<instrument id="I1"/>')+'</measure>'
+        head='<score-partwise><part-list><score-part id="P1"><part-name>Part 1</part-name><score-instrument id="I1"><instrument-name>Mystery reed</instrument-name>{}</score-instrument><midi-instrument id="I1"><midi-program>1</midi-program></midi-instrument></score-part></part-list><part id="P1">'
+        unknown=normalize((head.format('')+body+SUFFIX).encode(),{})
+        self.assertFalse(unknown["parts"][0]["reliable"])
+        named=normalize((head.format('<instrument-abbreviation>Fl.</instrument-abbreviation>')+body+SUFFIX).encode(),{})
+        self.assertEqual('flute',named["parts"][0]["instrument"])
+        self.assertTrue(named["parts"][0]["reliable"])
+        heading=(head.format('').replace('<part-name>Part 1</part-name>','<part-name>Flute</part-name>').replace('Mystery reed','Acoustic Grand Piano')+body.replace('<instrument id="I1"/>','')+SUFFIX).encode()
+        self.assertEqual('flute',normalize(heading,{})["parts"][0]["instrument"])
+
+    def test_selected_note_instrument_catalog_and_xml_references_are_retained(self):
+        head='<score-partwise><part-list><score-part id="P1"><part-name>Wind</part-name><score-instrument id="I1"><instrument-name>Flute</instrument-name></score-instrument><score-instrument id="I2"><instrument-name>Clarinet</instrument-name></score-instrument></score-part></part-list><part id="P1">'
+        body='<measure number="1">'+ATTR.format('<transpose><chromatic>0</chromatic></transpose>')+note("C",1,'<instrument id="I1"/>')+note("D",1,'<instrument id="I2"/>')+'</measure>'
+        result=normalize((head+body+SUFFIX).encode(),{"expandRepeats":False})
+        self.assertEqual([["I1"],["I2"]],[n["instrumentIds"] for n in result["notes"]])
+        self.assertEqual(["flute","clarinet"],[n["resolvedInstrumentId"] for n in result["notes"]])
+        self.assertEqual(["flute","clarinet"],result["parts"][0]["instrumentIds"])
+        self.assertTrue(result["parts"][0]["instrumentMappingResolved"])
+        self.assertTrue(result["parts"][0]["transpositionConfirmed"])
+        missing=normalize((head+body.replace('<instrument id="I2"/>','')+SUFFIX).encode(),{})
+        self.assertFalse(missing["parts"][0]["reliable"])
+        self.assertIn("instrument-mapping-unresolved",missing["parts"][0]["requiresConfirmation"])
+
+    def test_automatic_transposing_instrument_requires_notation_confirmation(self):
+        data=xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>')
+        result=normalize(data,{})
+        self.assertTrue(result["parts"][0]["reliable"])
+        self.assertFalse(result["parts"][0]["transpositionConfirmed"])
+        self.assertIn("transposition-unconfirmed",result["parts"][0]["requiresConfirmation"])
+        manual=normalize(data,{"instrument":"clarinet","variant":"bb"})
+        self.assertTrue(manual["parts"][0]["transpositionConfirmed"])
+        self.assertEqual(58,manual["notes"][0]["midi"])
+        unknown=normalize(data,{"instrument":"drumkit"})
+        self.assertFalse(unknown["parts"][0]["reliable"])
+
+    def test_exact_general_midi_keyboard_and_reed_programs_are_resolved(self):
+        clavi=xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>').replace(b'<part-name>Clarinet</part-name>',b'<part-name>Clavi</part-name>')
+        self.assertEqual('clavinet',normalize(clavi,{})["parts"][0]["instrument"])
+        for program,instrument in ((7,"harpsichord"),(8,"clavinet"),(22,"accordion"),(24,"accordion")):
+            data=xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>').decode().replace('<part-name>Clarinet</part-name>',
+                f'<part-name>Part 1</part-name><midi-instrument id="I1"><midi-program>{program}</midi-program></midi-instrument>')
+            with self.subTest(program=program):self.assertEqual(instrument,normalize(data.encode(),{})["parts"][0]["instrument"])
+
+    def test_added_notation_variants_and_selected_scope_have_actual_sound_pitches(self):
+        data=xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>')
+        for instrument,variant,pitch in (("guitar","octave",48),("piccolo","octave",72),("english-horn","f",53),("sax","eb-alto",51)):
+            with self.subTest(instrument=instrument):
+                result=normalize(data,{"instrument":instrument,"variant":variant})
+                self.assertEqual(pitch,result["notes"][0]["midi"]);self.assertTrue(result["parts"][0]["transpositionConfirmed"])
+        for instrument,pitch in (("contrabass",48),("euphonium",60)):
+            with self.subTest(defaultVariant=instrument):
+                result=normalize(data,{"instrument":instrument})
+                self.assertEqual(pitch,result["notes"][0]["midi"])
+
     def test_real_short_context_subprocess_returns_promptly_without_fabricated_baseline(self):
         # Execute the real helper module in a fresh process: the former 1x1
         # upstream backtracking loop would hit this 15-second test deadline.
@@ -34,7 +109,7 @@ class ScoreToolsTest(unittest.TestCase):
                     self.assertEqual([],result["pairs"]);self.assertEqual([],result["missing"]);self.assertEqual([],result["extra"])
                     self.assertTrue(result["warnings"])
 
-    @unittest.skipUnless((Path(__file__).parent/"runtime/native/nakamura/SprToFmt3x.exe").is_file(), "Install both actual baselines")
+    @unittest.skipUnless((RUNTIME_HOME/"native/nakamura/SprToFmt3x.exe").is_file(), "Install both actual baselines")
     def test_saved_json_float_roundtrip_uses_real_partitura_and_both_baselines(self):
         data=xml('<measure number="1">'+ATTR.replace('<beats>2</beats>','<beats>6</beats>').format('')
                  +''.join(note(step) for step in ('C','D','E','F','G','A'))+'</measure>')
@@ -45,7 +120,7 @@ class ScoreToolsTest(unittest.TestCase):
         # MIDI, source ordinals and occurrence indexes encoded as 60.0/0.0.
         payload=json.loads(json.dumps({"score":score,"performance":performance}),parse_int=float)
         original=json.dumps(payload,sort_keys=True)
-        home=(Path(__file__).parent/"runtime").resolve()
+        home=RUNTIME_HOME.resolve()
         for backend in ("parangonar","nakamura"):
             with self.subTest(backend=backend):
                 result=align(payload|{"options":{"backend":backend}},home)
@@ -70,9 +145,9 @@ class ScoreToolsTest(unittest.TestCase):
                 with self.subTest(backend=backend,midi=midi):
                     payload={"score":{"notes":[note_row|{"midi":midi}]},"performance":[note_row],"options":{"backend":backend}}
                     with self.assertRaisesRegex(ValueError,"midi must be an integer"):
-                        align(payload,Path(__file__).parent/"runtime")
+                        align(payload,RUNTIME_HOME)
             with self.assertRaisesRegex(ValueError,"mi must be an integer"):
-                align({"score":{"notes":[note_row|{"mi":.5}]},"performance":[note_row],"options":{"backend":backend}},Path(__file__).parent/"runtime")
+                align({"score":{"notes":[note_row|{"mi":.5}]},"performance":[note_row],"options":{"backend":backend}},RUNTIME_HOME)
         with self.assertRaisesRegex(ValueError,"from must be an integer"):
             normalize(xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>'),{"from":1.5})
 
@@ -119,11 +194,11 @@ class ScoreToolsTest(unittest.TestCase):
         self.assertIn("P1:2@0",result["missing"]);self.assertIn(2,result["extra"])
         self.assertEqual(5,len(result["pairs"]))
 
-    @unittest.skipUnless((Path(__file__).parent/"runtime/native/nakamura/SprToFmt3x.exe").is_file(),"Install the native Nakamura baseline")
+    @unittest.skipUnless((RUNTIME_HOME/"native/nakamura/SprToFmt3x.exe").is_file(),"Install the native Nakamura baseline")
     def test_actual_nakamura_preserves_wrong_pitch_as_a_substitution_without_changing_detection(self):
         notes=[{"sourceNoteId":f"P1:{i}","occurrenceId":f"P1:{i}@0","midi":pitch,"onset":i,"duration":.8} for i,pitch in enumerate([60,62,64,65,67,69])]
         performance=[{"midi":pitch,"onset":time,"duration":.4,"confidence":.9} for pitch,time in [(60,2),(62,2.7),(70,3),(65,4.3),(67,5.1),(69,6.3)]]
-        result=align_nakamura(notes,performance,(Path(__file__).parent/"runtime").resolve())
+        result=align_nakamura(notes,performance,RUNTIME_HOME.resolve())
         self.assertTrue(result["metadata"]["evaluated"])
         self.assertEqual(6,len(result["pairs"]))
         replacement=next(p for p in result["pairs"] if p["occurrenceId"]=="P1:2@0")

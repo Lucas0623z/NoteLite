@@ -2,12 +2,12 @@
 export type NoteKey = { partId: string; measureIndex: number; noteIndex: number };
 export const noteKey = (key: NoteKey) => `${encodeURIComponent(key.partId)}:${key.measureIndex}:${key.noteIndex}`;
 export type PlaybackNote = { key: NoteKey; start: number; end: number; midi: number; tieStart: boolean; tieStop: boolean; voiceKey: string; staff?: string;
-  voice?: string; writtenMidi?: number; step?: string; alter?: number; octave?: number; transpose?: number; transposeExplicit?: boolean; onsetBeat?: number; durationBeat?: number; occurrenceOrdinal?: number };
+  voice?: string; writtenMidi?: number; step?: string; alter?: number; octave?: number; transpose?: number; transposeExplicit?: boolean; onsetBeat?: number; durationBeat?: number; occurrenceOrdinal?: number; instrumentIds?:string[] };
 export type PlaybackPosition = { keys: NoteKey[]; start: number };
 export type ScoreTimeline = { notes: PlaybackNote[]; positions: PlaybackPosition[]; duration: number; initialTempo: number; warnings: string[] };
 
-const elements = (node: Node, name?: string) => Array.from(node.childNodes).filter((n): n is Element => n.nodeType === 1 && (!name || (n as Element).localName === name));
-const child = (node: Node, name: string) => elements(node, name)[0];
+const elements = (node: Node | undefined, name?: string) => Array.from(node?.childNodes || []).filter((n): n is Element => n.nodeType === 1 && (!name || (n as Element).localName === name));
+const child = (node: Node | undefined, name: string) => elements(node, name)[0];
 const text = (node: Node, name: string, fallback = "") => child(node, name)?.textContent?.trim() || fallback;
 const number = (node: Node, name: string, fallback = 0) => Number(text(node, name, String(fallback)));
 const units: Record<string, number> = { maxima: 32, long: 16, breve: 8, whole: 4, half: 2, quarter: 1, eighth: .5, "16th": .25, "32nd": .125, "64th": .0625, "128th": .03125 };
@@ -76,7 +76,7 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
   type MeasureData = { length: number; notes: PlaybackNote[]; positions: PlaybackPosition[]; tempos: { at: number; bpm: number }[] };
   const parts = elements(root, "part"), warnings = new Set<string>(), data: MeasureData[][] = [];
   for (const part of parts) {
-    let divisions = 1, nominal: number | undefined = 4, transpose = 0, transposeExplicit = false;
+    let divisions = 1, nominal: number | undefined = 4, transpose = 0, transposeExplicit = !!child(child(root, "defaults"), "concert-score");
     const staffTranspose = new Map<string, number>(), measures: MeasureData[] = [];
     for (const [mi, measure] of elements(part, "measure").entries()) {
       let cursor = 0, previousOnset = 0, maxEnd = 0, ni = 0;
@@ -131,7 +131,8 @@ export function createScoreTimeline(xml: string, Parser: typeof DOMParser = DOMP
             const midi = 12 * (number(pitch, "octave") + 1) + semitone + number(pitch, "alter") + (staffTranspose.get(staff) ?? transpose);
             if (!Number.isInteger(midi) || midi < 0 || midi > 127) throw new Error("试听暂不支持此谱的微分音或 MIDI 音高。");
             const ties = elements(item, "tie").map(t => t.getAttribute("type"));
-            notes.push({ key, start: onset, end: onset + duration, midi, tieStart: ties.includes("start"), tieStop: ties.includes("stop"), voiceKey: JSON.stringify([key.partId, voice, midi]), staff,
+            const instrumentIds=elements(item,"instrument").map(i=>i.getAttribute("id")||"").filter(Boolean);
+            notes.push({ key, start: onset, end: onset + duration, midi, tieStart: ties.includes("start"), tieStop: ties.includes("stop"), voiceKey: JSON.stringify([key.partId, voice, midi, instrumentIds]), staff, instrumentIds,
               voice, writtenMidi: midi - (staffTranspose.get(staff) ?? transpose), step: text(pitch, "step"), alter: number(pitch, "alter"), octave: number(pitch, "octave"), transpose: staffTranspose.get(staff) ?? transpose, transposeExplicit: transposeExplicit || staffTranspose.has(staff) });
           } else if (child(item, "unpitched")) warnings.add("无固定音高音符仅显示指针，试听不发声。");
         }

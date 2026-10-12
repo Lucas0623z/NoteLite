@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -104,33 +105,47 @@ class AcceptanceGateTests(unittest.TestCase):
             {"nodeType": "Test Case", "name": cloud.LIVE_ACCOUNT_TEST.split("/")[-1] + "()", "result": "Passed"}]}]}
         self.assertEqual(cloud.test_outcomes(nested), {cloud.LIVE_ACCOUNT_TEST: "Passed"})
 
-    def test_added_actual_recorded_inference_regression_is_required_on_every_platform(self):
+    def test_added_inference_legal_resource_and_recording_tail_regressions_are_required_on_every_platform(self):
         original_read = Path.read_text
-        name = "NoteWiseRecordedTranscriptionTests/testAdditionalActualRecordedInferenceAcceptance"
-        def source_with_added_test(path, *args, **kwargs):
-            source = original_read(path, *args, **kwargs)
-            if path.name == "NoteWiseRecordedTranscriptionTests.swift":
-                return source + "\nfunc testAdditionalActualRecordedInferenceAcceptance() throws {}\n"
-            return source
-        with patch.object(Path, "read_text", source_with_added_test):
-            for platform in cloud.PLATFORMS:
-                self.assertIn(name, cloud.required_tests(platform))
-                tree = test_tree(platform)
-                summary = {"result": "Passed", "failedTests": 0, "passedTests": len(cloud.required_tests(platform))}
-                self.assertEqual(cloud.validate_test_results(platform, tree, summary)["actualResults"][name], "Passed")
-                leaves = tree["testNodes"][0]["children"]
-                actual = next(leaf for leaf in leaves if leaf["nodeIdentifier"] == name + "()")
-                actual["result"] = "Skipped"
-                with self.assertRaises(cloud.release.ReleaseError):
-                    cloud.validate_test_results(platform, tree, summary)
-                leaves.remove(actual)
-                with self.assertRaises(cloud.release.ReleaseError):
-                    cloud.validate_test_results(platform, tree, summary)
+        for suite in ("NoteWiseRecordedTranscriptionTests", "FigmaLegalInformationTests", "NoteWiseStopTailTests"):
+            name = suite + "/testAdditionalActualAcceptance"
+            def source_with_added_test(path, *args, **kwargs):
+                source = original_read(path, *args, **kwargs)
+                return source + "\nfunc testAdditionalActualAcceptance() throws {}\n" if path.name == suite + ".swift" else source
+            with patch.object(Path, "read_text", source_with_added_test):
+                for platform in cloud.PLATFORMS:
+                    self.assertIn(name, cloud.required_tests(platform))
+                    tree = test_tree(platform)
+                    summary = {"result": "Passed", "failedTests": 0, "passedTests": len(cloud.required_tests(platform))}
+                    self.assertEqual(cloud.validate_test_results(platform, tree, summary)["actualResults"][name], "Passed")
+                    leaves = tree["testNodes"][0]["children"]
+                    actual = next(leaf for leaf in leaves if leaf["nodeIdentifier"] == name + "()")
+                    actual["result"] = "Skipped"
+                    with self.assertRaises(cloud.release.ReleaseError):
+                        cloud.validate_test_results(platform, tree, summary)
+                    leaves.remove(actual)
+                    with self.assertRaises(cloud.release.ReleaseError):
+                        cloud.validate_test_results(platform, tree, summary)
+
+    def test_installed_legal_resources_and_recording_tail_leaf_results_are_recognized_without_identifiers(self):
+        legal = "FigmaLegalInformationTests/testActualInstalledAppHasReadableFullLicenseNoticeAndCommitSourceOffer"
+        for platform in cloud.PLATFORMS:
+            self.assertIn(legal, cloud.required_tests(platform))
+            for suite in ("FigmaLegalInformationTests", "NoteWiseStopTailTests"):
+                names = sorted(name for name in cloud.required_tests(platform) if name.startswith(suite + "/"))
+                self.assertTrue(names, suite)
+                nested = {"testNodes": [{"nodeType": "Test Suite", "name": suite, "result": "Passed", "children": [
+                    {"nodeType": "Test Case", "name": name.split("/")[-1] + "()", "result": "Passed"} for name in names]}]}
+                self.assertEqual(cloud.test_outcomes(nested), {name: "Passed" for name in names})
+                for result in ("Skipped", "Failed", None):
+                    nested["testNodes"][0]["children"][0]["result"] = result
+                    self.assertEqual(cloud.test_outcomes(nested)[names[0]], result)
 
     def test_account_identity_profile_and_recording_regressions_cannot_be_missing_or_skipped(self):
         for platform in cloud.PLATFORMS:
             required = cloud.required_tests(platform)
-            for suite in ("CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests"):
+            for suite in ("CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests",
+                          "FigmaLegalInformationTests", "NoteWiseStopTailTests"):
                 names = sorted(name for name in required if name.startswith(suite + "/"))
                 self.assertTrue(names, suite)
                 for name in names:
@@ -151,6 +166,8 @@ class PackagingGateTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.app = self.root / "app"; self.app.mkdir()
+        environment = patch.dict(os.environ, {"GITHUB_SHA": SHA, "GITHUB_REPOSITORY": cloud.legal_resources.REPOSITORY})
+        environment.start(); self.addCleanup(environment.stop)
         root_patch = patch.object(cloud, "ROOT", self.root); root_patch.start(); self.addCleanup(root_patch.stop)
         # Keep the real policy module: only synthetic source/app resources change.
         real_policy = Path(__file__).resolve().parents[2] / "packaging/cloud-client-release/release.py"
@@ -170,6 +187,14 @@ class PackagingGateTests(unittest.TestCase):
         profiles.write_bytes(b'{"schemaVersion":1,"profiles":[]}' )
         (self.app / "NoteWiseProfiles.json").write_bytes(profiles.read_bytes())
         model = self.app / "NoteWiseBasicPitch.mlmodelc"; model.mkdir(); (model / "model.mil").write_bytes(b"synthetic compiled fixture, not inference proof")
+        real_root = Path(__file__).resolve().parents[2]
+        shutil.copytree(real_root / "apple/AudiverisCore", self.root / "apple/AudiverisCore",
+                        ignore=shutil.ignore_patterns(".build", ".swiftpm", "__pycache__"))
+        legal = self.root / "apple/Legal"; legal.mkdir()
+        for name in cloud.legal_resources.STATIC_NAMES:
+            shutil.copyfile(real_root / "apple/Legal" / name, legal / name)
+        (legal / cloud.legal_resources.SOURCE_OFFER).write_bytes(cloud.legal_resources.encoded_offer(self.root, SHA))
+        shutil.copytree(legal, self.app / "Legal")
 
     def test_resources_must_match_actual_production_build_and_locked_model_notices(self):
         result = cloud.verify_resources(self.app)
@@ -179,6 +204,81 @@ class PackagingGateTests(unittest.TestCase):
         (self.app / "FigmaUI/assets/app.js").write_bytes(b"console.log('release')")
         (self.app / "BASIC-PITCH-LICENSE").write_bytes(b"altered")
         with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+
+    def test_actual_app_requires_full_unchanged_agpl_and_complete_notice_resources(self):
+        result = cloud.verify_resources(self.app)["Legal"]
+        self.assertTrue(result["actualAppLicenseBytesVerified"])
+        self.assertFalse(result["distributionCompatibilityEstablished"])
+        self.assertEqual(result["sourceCommit"], SHA)
+        for name in cloud.legal_resources.STATIC_NAMES:
+            path = self.app / "Legal" / name
+            original = path.read_bytes()
+            path.unlink()
+            with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+            path.write_bytes(original + b" altered")
+            with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+            path.write_bytes(original)
+        # Even changing both source and packaged license must not turn a URL
+        # or shortened notice into a purported full license.
+        for folder in (self.root / "apple/Legal", self.app / "Legal"):
+            (folder / "AGPL-3.0-LICENSE.txt").write_bytes(b"https://www.gnu.org/licenses/agpl-3.0.html")
+        with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+        (self.root / "apple/AudiverisCore/LICENSE").write_bytes(b"https://www.gnu.org/licenses/agpl-3.0.html")
+        with self.assertRaisesRegex(cloud.release.ReleaseError, "full AGPL"): cloud.verify_resources(self.app)
+
+    def test_source_offer_must_bind_actual_release_commit_archive_and_package_source(self):
+        source = self.root / "apple/Legal" / cloud.legal_resources.SOURCE_OFFER
+        installed = self.app / "Legal" / cloud.legal_resources.SOURCE_OFFER
+        good = source.read_bytes()
+        import json
+        baseline = json.loads(good)
+        self.assertEqual(baseline["sourceArchiveURL"], "https://github.com/" + cloud.legal_resources.REPOSITORY + "/archive/" + SHA + ".tar.gz")
+        mutations = [
+            {**baseline, "sourceCommit": "b" * 40},
+            {**baseline, "sourceArchiveURL": "https://github.com/Lucas0623z/NoteLite/archive/refs/heads/main.tar.gz"},
+            {**baseline, "translatedPackageInventory": {}},
+            {**baseline, "upstreamProvenance": {}},
+            {**baseline, "distributionCompatibility": "all legally compliant"},
+        ]
+        for changed in mutations:
+            data = (json.dumps(changed, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
+            source.write_bytes(data); installed.write_bytes(data)
+            with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+        source.write_bytes(good); installed.write_bytes(good)
+        original_source = self.root / "apple/AudiverisCore/Sources/AudiverisCore/Runs.swift"
+        original_source.write_bytes(original_source.read_bytes() + b"\n// changed after offer generation\n")
+        with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+
+    def test_source_offer_missing_and_unexpected_legal_payloads_fail_in_actual_app(self):
+        installed = self.app / "Legal" / cloud.legal_resources.SOURCE_OFFER
+        good = installed.read_bytes(); installed.unlink()
+        with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+        installed.write_bytes(good)
+        extra = self.app / "Legal/old-source-offer.json"; extra.write_bytes(good)
+        with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+        extra.unlink()
+        with patch.dict(os.environ, {"GITHUB_SHA": "b" * 40}):
+            with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "private/copied-client"}):
+            with self.assertRaises(cloud.release.ReleaseError): cloud.verify_resources(self.app)
+
+    def test_preparation_refuses_wrong_head_dirty_source_and_stale_generated_offer(self):
+        legal = cloud.legal_resources
+        with patch.dict(os.environ, {"GITHUB_SHA": SHA}), patch.object(legal, "git", return_value="b" * 40):
+            with self.assertRaisesRegex(legal.LegalResourceError, "different checkout"): legal.prepare(self.root)
+        def dirty(root, *args):
+            return SHA if args[:1] == ("rev-parse",) else " M apple/NoteLite/NoteWise.swift"
+        with patch.object(legal, "git", side_effect=dirty):
+            with self.assertRaisesRegex(legal.LegalResourceError, "Commit corresponding source"): legal.prepare(self.root)
+        def clean(root, *args):
+            return SHA if args[:1] == ("rev-parse",) else ""
+        with patch.object(legal, "git", side_effect=clean):
+            legal.prepare(self.root, check=True)
+            path = self.root / "apple/Legal" / legal.SOURCE_OFFER
+            path.write_bytes(path.read_bytes() + b" ")
+            with self.assertRaisesRegex(legal.LegalResourceError, "stale"): legal.prepare(self.root, check=True)
+            legal.prepare(self.root)
+            legal.prepare(self.root, check=True)
 
     def test_embedded_jdk_private_data_test_maps_and_debug_controls_are_rejected(self):
         for name in ("OMRResources/classes.jar", "runtime/lib/modules", "history.sqlite", "distribution.p12", "assets/debug.map", "capture.log"):

@@ -48,6 +48,10 @@ final class PracticeRuntime {
         Map<String,Object> options=new LinkedHashMap<>(request);options.put("metadata",metadata);
         prepared=PracticeJson.object(PracticeJson.parse(new String(LocalAudioAnalysis.normalize(xml,options),StandardCharsets.UTF_8)));
         List<?> groups=groups(prepared);if(groups.isEmpty())throw new IOException("所选范围没有可练习的音符。");
+        if("microphone".equals(options.get("input"))||"recording".equals(options.get("input"))){
+            options.put("normalizedParts",prepared.getOrDefault("parts",List.of()));requireFusionInstruments(options);
+            if("microphone".equals(options.get("input"))&&polyphonic(groups))throw new IOException("所选声部含和弦或重叠音，请使用 MIDI 或录后比对。");
+        }
         if(prepared.get("warnings") instanceof List<?> warnings&&!warnings.isEmpty())options.put("scoreWarnings",warnings);
         config=options;engine=new PracticeEngine(PracticeTimeline.fromGroups(groups,bpm),PracticeEngine.Config.fromMap(options));
         sessionEpoch=clock();createdAt=Instant.now().toString();takeId=null;segments.clear();importedRecording=null;captureOffset=0;
@@ -119,7 +123,13 @@ final class PracticeRuntime {
         Map<String,Object> options=new LinkedHashMap<>(request);options.put("metadata",metadata);
         prepared=PracticeJson.object(PracticeJson.parse(new String(LocalAudioAnalysis.normalize(xml,options),StandardCharsets.UTF_8)));
         List<?> groups=groups(prepared);if(groups.isEmpty())throw new IOException("所选范围没有可练习的音符。");
-        if(!"basic-pitch".equals(options.getOrDefault("engine","basic-pitch"))&&polyphonic(groups))throw new IOException("所选声部含和弦或重叠音，请选择“单音与和弦”检测，或只练单音声部。");
+        String detector=String.valueOf(options.getOrDefault("engine","notewise-fusion"));options.put("engine",detector);
+        if(!List.of("notewise-fusion","basic-pitch").contains(detector)&&polyphonic(groups))throw new IOException("所选声部含和弦或重叠音，请选择 NoteWise 自动融合或“单音与和弦”检测，或只练单音声部。");
+        // The actual normalized selection is authoritative. Never trust a
+        // browser's supplied plan, parts, overlap flag or narrow pitch range.
+        for(String key:List.of("plan","noteWisePlan","fusionPlan","normalizedParts","polyphonic"))options.remove(key);
+        options.put("normalizedParts",prepared.getOrDefault("parts",List.of()));options.put("polyphonic",polyphonic(groups));
+        requireFusionInstruments(options);
         config=options;engine=null;importedRecording=wav;segments.clear();
         if(!rechecking){
             takeId=null;
@@ -136,7 +146,14 @@ final class PracticeRuntime {
         double bpm=PracticeWave.number(options.get("bpm"),100);
         Map<String,Object> judged=new LinkedHashMap<>(RecordedAlignment.analyze(PracticeTimeline.fromGroups(groups,bpm),PracticeEngine.Config.fromMap(judgeOptions),transcription));
         String baseline=String.valueOf(options.getOrDefault("baseline","parangonar"));
-        if(!notes.isEmpty())judged.put("baseline",PracticeJson.parse(new String(LocalAudioAnalysis.align(prepared,notes,Map.of("backend",baseline)),StandardCharsets.UTF_8)));
+        if(!notes.isEmpty()){
+            try{judged.put("baseline",PracticeJson.parse(new String(LocalAudioAnalysis.align(prepared,notes,Map.of("backend",baseline)),StandardCharsets.UTF_8)));}
+            catch(IOException failure){
+                if(Thread.currentThread().isInterrupted())throw failure;
+                judged.put("baseline",Map.of("engine",baseline,"metadata",Map.of("evaluated",false,"reason","baseline-failed"),"warnings",List.of(failure.getMessage())));
+                judged.put("warning","主分析报告已保存；录后对照基线未完成，可稍后复核。"+failure.getMessage());
+            }
+        }
         judged.put("transcription",transcription);judged.put("engine",transcription.getOrDefault("engine","recorded"));
         judged.put("title",title);judged.put("createdAt",Instant.now().toString());judged.put("durationSeconds",transcription.getOrDefault("seconds",0));
         judged.put("metadata",options);judged.put("input","recording");judged.put("scope",Map.of("part",options.getOrDefault("part","all"),"from",options.getOrDefault("from",1),"to",options.getOrDefault("to",1)));
@@ -223,6 +240,16 @@ final class PracticeRuntime {
     private static List<Object> replayAnchorKey(Map<?,?> sound){return List.of(String.valueOf(sound.get("id")),(int)PracticeWave.number(sound.get("index"),-1),PracticeWave.number(sound.get("time"),Double.NaN));}
     private void requireEngine() throws IOException {if(engine==null)throw new IOException("尚未启动练习。");}
     private static List<?> groups(Map<String,Object> normalized){return normalized.get("groups") instanceof List<?> list?list:List.of();}
-    private static boolean polyphonic(List<?> groups){double previousEnd=-1;for(Object item:groups){Map<String,Object> group=PracticeJson.object(item);List<?> notes=(List<?>)group.getOrDefault("notes",List.of());double onset=PracticeWave.number(group.get("onset"),0);if(notes.stream().map(n->PracticeJson.object(n).get("midi")).distinct().count()>1||onset<previousEnd-.0001)return true;for(Object note:notes){Map<String,Object> n=PracticeJson.object(note);previousEnd=Math.max(previousEnd,PracticeWave.number(n.get("onset"),onset)+PracticeWave.number(n.get("duration"),0));}}return false;}
+    private static void requireFusionInstruments(Map<String,Object> options)throws IOException{
+        List<?> parts=options.get("normalizedParts") instanceof List<?> list?list:List.of();
+        if(parts.isEmpty())throw new IOException("请先确认所选声部的演奏乐器。");
+        for(Object value:parts){Map<String,Object> part=PracticeJson.object(value);
+            if(!Boolean.TRUE.equals(part.get("reliable"))||!Boolean.TRUE.equals(part.get("transpositionConfirmed"))
+                ||!Boolean.TRUE.equals(part.get("instrumentMappingResolved"))
+                ||part.get("requiresConfirmation") instanceof List<?> required&&!required.isEmpty())
+                throw new IOException("请先确认所选声部的乐器及实音／移调谱制，再使用 NoteWise 自动融合。");
+        }
+    }
+    private static boolean polyphonic(List<?> groups){double previousEnd=-1;for(Object item:groups){Map<String,Object> group=PracticeJson.object(item);List<?> notes=(List<?>)group.getOrDefault("notes",List.of());double onset=PracticeWave.number(group.get("onset"),0);if(notes.size()>1||onset<previousEnd-.0001)return true;for(Object note:notes){Map<String,Object> n=PracticeJson.object(note);previousEnd=Math.max(previousEnd,PracticeWave.number(n.get("onset"),onset)+PracticeWave.number(n.get("duration"),0));}}return false;}
     private static String digest(byte[] bytes){try{return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(Exception ex){throw new IllegalStateException(ex);}}
 }

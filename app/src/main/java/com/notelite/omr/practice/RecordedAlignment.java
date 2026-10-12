@@ -28,13 +28,14 @@ public final class RecordedAlignment {
             Map<?,?> n=PracticeTimeline.map(value);
             String type=PracticeTimeline.string(n,"type","");
             if(!type.isEmpty()){
-                Map<String,Object> e=new java.util.LinkedHashMap<>();n.forEach((k,v)->e.put(String.valueOf(k),v));events.add(e);continue;
+                Map<String,Object> e=new java.util.LinkedHashMap<>();n.forEach((k,v)->e.put(String.valueOf(k),v));
+                e.put("confidence",recordedConfidence(n));events.add(e);continue;
             }
             double onset=PracticeTimeline.number(n,"onsetMs",PracticeTimeline.number(n,"onset",0)*1000);
             double duration=PracticeTimeline.number(n,"durationMs",PracticeTimeline.number(n,"duration",0)*1000);
             if(!Double.isFinite(onset)||onset<0||!Double.isFinite(duration)||duration<=0)throw new IllegalArgumentException("录音音符时间无效。");
             String id=PracticeTimeline.string(n,"id","recorded"+(++serial));
-            double confidence=PracticeTimeline.number(n,"confidence",1),cents=PracticeTimeline.number(n,"cents",0);
+            double confidence=recordedConfidence(n),cents=PracticeTimeline.number(n,"cents",0);
             Map<String,Object> attack=PracticeEngine.fields("type","note-on","id",id,"midi",n.get("midi"),"onsetMs",onset,"timeMs",onset,"cents",cents,"confidence",confidence,"voiced",true);
             Map<String,Object> original=new java.util.LinkedHashMap<>();n.forEach((key,item)->original.put(String.valueOf(key),item));attack.put("recordedNote",original);
             for(String key:List.of("reviewRequired","onsetReliable","reason","onsetEvidence"))if(n.containsKey(key))attack.put(key,n.get(key));
@@ -55,7 +56,7 @@ public final class RecordedAlignment {
                     "durationMs",duration,"confidence",PracticeTimeline.number(interval,"confidence",0),"voiced",null,"reason",PracticeTimeline.string(interval,"reason","uncertain-acoustic-evidence")));
         }
         events.sort(Comparator.comparingDouble(e->PracticeTimeline.number(e,"timeMs",PracticeTimeline.number(e,"onsetMs",0))));
-        List<Map<String,Object>> strong=events.stream().filter(e->e.get("type").equals("note-on")&&PracticeTimeline.number(e,"confidence",1)>=config.confidenceThreshold()
+        List<Map<String,Object>> strong=events.stream().filter(e->e.get("type").equals("note-on")&&PracticeTimeline.number(e,"confidence",0)>=config.confidenceThreshold()
                 &&!Boolean.TRUE.equals(e.get("reviewRequired"))&&!Boolean.FALSE.equals(e.get("onsetReliable"))).toList();
         double offset=0;
         if(config.startTimeMs()!=null)offset=config.startTimeMs();
@@ -80,6 +81,12 @@ public final class RecordedAlignment {
             alignment.put("expectedTimeMapping",mapping.locations);
         }
         return result;
+    }
+    private static double recordedConfidence(Map<?,?> note){
+        if(!note.containsKey("confidence"))return 0;
+        if(!(note.get("confidence") instanceof Number value)||!Double.isFinite(value.doubleValue())||value.doubleValue()<0||value.doubleValue()>1)
+            throw new IllegalArgumentException("录音可信度必须是 0 至 1 的有限数值。");
+        return value.doubleValue();
     }
     private static Map<String,Object> judge(PracticeTimeline timeline,PracticeEngine.Config config,List<Map<String,Object>> events,
                                            Map<?,?> range,boolean noReliableNotes,double offset,Map<Integer,Double> expectedTimes){

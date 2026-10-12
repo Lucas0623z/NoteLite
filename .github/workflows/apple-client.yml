@@ -91,6 +91,7 @@ jobs:
           python3 -B -m unittest discover -s apple/scripts -p test_verify_simulator_identity.py
           python3 apple/scripts/prepare-release-features.py --check
           python3 apple/scripts/prepare-figma-ui.py
+          python3 -B apple/release/legal_resources.py prepare
       - name: Generate Xcode project
         id: generate
         working-directory: apple
@@ -132,7 +133,9 @@ jobs:
           set -euo pipefail
           for resources in \
             Build/Build/Products/Release-iphonesimulator/NoteLite.app \
+            Build-device/Build/Products/Release-iphoneos/NoteLite.app \
             Build/Build/Products/Release/黑白键AI-你的陪练搭子.app/Contents/Resources; do
+            python3 -B release/legal_resources.py verify --resources "$resources"
             for file in index.html app.js style.css demo.musicxml THIRD-PARTY.txt; do
               test -s "$resources/practice/$file"
             done
@@ -277,6 +280,7 @@ jobs:
           python3 -m unittest discover -s apple/scripts -p test_notewise_model_patch.py
           python3 -B -m unittest discover -s apple/scripts -p test_verify_simulator_identity.py
           python3 apple/scripts/prepare-release-features.py --check
+          python3 -B apple/release/legal_resources.py prepare
       - name: Generate Xcode project
         working-directory: apple
         run: |
@@ -320,6 +324,7 @@ jobs:
           set -euo pipefail
           mkdir -p apple/Screenshots/native-diagnostics
           app_bundle=$(xcrun simctl get_app_container "$DEVICE_ID" com.lucas0623z.yinban app)
+          python3 -B apple/release/legal_resources.py verify --resources "$app_bundle"
           python3 -B apple/scripts/verify_simulator_identity.py \
             --app "$app_bundle" \
             --output apple/Screenshots/native-diagnostics/simulator-host-signature.json

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "checkedDate": "2026-10-12",
+  "license": "AGPL-3.0-or-later",
+  "verifiedUpstreamReference": {
+    "repository": "https://github.com/Audiveris/audiveris",
+    "tag": "5.10.0",
+    "commit": "b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0",
+    "evidence": "All six Java algorithm bodies match after comments/whitespace are removed and com.notelite package references are restored to org.audiveris."
+  },
+  "historicalForkPoint": {
+    "status": "unknown",
+    "earliestLocalImport": "22ea65a1c758030fbaefd54a260005a0b77fae9a",
+    "reason": "The imported NoteLite git history does not preserve Audiveris ancestry; a matching verified reference does not identify a unique historical fork point."
+  },
+  "comparisonNormalization": [
+    "Restore com.notelite package references to org.audiveris.",
+    "Remove Java line and block comments; remove whitespace.",
+    "Compare remaining source bodies, without changing algorithm statements."
+  ],
+  "javaSources": [
+    {
+      "upstreamPath": "app/src/main/java/org/audiveris/omr/image/AdaptiveFilter.java",
+      "commit": "b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0",
+      "url": "https://raw.githubusercontent.com/Audiveris/audiveris/b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0/app/src/main/java/org/audiveris/omr/image/AdaptiveFilter.java",
+      "upstreamSHA256": "362f100a3ebf0b41d9e6107d0f362130529aa0dc37ff3de06bf029ac7d9884d1",
+      "localSHA256": "5b4f71fc64cc0ac0cc103687828069c9508813c78993edd76ca9bc6907b5dbd5",
+      "normalizedAlgorithmMatch": true,
+      "localPath": "app/src/main/java/com/notelite/omr/image/AdaptiveFilter.java"
+    },
+    {
+      "upstreamPath": "app/src/main/java/org/audiveris/omr/image/VerticalFilter.java",
+      "commit": "b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0",
+      "url": "https://raw.githubusercontent.com/Audiveris/audiveris/b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0/app/src/main/java/org/audiveris/omr/image/VerticalFilter.java",
+      "upstreamSHA256": "5ebb6d5230559b34b951ea5b478488c8879cc02734e06d2e946b5f4343a8eb15",
+      "localSHA256": "b1e525a5f05a49a81f25d0255ac794642af5741e6ba27735e8fdf38a4d00adb2",
+      "normalizedAlgorithmMatch": true,
+      "localPath": "app/src/main/java/com/notelite/omr/image/VerticalFilter.java"
+    },
+    {
+      "upstreamPath": "app/src/main/java/org/audiveris/omr/image/GlobalFilter.java",
+      "commit": "b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0",
+      "url": "https://raw.githubusercontent.com/Audiveris/audiveris/b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0/app/src/main/java/org/audiveris/omr/image/GlobalFilter.java",
+      "upstreamSHA256": "39496d518897674611ea70d01bbcf142f2a70a94c6b5c30af9f0de18bed4337c",
+      "localSHA256": "690992af9005f556fa7c6cecf97a2ef80efaebbe507b3df752b3cf9c78653e39",
+      "normalizedAlgorithmMatch": true,
+      "localPath": "app/src/main/java/com/notelite/omr/image/GlobalFilter.java"
+    },
+    {
+      "upstreamPath": "app/src/main/java/org/audiveris/omr/run/RunsRetriever.java",
+      "commit": "b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0",
+      "url": "https://raw.githubusercontent.com/Audiveris/audiveris/b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0/app/src/main/java/org/audiveris/omr/run/RunsRetriever.java",
+      "upstreamSHA256": "c7f0bce8eb162c48bc3915d55cc2762b3db94972a43216ae5e7c5652e4c23968",
+      "localSHA256": "f1fa1067f3a99883868ff7526d65614be7cbe565871a681af8030b5f951ecb07",
+      "normalizedAlgorithmMatch": true,
+      "localPath": "app/src/main/java/com/notelite/omr/run/RunsRetriever.java"
+    },
+    {
+      "upstreamPath": "app/src/main/java/org/audiveris/omr/run/RunTableFactory.java",
+      "commit": "b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0",
+      "url": "https://raw.githubusercontent.com/Audiveris/audiveris/b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0/app/src/main/java/org/audiveris/omr/run/RunTableFactory.java",
+      "upstreamSHA256": "d4211b2aa47fe1c4eb6988d1b259b5234da781647d5720eb1e04e8f302ec10a2",
+      "localSHA256": "24ca009ad4f809813252b274265e93755ea08d58b6c83eadd151661e3c288868",
+      "normalizedAlgorithmMatch": true,
+      "localPath": "app/src/main/java/com/notelite/omr/run/RunTableFactory.java"
+    },
+    {
+      "upstreamPath": "app/src/main/java/org/audiveris/omr/run/RunTable.java",
+      "commit": "b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0",
+      "url": "https://raw.githubusercontent.com/Audiveris/audiveris/b02fd4f8e31bf3dee1124bf4956e60fcca7f00a0/app/src/main/java/org/audiveris/omr/run/RunTable.java",
+      "upstreamSHA256": "0a1d100fa7540e537983a1eb89d204098d3fb51f3f34c6264442147388840982",
+      "localSHA256": "ad0b88cc1b6cce128da8b0898f8a6cc63c880d19519d339af066b3709c4aa78e",
+      "normalizedAlgorithmMatch": true,
+      "localPath": "app/src/main/java/com/notelite/omr/run/RunTable.java"
+    }
+  ],
+  "swiftSources": [
+    "apple/AudiverisCore/Sources/AudiverisCore/Binarization.swift",
+    "apple/AudiverisCore/Sources/AudiverisCore/Image.swift",
+    "apple/AudiverisCore/Sources/AudiverisCore/Runs.swift"
+  ],
+  "modifications": [
+    "Partial Swift translation with value types and resource/dimension guards.",
+    "Cancellation and whole-image run retrieval.",
+    "Java callbacks, region selection, rejection hooks, threading and the remaining recognition pipeline are not included.",
+    "No musical notes are inferred by this partial package."
+  ],
+  "existingPackageNotice": "apple/AudiverisCore/NOTICE.md",
+  "oracleManifest": "apple/AudiverisCore/Tests/AudiverisCoreTests/Fixtures/manifest.json",
+  "distributionException": "No all-rights-holder App Store exception has been established by this audit."
+}

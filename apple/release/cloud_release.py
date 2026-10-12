@@ -2,8 +2,9 @@
 """Release the native cloud-OMR client after real, exact-commit Apple acceptance.
 
 Signing/profile/keychain handling is shared with the existing audited release
-helper. This client bundles Figma UI and local NoteWise only; it never downloads
-an embedded OMR/JDK composition and never submits a public App Store release.
+helper. This client bundles Figma UI, local NoteWise and the retained partial
+AudiverisCore preprocessing dependency; it never downloads a full embedded
+OMR/JDK composition and never submits a public App Store release.
 """
 import argparse
 import hashlib
@@ -19,6 +20,7 @@ import sys
 import zipfile
 
 import release
+import legal_resources
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE = "com.lucas0623z.yinban"
@@ -46,6 +48,12 @@ NOTEWISE_TESTS = {
     "NoteWiseRecordedTranscriptionTests/testActualBundledCoreMLSilenceDoesNotBecomeCorrectNotes",
     "NoteWiseRecordedTranscriptionTests/testSwiftDecoderMatchesPinnedOfficialPythonReference",
     "NoteWiseRecordedTranscriptionTests/testInvalidActivationAndCancellationAreRejected",
+}
+DYNAMIC_UNIT_SUITES = ("NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "NoteWiseStopTailTests",
+                       "CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests",
+                       "FigmaLegalInformationTests")
+RECOGNIZED_SUITES = frozenset(DYNAMIC_UNIT_SUITES) | {
+    "FigmaShellUITests", "ReleaseFeatureTests", "AccountDeletionNativeTests", "CloudAccountLiveLifecycleTests",
 }
 MAX_ZIP_FILE = 1024 * 1024 * 1024
 MAX_ZIP_TOTAL = 4 * 1024 * 1024 * 1024
@@ -99,7 +107,7 @@ def test_outcomes(value):
                     components = identifier.split("/")
                     key = "/".join(components[-2:])
                 else:
-                    suite = next((s for s in reversed(ancestry) if s in {"FigmaShellUITests", "NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "ReleaseFeatureTests", "AccountDeletionNativeTests", "CloudAccountLiveLifecycleTests", "CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests"}), None)
+                    suite = next((s for s in reversed(ancestry) if s in RECOGNIZED_SUITES), None)
                     key = (suite + "/" + name) if suite and name.startswith("test") else None
                 if key:
                     release.require(key not in result, "Duplicate native test result; release requires one actual result per test.")
@@ -116,8 +124,9 @@ def test_outcomes(value):
 def required_tests(platform):
     release.require(platform in PLATFORMS, "Unknown Apple acceptance platform.")
     required = CORE_TESTS | NOTEWISE_TESTS | {LIVE_ACCOUNT_TEST} | (MAC_TESTS if platform == "macOS" else {DIRECTION_TEST})
-    # Any added NoteWise inference regression in this exact source must also pass.
-    for suite in ("NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests"):
+    # Every regression in these exact source suites, including actual bundled
+    # legal resources and recording tails, requires a passing native test leaf.
+    for suite in DYNAMIC_UNIT_SUITES:
         source = (ROOT / "apple/NoteLiteTests" / (suite + ".swift")).read_text(encoding="utf-8")
         required |= {suite + "/" + name for name in re.findall(r"\bfunc\s+(test[A-Za-z0-9_]+)\s*\(", source)}
     source = (ROOT / "apple/NoteLiteTests/ReleaseFeatureTests.swift").read_text(encoding="utf-8")
@@ -133,7 +142,7 @@ def validate_test_results(platform, value, summary):
                     and summary.get("passedTests", 0) > 0, "The actual Xcode test bundle did not pass.")
     required = required_tests(platform)
     release.require(all(outcomes.get(name) == "Passed" for name in required),
-                    "A required core, interaction, direction or NoteWise test is missing, skipped or failed: " + platform)
+                    "A required core, interaction, direction, NoteWise or public legal-resource test is missing, skipped or failed: " + platform)
     return {"platform": platform, "requiredTests": sorted(required), "actualResults": {n: outcomes[n] for n in sorted(required)},
             "actualPassedTests": summary["passedTests"], "actualFailedTests": summary["failedTests"]}
 
@@ -237,7 +246,7 @@ def verify_resources(app):
     resource_gate_spec = importlib.util.spec_from_file_location("cloud_resource_gate", ROOT / "packaging/cloud-client-release/release.py")
     resource_gate = importlib.util.module_from_spec(resource_gate_spec)
     resource_gate_spec.loader.exec_module(resource_gate)
-    reports = {}
+    reports = {"Legal": verify_legal_resources(app)}
     for name, source in (("FigmaUI", ROOT / "apple/FigmaUI"), ("practice", ROOT / "app/res/practice")):
         expected, actual = resource_inventory(source), resource_inventory(app / name)
         release.require(expected == actual, "Archived " + name + " resources differ from the actual production build.")
@@ -266,6 +275,19 @@ def verify_resources(app):
                         and path.suffix.lower() not in {".jar", ".jmod", ".class", ".p12", ".pfx", ".pem", ".key", ".sqlite", ".sqlite3", ".db", ".log", ".map", ".xctest", ".xcresult"},
                         "Unexpected engine, private, source-map or test payload in the native client: " + name)
     return reports
+
+
+def verify_legal_resources(app):
+    """Verify actual copied bytes and the release's exact corresponding source.
+
+    Presence in the source directory is insufficient: this runs on both the
+    archive and extracted signed IPA. No result here claims legal clearance.
+    """
+    source_sha = exact_sha(os.environ.get("GITHUB_SHA"))
+    try:
+        return legal_resources.verify_packaged(ROOT, app, source_sha, os.environ.get("GITHUB_REPOSITORY", legal_resources.REPOSITORY))
+    except (OSError, ValueError) as error:
+        raise release.ReleaseError(str(error)) from None
 
 
 def code_signature(app, private, expected_profile, expected_fingerprint):
@@ -361,6 +383,10 @@ def archive():
         release.run(["node", str(ROOT / "apple/scripts/prepare-notewise-profiles.mjs")], capture=True)
         release.run([sys.executable, str(ROOT / "apple/scripts/prepare-notewise-model.py")], capture=True)
         release.run([sys.executable, str(ROOT / "apple/scripts/prepare-release-features.py"), "--check"], capture=True)
+        # Prepared before XcodeGen by the workflow. Never regenerate after the
+        # project has already selected its resource files or silently bless a
+        # source/profile mutation between project generation and archiving.
+        release.run([sys.executable, str(ROOT / "apple/release/legal_resources.py"), "check"], capture=True)
         archive_path = private / "NoteLite-cloud.xcarchive"
         command = ["xcodebuild", "archive", "-project", str(project), "-scheme", "NoteLite", "-configuration", "Release",
                    "-destination", "generic/platform=iOS", "-archivePath", str(archive_path), "-derivedDataPath", str(private / "DerivedData"),

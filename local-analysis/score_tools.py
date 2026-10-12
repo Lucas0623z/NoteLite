@@ -9,18 +9,10 @@ import subprocess
 import tempfile
 import warnings
 import zipfile
-
-
-VARIANTS = {
-    "clarinet": {"bb": -2, "a": -3, "eb": 3, "concert": 0},
-    "horn": {"f": -7, "bb": -2, "concert": 0},
-    "trumpet": {"bb": -2, "concert": 0},
-    "contrabass": {"octave": -12, "concert": 0},
-    "euphonium": {"bass": 0, "bb-treble": -14},
-}
+from fusion import profile_policy
 
 # Qualified names precede broad family terms, as in the existing UI resolver.
-NAMES = [(r"harpsichord|羽管键琴|大键琴","harpsichord"),(r"english horn|cor anglais|英国管","english-horn"),
+NAMES = [(r"harpsichord|羽管键琴|大键琴","harpsichord"),(r"clavinet|clavi\b|击弦古钢琴","clavinet"),(r"english horn|cor anglais|英国管","english-horn"),
          (r"electric bass|acoustic bass|bass guitar|^bass$|贝斯","bass"),(r"organ|管风琴","organ"),
          (r"accordion|手风琴","accordion"),(r"harmonica|口琴","harmonica"),(r"piccolo|短笛","piccolo"),
          (r"recorder|竖笛","recorder"),(r"guitar|吉他","guitar"),(r"sax|萨克斯","sax"),
@@ -40,6 +32,14 @@ def name_profile(name):
     return next((instrument for pattern,instrument in NAMES if re.search(pattern,str(name),re.I)), None)
 
 
+def program_profile(program):
+    programs = {7:"harpsichord",8:"clavinet",22:"accordion",23:"harmonica",24:"accordion",41:"violin",42:"viola",43:"cello",44:"contrabass",47:"harp",57:"trumpet",58:"trombone",59:"tuba",61:"horn",69:"oboe",70:"english-horn",71:"bassoon",72:"clarinet",73:"piccolo",74:"flute",75:"recorder"}
+    inferred=programs.get(program)
+    for lo,hi,instrument in [(1,6,"piano"),(17,21,"organ"),(25,32,"guitar"),(33,40,"bass"),(53,55,"voice"),(57,64,"brass"),(65,68,"sax"),(73,80,"flute")]:
+        if inferred is None and lo<=program<=hi: inferred=instrument
+    return inferred
+
+
 def part_instrument(tree, part, options):
     meta = options.get("metadata", {})
     evidence = meta.get("parts", {})
@@ -47,11 +47,12 @@ def part_instrument(tree, part, options):
     if not isinstance(provenance,dict): provenance = {}
     choice = options.get("byPart", {}).get(part.id, {})
     selected = choice.get("instrument", options.get("instrument", "auto") if options.get("part","all") in ("all",part.id) else "auto")
-    variant = choice.get("variant", options.get("variant", "concert"))
+    definition=profile_policy(selected)
+    variant = choice.get("variant", options.get("variant", definition["defaultVariant"] if definition else "concert"))
     origin = provenance.get("origin",meta.get("origin","score"))
     if selected not in ("auto", "", None):
         return {"id":part.id,"label":part.part_name or part.id,"instrument":selected,"variant":variant,
-                "reliable":True,"provenance":"manual","metadata":provenance}
+                "reliable":profile_policy(selected) is not None,"provenance":"manual","metadata":provenance}
     result = {"id":part.id,"label":part.part_name or part.id,"instrument":"auto","variant":"concert",
               "reliable":False,"provenance":origin,"metadata":provenance}
     # OMR's playback-default piano is not evidence about the photographed part.
@@ -73,10 +74,7 @@ def part_instrument(tree, part, options):
     program_text = score_part.findtext("midi-instrument/midi-program") if score_part is not None else None
     program = int(program_text) if program_text else int(provenance.get("program",0) or 0)
     explicit = program_text is not None or provenance.get("programExplicit",program>0)
-    programs = {23:"harmonica",41:"violin",42:"viola",43:"cello",44:"contrabass",47:"harp",57:"trumpet",58:"trombone",59:"tuba",61:"horn",69:"oboe",70:"english-horn",71:"bassoon",72:"clarinet",73:"piccolo",74:"flute",75:"recorder"}
-    inferred = programs.get(program)
-    for lo,hi,instrument in [(1,8,"piano"),(17,24,"organ"),(25,32,"guitar"),(33,40,"bass"),(53,55,"voice"),(57,64,"brass"),(65,68,"sax"),(73,80,"flute")]:
-        if inferred is None and lo <= program <= hi: inferred = instrument
+    inferred = program_profile(program)
     unknown_name = any(str(n).strip() and not re.fullmatch(r"(?:part|staff|instrument|unknown|unnamed|声部|乐器|未命名|未标明)(?:\s*\d+)?",str(n).strip(),re.I) for n in names)
     if explicit and inferred and (program != 1 or not unknown_name):
         result.update(instrument=inferred,reliable=True,provenance="score-midi-program")
@@ -89,17 +87,87 @@ def manual_transpose(part, options):
         values = next((p for p in options.get("instrumentOptions", []) if p.get("partId", p.get("part")) == part), {})
     if not values and options.get("part", "all") in ("all", part):
         values = options
-    explicit = options.get("transpositions", {}).get(part, values.get("transposeSemitones"))
-    if explicit is not None:
+    explicit = options.get("transpositions", {}).get(part, values.get("transpose") if values.get("transpose") not in (None,"") else values.get("transposeSemitones"))
+    if explicit not in (None,""):
         amount = float(explicit)
-        if amount != round(amount) or not -48 <= amount <= 48:
+        if not math.isfinite(amount) or amount != round(amount) or not -48 <= amount <= 48:
             raise ValueError("Invalid manual transposition")
         return int(amount)
     instrument = values.get("instrument", values.get("instrumentId", ""))
-    variant = values.get("variant", "concert")
-    if instrument in VARIANTS:
-        return VARIANTS[instrument].get(variant, 0)
+    profile=profile_policy(instrument)
+    if profile:
+        variant = values.get("variant") or profile["defaultVariant"]
+        found=next((v for v in profile["variants"] if v["id"]==variant),None)
+        if found: return found["transpose"]
+        raise ValueError("Unknown instrument notation variant: "+str(variant))
     return 0
+
+
+def resolve_selected_parts(tree,parts,notes,options):
+    """Retain per-note MusicXML identity; resolve only the selected excerpt.
+
+    A part-name or first playback program cannot erase a second instrument.
+    OMR provenance can still require manual confirmation even with a catalog.
+    """
+    selected=[]
+    for part in parts:
+        actual=[n for n in notes if n["part"]==part["id"]]
+        if not actual: continue
+        score_part=next((p for p in tree.findall("part-list/score-part") if p.get("id")==part["id"]),None)
+        catalog={}
+        if score_part is not None:
+            midi={p.get("id"):p.findtext("midi-program") for p in score_part.findall("midi-instrument")}
+            for entry in score_part.findall("score-instrument"):
+                identity=entry.get("id");name=entry.findtext("instrument-name","")
+                abbreviation=entry.findtext("instrument-abbreviation","")
+                inferred=name_profile(name) or name_profile(abbreviation)
+                if inferred is None and midi.get(identity):
+                    try:
+                        program=int(midi[identity])
+                        unknown_name=any(str(n).strip() and not re.fullmatch(r"(?:part|staff|instrument|unknown|unnamed|声部|乐器|未命名|未标明)(?:\s*\d+)?",str(n).strip(),re.I) for n in (name,abbreviation))
+                        inferred=program_profile(program) if program!=1 or not unknown_name else None
+                    except ValueError: pass
+                if identity: catalog[identity]={"id":identity,"name":name,"abbreviation":abbreviation,"instrument":inferred}
+        ids=[];reasons=[]
+        manual=part.get("provenance")=="manual"
+        for note in actual:
+            references=note["instrumentIds"]
+            if manual: inferred=part["instrument"] if part["reliable"] else None
+            elif references:
+                definitions=[catalog.get(i,{}).get("instrument") for i in references]
+                inferred=definitions[0] if len(definitions)==1 and definitions[0] else None
+            elif len(catalog)>1:
+                inferred=None
+            elif len(catalog)==1:
+                inferred=part["instrument"] if part["reliable"] else next(iter(catalog.values()))["instrument"]
+            else: inferred=part["instrument"] if part["reliable"] else None
+            if not manual and part.get("metadata",{}).get("confirmed") is False: inferred=None
+            if not manual and part.get("metadata",{}).get("instrumentConfirmed") is False: inferred=None
+            note["resolvedInstrumentId"]=inferred
+            if inferred and profile_policy(inferred): ids.append(inferred)
+            else: reasons.append("instrument-mapping-unresolved")
+        ids=list(dict.fromkeys(ids));profiles=[profile_policy(i) for i in ids]
+        if len({p["family"] for p in profiles})>1: reasons.append("mixed-instrument-families")
+        part["instrumentCatalog"]=list(catalog.values());part["instrumentIds"]=ids
+        part["instrumentMappingResolved"]=not reasons
+        if ids and not reasons and (part.get("reliable") or catalog):
+            part.update(instrument=ids[0],reliable=True)
+            if len(ids)>1: part["provenance"]="explicit-score-instrument-switch"
+        elif reasons: part["reliable"]=False
+        choice=options.get("byPart",{}).get(part["id"],{})
+        transposition_override=part["id"] in options.get("transpositions",{}) or any(choice.get(k) not in (None,"") for k in ("transpose","transposeSemitones"))
+        if options.get("part","all") in ("all",part["id"]) and any(options.get(k) not in (None,"") for k in ("transpose","transposeSemitones")):transposition_override=True
+        confirmed=bool(profiles) and (manual or transposition_override or all(n["transposeExplicit"] or
+            not any(v["transpose"]!=0 for v in profile_policy(n["resolvedInstrumentId"])["variants"])
+            for n in actual if n["resolvedInstrumentId"]))
+        if not confirmed: reasons.append("transposition-unconfirmed")
+        part["transpositionConfirmed"]=confirmed
+        part["requiresConfirmation"]=list(dict.fromkeys(reasons))
+        if profiles:
+            part.update(family=profiles[0]["family"] if len({p["family"] for p in profiles})==1 else "mixed",
+                        minMidi=min(p["minMidi"] for p in profiles),maxMidi=max(p["maxMidi"] for p in profiles))
+        selected.append(part)
+    return selected
 
 
 def xml_document(data):
@@ -135,11 +203,12 @@ def normalize(data: bytes, options: dict):
     from partitura import score as ps
     from lxml import etree
     tree = xml_document(data)
+    concert_score=tree.find("defaults/concert-score") is not None
     source, original_parts = {}, {}
     notes_total = 0
     for pi, part in enumerate(tree.findall("part")):
         part_id = part.get("id", f"P{pi+1}")
-        transpose, transpose_explicit, staff_transpose, beat_type = 0, False, {}, 4
+        transpose, transpose_explicit, staff_transpose, beat_type = 0, concert_score, {}, 4
         ordinal, measures = 0, []
         for mi, measure in enumerate(part.findall("measure")):
             label = measure.get("number", str(mi+1)); measures.append(label)
@@ -158,6 +227,7 @@ def normalize(data: bytes, options: dict):
                     staff = item.findtext("staff", "1")
                     source[sid] = {"id": f"{part_id}:{ordinal}", "part": part_id, "xmlIndex": ordinal,
                                    "mi": mi, "measure": label, "beatType": beat_type,
+                                   "instrumentIds": [i.get("id") for i in item.findall("instrument") if i.get("id")],
                                    "transposeSemitones": staff_transpose.get(staff, transpose),
                                    "transposeExplicit": staff in staff_transpose or transpose_explicit}
                     ordinal += 1; notes_total += 1
@@ -172,6 +242,9 @@ def normalize(data: bytes, options: dict):
     notes, tempo, traversal, parts = [], [], [], []
     offset = min(float(p.quarter_map(p.first_point.t)) for p in loaded.parts)
     for part in loaded.parts:
+        # Validate explicit manual choices even when XML already supplied the
+        # sounding pitch and applying a second transpose would be forbidden.
+        manual_transpose(part.id,options)
         parts.append(part_instrument(tree,part,options))
         measures = list(part.measures)
         for occurrence, measure in enumerate(measures):
@@ -213,13 +286,15 @@ def normalize(data: bytes, options: dict):
                           "part": meta["part"], "voice": str(note.voice or 1), "staff": str(note.staff or 1),
                           "mi": meta["mi"], "measure": meta["measure"], "beat": (onset-measure_start)*meta["beatType"]/4+1,
                           "onset": onset, "duration": duration, "midi": midi, "writtenMidi": written,
-                          "transposeSemitones": transposition, "transposeExplicit": meta["transposeExplicit"]})
+                          "transposeSemitones": transposition, "transposeExplicit": meta["transposeExplicit"],
+                          "instrumentIds":list(meta["instrumentIds"])})
             if part is loaded.parts[0] and occurrence < len(traversal):
                 traversal[occurrence].update(mi=meta["mi"], measure=meta["measure"])
         for event in part.iter_all(ps.Tempo):
             quarter = 60_000_000/event.microseconds_per_quarter
             tempo.append({"onset": float(part.quarter_map(event.start.t))-offset, "bpm": float(quarter)})
     notes.sort(key=lambda n: (n["onset"], n["midi"], n["occurrenceId"]))
+    parts=resolve_selected_parts(tree,parts,notes,options)
     if len(notes) > 50000:
         raise ValueError("Unfolded score exceeds 50000 notes")
     groups = []
