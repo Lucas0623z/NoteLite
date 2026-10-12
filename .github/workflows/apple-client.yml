@@ -99,8 +99,8 @@ jobs:
           xcodebuild -version
           sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
           test "${sdk_version%%.*}" -ge 26
-          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          xcodegen generate --spec project.yml
+          XCODEGEN_BIN=$(bash scripts/install-xcodegen.sh)
+          "$XCODEGEN_BIN" generate --spec project.yml
       - name: Build iOS simulator app without signing
         id: build_ios
         working-directory: apple
@@ -279,6 +279,7 @@ jobs:
           python3 -m unittest discover -s apple/scripts -p test_notewise_model_patch.py
           python3 -B -m unittest discover -s apple/scripts -p test_verify_simulator_identity.py
           python3 -B -m unittest discover -s apple/scripts -p test_simulator_test_products.py
+          python3 -B -m unittest discover -s apple/scripts -p test_install_xcodegen.py
           python3 apple/scripts/prepare-release-features.py --check
           python3 -B apple/release/legal_resources.py prepare
       - name: Generate Xcode project
@@ -287,8 +288,8 @@ jobs:
           xcodebuild -version
           sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
           test "${sdk_version%%.*}" -ge 26
-          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          xcodegen generate --spec project.yml
+          XCODEGEN_BIN=$(bash scripts/install-xcodegen.sh)
+          "$XCODEGEN_BIN" generate --spec project.yml
       - name: Create and boot dedicated screenshot simulator
         id: simulator
         timeout-minutes: 5
@@ -330,6 +331,13 @@ jobs:
           path: apple/NoteLite-simulator-tests.tar.gz
           if-no-files-found: error
           compression-level: 0
+      - name: Preserve the unmodified original test plan diagnostics
+        if: always() && steps.build_simulator_tests.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-simulator-original-test-plan
+          path: apple/build/SimulatorProductDiagnostics/
+          if-no-files-found: error
       - name: Remove dedicated build simulator
         if: always()
         run: python3 tools/audiveris-port/manage-embedded-simulators.py cleanup apple/SimulatorResults

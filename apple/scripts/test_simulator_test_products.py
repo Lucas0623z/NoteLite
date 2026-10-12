@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -302,6 +303,12 @@ class XctestrunTests(Fixture):
     def validate(self, document):
         return products.validate_xctestrun(document, self.products, self.platforms)
 
+    def target(self, document, version, name):
+        if version == 1:
+            return document[name]
+        return next(target for target in document["TestConfigurations"][0]["TestTargets"]
+                    if target["BlueprintName"] == name)
+
     def testRealPlistFormatsOneAndTwoRetainBothTargetsAndPortablePaths(self):
         for version in (1, 2):
             for encoding in (plistlib.FMT_XML, plistlib.FMT_BINARY):
@@ -315,6 +322,203 @@ class XctestrunTests(Fixture):
                     self.assertEqual(plan["hostApp"], "Debug-iphonesimulator/NoteLite.app")
                     self.assertEqual(plan["uiRunnerApp"], "Debug-iphonesimulator/NoteLiteUITests-Runner.app")
                     self.assertEqual(path.read_bytes(), raw, "Never rewrite the original plist")
+
+    def testBlueprintProjectMetadataKeepsOriginalPlistBytesAndDictionaryInBothFormats(self):
+        # These are project-container fixtures, not values observed in the CI plist.
+        for version in (1, 2):
+            for encoding in (plistlib.FMT_XML, plistlib.FMT_BINARY):
+                for project_path in ["NoteLite.xcodeproj", "../NoteLite.xcodeproj",
+                                     "../../checkout/apple/NoteLite.xcodeproj"]:
+                    with self.subTest(version=version, encoding=encoding, project_path=project_path):
+                        document = self.document(version)
+                        for name in sorted(products.TARGETS):
+                            self.target(document, version, name).update({
+                                "BlueprintName": name, "BlueprintProviderName": "NoteLite",
+                                "BlueprintProviderRelativePath": project_path})
+                        raw = plistlib.dumps(document, fmt=encoding)
+                        path = self.base / "blueprint-metadata.xctestrun"
+                        path.write_bytes(raw)
+                        decoded = plistlib.loads(path.read_bytes())
+                        original = copy.deepcopy(decoded)
+                        plan = self.validate(decoded)
+                        self.assertEqual(decoded, original, "Validation must not change the original dictionary")
+                        self.assertEqual(path.read_bytes(), raw, "Validation must not rewrite original plist bytes")
+                        self.assertEqual({target["name"] for target in plan["targets"]}, products.TARGETS)
+                        for target in plan["targets"]:
+                            self.assertNotIn("BlueprintProviderRelativePath", target["runtimePathKeys"])
+
+    def testBlueprintMetadataNeverExemptsActualRuntimePathsInEitherFormat(self):
+        runtime_fields = [
+            ("NoteLiteTests", "TestHostPath", None),
+            ("NoteLiteTests", "TestBundlePath", None),
+            ("NoteLiteUITests", "UITargetAppPath", None),
+            ("NoteLiteTests", "DependentProductPaths", None),
+            ("NoteLiteTests", "TestingEnvironmentVariables", "DYLD_FRAMEWORK_PATH"),
+            ("NoteLiteTests", "TestingEnvironmentVariables", "DYLD_LIBRARY_PATH"),
+            ("NoteLiteTests", "EnvironmentVariables", "DYLD_INSERT_LIBRARIES"),
+        ]
+        for version in (1, 2):
+            baseline = self.document(version)
+            for target_name in products.TARGETS:
+                self.target(baseline, version, target_name).update({
+                    "BlueprintProviderName": "NoteLite",
+                    "BlueprintProviderRelativePath": "../../checkout/apple/NoteLite.xcodeproj"})
+            self.validate(baseline)  # A rejected mutation must fail because of its runtime path.
+            for name, field, environment_key in runtime_fields:
+                for runtime_path in [str((self.debug / "NoteLite.app").resolve()),
+                                     "/Users/compiler/DerivedData/Debug-iphonesimulator/NoteLite.app",
+                                     "__TESTROOT__/../outside.app"]:
+                    document = copy.deepcopy(baseline)
+                    target = self.target(document, version, name)
+                    if environment_key is not None:
+                        target.setdefault(field, {})[environment_key] = runtime_path
+                    else:
+                        target[field] = [runtime_path] if field == "DependentProductPaths" else runtime_path
+                    original = copy.deepcopy(document)
+                    with self.subTest(version=version, field=field, environment_key=environment_key,
+                                      runtime_path=runtime_path), self.assertRaises(ValueError):
+                        self.validate(document)
+                    self.assertEqual(document, original, "A rejected plist must also remain unmodified")
+
+    def testOriginalDiagnosticsKeepExactBytesHashAndIdentityWithoutDumpingEnvironmentValues(self):
+        for version in (1, 2):
+            for encoding in (plistlib.FMT_XML, plistlib.FMT_BINARY):
+                with self.subTest(version=version, encoding=encoding):
+                    document = self.document(version)
+                    target = self.target(document, version, "NoteLiteTests")
+                    target["BlueprintProviderRelativePath"] = "../../checkout/apple/NoteLite.xcodeproj"
+                    target["EnvironmentVariables"]["OS_ACTIVITY_DT_MODE"] = "environment-value-fixture"
+                    target["CommandLineArguments"] = ["--ordinary-argument-fixture"]
+                    original_dictionary = copy.deepcopy(document)
+                    raw = plistlib.dumps(document, fmt=encoding)
+                    original = self.base / "build-original.xctestrun"
+                    original.write_bytes(raw)
+                    repo = self.base / ("diagnostics-" + str(version) + "-" + encoding.name)
+                    identity = {"sourceCommit": "a" * 40, "runId": "123456", "runAttempt": "2",
+                                "toolchain": {"xcodebuild": "Xcode 26.6"}, "sourceInputs": {}}
+                    capture = io.StringIO()
+                    with mock.patch("sys.stdout", capture):
+                        products.save_original_diagnostics(repo, original, raw, identity, document)
+                    directory = repo / "apple/build/SimulatorProductDiagnostics"
+                    self.assertEqual((directory / "original.xctestrun").read_bytes(), raw)
+                    self.assertEqual(original.read_bytes(), raw)
+                    self.assertEqual(document, original_dictionary)
+                    report_text = (directory / "original-xctestrun-identity.json").read_text(encoding="utf-8")
+                    report = json.loads(report_text)
+                    self.assertEqual(report["originalBytes"], len(raw))
+                    self.assertEqual(report["originalSHA256"], hashlib.sha256(raw).hexdigest())
+                    for key, value in identity.items():
+                        self.assertEqual(report[key], value)
+                    self.assertTrue(report["credentialEnvironmentCheckPassed"])
+                    self.assertIn("no native XCTest result", report["actualTestResults"])
+                    for output in (report_text, capture.getvalue()):
+                        self.assertNotIn("environment-value-fixture", output)
+                        self.assertNotIn("--ordinary-argument-fixture", output)
+                        self.assertNotIn("../../checkout/apple/NoteLite.xcodeproj", output)
+
+    def testCredentialEnvironmentRejectsOriginalArtifactBeforeCreatingItsDirectory(self):
+        mutations = [("DEEPSEEK_API_KEY", "dummy-fixture"), ("PASSWORD", "dummy-fixture"),
+                     ("AUTHORIZATION", "dummy-fixture"), ("BENIGN_SETTING", "Bearer dummy-fixture"),
+                     ("BENIGN_SETTING", "sk-" + "a" * 24),
+                     ("BENIGN_SETTING", "-----BEGIN RSA PRIVATE KEY-----"),
+                     ("NOTELITE_UNKNOWN_SETTING", "dummy-fixture"),
+                     ("NOTELITE_LIVE_ACCOUNT_ACCEPTANCE", "0"),
+                     ("NOTELITE_SIM_SWIFT_PATH", "/compiler/swift"),
+                     ("BENIGN_SETTING", 1), ("BENIGN_SETTING", "x" * 8193)]
+        for version in (1, 2):
+            baseline = self.document(version)
+            products.check_diagnostic_environment(baseline)
+            for environment in ["EnvironmentVariables", "TestingEnvironmentVariables",
+                                "UITargetAppEnvironmentVariables"]:
+                for name, value in mutations:
+                    with self.subTest(version=version, environment=environment, name=name):
+                        document = copy.deepcopy(baseline)
+                        self.target(document, version, "NoteLiteUITests").setdefault(environment, {})[name] = value
+                        original_dictionary = copy.deepcopy(document)
+                        raw = plistlib.dumps(document)
+                        original = self.base / "private-fixture.xctestrun"
+                        original.write_bytes(raw)
+                        repo = self.base / "rejected-diagnostic-repo"
+                        capture = io.StringIO()
+                        with mock.patch("sys.stdout", capture), self.assertRaises(ValueError):
+                            products.save_original_diagnostics(repo, original, raw, {}, document)
+                        self.assertFalse((repo / "apple/build/SimulatorProductDiagnostics").exists())
+                        self.assertEqual(capture.getvalue(), "", "Rejected diagnostics must print no values")
+                        self.assertEqual(original.read_bytes(), raw)
+                        self.assertEqual(document, original_dictionary)
+        # Format 2 may carry configuration-level settings outside either target dictionary.
+        document = self.document(2)
+        document["TestConfigurations"][0]["EnvironmentVariables"] = {"API_TOKEN": "dummy-fixture"}
+        raw = plistlib.dumps(document)
+        original = self.base / "private-configuration.xctestrun"
+        original.write_bytes(raw)
+        repo = self.base / "rejected-configuration-repo"
+        capture = io.StringIO()
+        with mock.patch("sys.stdout", capture), self.assertRaises(ValueError):
+            products.save_original_diagnostics(repo, original, raw, {}, document)
+        self.assertFalse((repo / "apple/build/SimulatorProductDiagnostics").exists())
+        self.assertEqual(capture.getvalue(), "")
+        self.assertEqual(original.read_bytes(), raw)
+
+    def testOversizeOrControlCharacterRuntimeDiagnosticsCannotCreateOriginalArtifact(self):
+        for version in (1, 2):
+            for field, value in [("DependentProductPaths", ["__TESTROOT__/runtime"] * 201),
+                                 ("DependentProductPaths", [1]),
+                                 ("TestHostPath", "x" * 2049),
+                                 ("TestHostPath", "__TESTROOT__/runtime\nprivate"),
+                                 ("TestHostPath", "__TESTROOT__/runtime\0private")]:
+                with self.subTest(version=version, field=field, value_type=type(value).__name__):
+                    document = self.document(version)
+                    self.target(document, version, "NoteLiteTests")[field] = value
+                    # Binary plists can represent NUL-bearing strings; XML writer rejects them itself.
+                    raw = plistlib.dumps(document, fmt=plistlib.FMT_BINARY)
+                    original = self.base / "oversize-fixture.xctestrun"
+                    original.write_bytes(raw)
+                    repo = self.base / "bounded-diagnostic-repo"
+                    with mock.patch("sys.stdout", io.StringIO()), self.assertRaises(ValueError):
+                        products.save_original_diagnostics(repo, original, raw, {}, document)
+                    self.assertFalse((repo / "apple/build/SimulatorProductDiagnostics").exists())
+                    self.assertEqual(original.read_bytes(), raw)
+
+    def testCredentialOrMalformedArgumentsCannotPublishOriginalArtifact(self):
+        for version in (1, 2):
+            baseline = self.document(version)
+            self.target(baseline, version, "NoteLiteUITests").update({
+                "CommandLineArguments": ["--ordinary-argument-fixture"],
+                "UITargetAppCommandLineArguments": []})
+            products.check_diagnostic_environment(baseline)
+            for field in ["CommandLineArguments", "UITargetAppCommandLineArguments"]:
+                for arguments in [["--api-key=dummy-fixture"], ["Bearer dummy-fixture"],
+                                  ["sk-" + "a" * 24], ["--password=dummy-fixture"],
+                                  "not-an-array", [1], ["x" * 8193], ["--ordinary"] * 201]:
+                    with self.subTest(version=version, field=field, argument_type=type(arguments).__name__):
+                        document = copy.deepcopy(baseline)
+                        self.target(document, version, "NoteLiteUITests")[field] = arguments
+                        raw = plistlib.dumps(document)
+                        original = self.base / "private-arguments.xctestrun"
+                        original.write_bytes(raw)
+                        repo = self.base / "rejected-arguments-repo"
+                        capture = io.StringIO()
+                        with mock.patch("sys.stdout", capture), self.assertRaises(ValueError):
+                            products.save_original_diagnostics(repo, original, raw, {}, document)
+                        self.assertFalse((repo / "apple/build/SimulatorProductDiagnostics").exists())
+                        self.assertEqual(capture.getvalue(), "")
+                        self.assertEqual(original.read_bytes(), raw)
+
+    def testExistingOriginalDiagnosticCannotBeOverwritten(self):
+        repo = self.base / "existing-diagnostic-repo"
+        directory = repo / "apple/build/SimulatorProductDiagnostics"
+        directory.mkdir(parents=True)
+        (directory / "original.xctestrun").write_bytes(b"preserve previous diagnostic")
+        document = self.document(1)
+        raw = plistlib.dumps(document)
+        original = self.base / "new-original.xctestrun"
+        original.write_bytes(raw)
+        with mock.patch("sys.stdout", io.StringIO()), self.assertRaises(ValueError):
+            products.save_original_diagnostics(repo, original, raw, {}, document)
+        self.assertEqual((directory / "original.xctestrun").read_bytes(), b"preserve previous diagnostic")
+        self.assertFalse((directory / "original-xctestrun-identity.json").exists())
+        self.assertEqual(original.read_bytes(), raw)
 
     def testDefaultFormatOneAndAbsentEmptySwiftPathsRemainValid(self):
         document = copy.deepcopy(self.targets)

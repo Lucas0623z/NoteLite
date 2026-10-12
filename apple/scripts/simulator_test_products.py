@@ -31,12 +31,14 @@ LEGAL_NAMES = {"AGPL-3.0-LICENSE.txt", "AUDIVERISCORE-NOTICE.md", "CORRESPONDING
                "AUDIVERISCORE-PROVENANCE.json", "SOURCE-OFFER.json"}
 MAX_MEMBERS = 100000
 MAX_BYTES = 16 * 1024 ** 3
+ENGINEERING_PATH_KEYS = {"BlueprintPath", "BlueprintProviderRelativePath"}
 INPUTS = ("practice-web/package-lock.json", "figma-ui/pnpm-lock.yaml", "apple/project.yml",
           "apple/NoteLite/NoteWiseProfiles.json", "apple/NoteWiseModels/MODEL-LOCK.json",
           "apple/NoteWiseModels/DIVIDE-NO-NAN-PATCH.json", "apple/NoteWiseModels/BASIC-PITCH-LICENSE",
           "apple/NoteWiseModels/THIRD-PARTY.txt", "apple/scripts/simulator_test_products.py",
           "apple/scripts/prepare-figma-ui.py", "apple/scripts/prepare-notewise-model.py",
           "apple/scripts/prepare-notewise-profiles.mjs", "apple/scripts/select-xcode.sh",
+          "apple/scripts/install-xcodegen.sh",
           "apple/release/legal_resources.py", ".github/workflows/apple-client.yml")
 
 
@@ -277,13 +279,19 @@ def validate_xctestrun(document: dict, products: Path, platforms: Path) -> dict:
             require(environment.get(key, "") == "", "Simulator Swift paths must remain empty")
         path_keys = []
         for key, value in target.items():
-            if key.endswith("Path") and key not in ("TestHostPath", "TestBundlePath", "BlueprintPath"):
-                _runtime_path(value, products, platforms, host)
+            if key.endswith("Path") and key not in ({"TestHostPath", "TestBundlePath"} | ENGINEERING_PATH_KEYS):
+                try:
+                    _runtime_path(value, products, platforms, host)
+                except ValueError as error:
+                    raise ValueError(name + "." + key + ": " + str(error)) from error
                 path_keys.append(key)
             elif key.endswith("Paths"):
                 require(isinstance(value, list), "Invalid runtime path list")
                 for path in value:
-                    _runtime_path(path, products, platforms, host)
+                    try:
+                        _runtime_path(path, products, platforms, host)
+                    except ValueError as error:
+                        raise ValueError(name + "." + key + ": " + str(error)) from error
                 path_keys.append(key)
             elif key.endswith("EnvironmentVariables"):
                 require(isinstance(value, dict), "Invalid test environment")
@@ -292,7 +300,10 @@ def validate_xctestrun(document: dict, products: Path, platforms: Path) -> dict:
                         require(isinstance(env_value, str), "Invalid dynamic loader environment")
                         for path in env_value.split(":"):
                             if path:
-                                _runtime_path(path, products, platforms, host)
+                                try:
+                                    _runtime_path(path, products, platforms, host)
+                                except ValueError as error:
+                                    raise ValueError(name + "." + key + "." + env_key + ": " + str(error)) from error
         if name == "NoteLiteUITests":
             application = _runtime_path(target.get("UITargetAppPath"), products, platforms, host)
             require(application.is_dir() and application.name == "NoteLite.app", "Missing UI target app")
@@ -313,13 +324,82 @@ def validate_xctestrun(document: dict, products: Path, platforms: Path) -> dict:
 def describe_xctestrun(document):
     """Small structural diagnostics, including when validation fails; no environment values."""
     version, targets = _targets(document)
+    def runtime_fields(target):
+        fields = {}
+        for key, value in target.items():
+            if key in ENGINEERING_PATH_KEYS or not key.endswith(("Path", "Paths")):
+                continue
+            values = value if isinstance(value, list) else [value]
+            require(len(values) <= 200 and all(isinstance(path, str) and len(path) <= 2048
+                    and not re.search(r"[\x00-\x1f\x7f]", path) for path in values),
+                    "Runtime path diagnostics must be bounded plain strings")
+            fields[key] = value
+        return fields
     return {"formatVersion": version, "targets": [
         {"name": name, "keys": sorted(target),
+         "runtimePathFields": runtime_fields(target),
+         "environmentKeySets": {key: sorted(value) for key, value in target.items()
+                                if key.endswith("EnvironmentVariables") and isinstance(value, dict)},
          "environmentKeys": sorted(target.get("EnvironmentVariables", {}))
          if isinstance(target.get("EnvironmentVariables"), dict) else [],
          "liveAccountAcceptance": target.get("EnvironmentVariables", {}).get("NOTELITE_LIVE_ACCOUNT_ACCEPTANCE") == "1"
          if isinstance(target.get("EnvironmentVariables"), dict) else False}
         for name, target in targets]}
+
+
+def check_diagnostic_environment(document):
+    """Do not publish an original plist carrying credential environment settings."""
+    _targets(document)
+    def dictionaries(value):
+        if isinstance(value, dict):
+            yield value
+            for item in value.values():
+                yield from dictionaries(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from dictionaries(item)
+    credential_key = re.compile(r"PASSWORD|SECRET|TOKEN|CREDENTIAL|AUTHORIZATION|PRIVATE.?KEY|API.?KEY|ACCESS.?KEY", re.I)
+    credential_value = re.compile(r"-----BEGIN[^\n]*PRIVATE KEY-----|\bbearer\s+\S+|\bsk-[A-Za-z0-9]{20,}", re.I)
+    for target in dictionaries(document):
+        for key in ("CommandLineArguments", "UITargetAppCommandLineArguments"):
+            arguments = target.get(key, [])
+            require(isinstance(arguments, list) and len(arguments) <= 200
+                    and all(isinstance(value, str) and len(value) <= 8192
+                            and not credential_key.search(value) and not credential_value.search(value)
+                            for value in arguments),
+                    "Credential-like or invalid arguments are forbidden in original plist diagnostics")
+        for key, environment in target.items():
+            if not key.endswith("EnvironmentVariables"):
+                continue
+            require(isinstance(environment, dict) and len(environment) <= 200, "Invalid diagnostic environment")
+            for name, value in environment.items():
+                require(isinstance(name, str) and len(name) <= 256 and not re.search(r"[\x00-\x1f\x7f]", name)
+                        and isinstance(value, str) and len(value) <= 8192
+                        and not credential_key.search(name) and not credential_value.search(value),
+                        "Credential-like environment is forbidden in original plist diagnostics")
+                if name.startswith("NOTELITE_"):
+                    require(name in {"NOTELITE_LIVE_ACCOUNT_ACCEPTANCE", "NOTELITE_SIM_SWIFT_PATH"},
+                            "Unexpected application environment is forbidden in plist diagnostics")
+                    require(value == ("1" if name == "NOTELITE_LIVE_ACCOUNT_ACCEPTANCE" else ""),
+                            "Unexpected application environment value in plist diagnostics")
+
+
+def save_original_diagnostics(repo, original, raw, identity, document):
+    check_diagnostic_environment(document)
+    structure = describe_xctestrun(document)
+    diagnostics = repo / "apple/build/SimulatorProductDiagnostics"
+    no_link_ancestors(diagnostics)
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    destination = diagnostics / "original.xctestrun"
+    require(not destination.exists() and not destination.is_symlink(), "Refusing to replace original plist diagnostics")
+    destination.write_bytes(raw)
+    report = {**identity, "originalFilename": original.name,
+              "originalBytes": len(raw), "originalSHA256": hashlib.sha256(raw).hexdigest(),
+              "originalXctestrunStructure": structure,
+              "credentialEnvironmentCheckPassed": True,
+              "actualTestResults": "diagnostics only; no native XCTest result generated"}
+    (diagnostics / "original-xctestrun-identity.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"originalXctestrunStructure": structure}, indent=2), flush=True)
 
 
 def assert_identity(manifest: dict, expected: dict) -> None:
@@ -394,8 +474,11 @@ def package(repo, archive):
     original = candidates[0]
     products = original.parent
     platforms = Path(identity["toolchain"]["developerDirectory"]) / "Platforms"
-    document = plistlib.loads(original.read_bytes())
-    print(json.dumps({"originalXctestrunStructure": describe_xctestrun(document)}, indent=2), flush=True)
+    require(original.is_file() and not original.is_symlink() and original.stat().st_size <= 2 * 1024 ** 2,
+            "Original xctestrun must be a bounded ordinary file")
+    raw = original.read_bytes()
+    document = plistlib.loads(raw)
+    save_original_diagnostics(repo, original, raw, identity, document)
     plan = validate_xctestrun(document, products, platforms)
     resources = verify_resources(repo, products, plan)
     inventory = tree_inventory(products)
