@@ -133,7 +133,7 @@ Apple 当前标准 EULA 有设备/使用规则、转让/分发限制，同时在
 
 本轮审计阅读了实际已有 Apple 1.0.0 Build 14 IPA 和 Windows `b262b02` 的 5.13.1 包；Windows `runtime-ready.json` 是旧提交的实际运行 smoke 证据，不能当作新融合代码的实跑。目录存在、锁文件有名称、测试 mock 返回成功，都不等于该模型正在目标设备中运行。
 
-本轮新增 release 法律资源门禁测试，在 Windows 执行 20 项：19 项通过，1 项依赖 macOS 真实 codesign 的测试按平台跳过。新增用例覆盖实际 app 缺失/篡改许可证和 notice、缩水为 URL、源/包一起被改、错误源码 commit/archive、源码包改变、陈旧 offer 与 dirty source。测试中的模拟 app 只证明门禁逻辑，不能代替 Xcode 实际资源入包、真机听音或发行合法性的验收。
+本轮新增 release 法律资源门禁测试，收尾在 Windows 执行 21 项：20 项通过，1 项依赖 macOS 真实 codesign 的测试按平台跳过。新增用例覆盖实际 app 缺失/篡改许可证和 notice、缩水为 URL、源/包一起被改、错误源码 commit/archive、源码包改变、陈旧 offer 与 dirty source，以及许可与录音尾部实际测试叶的必测识别。测试中的模拟 app 只证明门禁逻辑，不能代替 Xcode 实际资源入包、真机听音或发行合法性的验收。
 
 所有后续报告应同时列出 source SHA、模型 SHA、平台/机型、是否真实音频、输入来源和不通过/未测试项目。Apple CI 应在同一个提交上实际构建 simulator/device/macOS，并检查 actual bundle；全乐器真人录音和 TestFlight 实机验证仍需要其自身证据。
 
