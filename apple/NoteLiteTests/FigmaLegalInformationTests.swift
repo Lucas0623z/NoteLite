@@ -47,11 +47,22 @@ final class FigmaLegalInformationTests: XCTestCase {
     func testMalformedForeignMissingOversizeAndLinkedResourcesAreRejected() throws {
         let root = try fixture(), legal = root.appendingPathComponent("Legal")
         let offer = legal.appendingPathComponent("SOURCE-OFFER.json"), original = try Data(contentsOf: offer)
-        for data in [Data("{}".utf8), Data("[]".utf8), Data([0xff]), Data(repeating: 65, count: 256 * 1024 + 1),
-                     Data(String(data: original, encoding: .utf8)!.replacingOccurrences(of: "Lucas0623z", with: "foreign").utf8),
-                     Data(String(data: original, encoding: .utf8)!.replacingOccurrences(of: "/archive/", with: "/tree/").utf8)] {
+        func changedField(_ key: String, _ value: String) throws -> Data {
+            var document = try XCTUnwrap(try JSONSerialization.jsonObject(with: original) as? [String: Any])
+            document[key] = value
+            return try JSONSerialization.data(withJSONObject: document)
+        }
+        // Foundation may escape URL slashes. Mutate parsed fields, never the
+        // serialized spelling of "/archive/", which can leave valid JSON intact.
+        let malformed: [(String, Data)] = [
+            ("missing fields", Data("{}".utf8)), ("array", Data("[]".utf8)), ("invalid UTF-8", Data([0xff])),
+            ("oversize offer", Data(repeating: 65, count: 256 * 1024 + 1)),
+            ("foreign repository", try changedField("repository", "https://github.com/foreign/NoteLite")),
+            ("tree instead of archive", try changedField("sourceArchiveURL", "https://github.com/Lucas0623z/NoteLite/tree/\(commit).tar.gz"))]
+        for (label, data) in malformed {
+            XCTAssertNotEqual(data, original, "The \(label) fixture must actually differ from the valid offer")
             try data.write(to: offer)
-            XCTAssertThrowsError(try FigmaLegalInformation.read(resources: root))
+            XCTAssertThrowsError(try FigmaLegalInformation.read(resources: root), label)
         }
         try original.write(to: offer)
         let notice = legal.appendingPathComponent("AUDIVERISCORE-NOTICE.md")
@@ -63,6 +74,28 @@ final class FigmaLegalInformationTests: XCTestCase {
         try Data("not a bundled public notice".utf8).write(to: external)
         try FileManager.default.createSymbolicLink(at: notice, withDestinationURL: external)
         XCTAssertThrowsError(try FigmaLegalInformation.read(resources: root))
+    }
+
+    func testEscapedAndUnescapedJSONSlashesKeepTheSameStrictMetadataValidation() throws {
+        let root = try fixture(), offer = root.appendingPathComponent("Legal").appendingPathComponent("SOURCE-OFFER.json")
+        let document = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: offer)) as? [String: Any])
+        let encodings: [JSONSerialization.WritingOptions] = [[], [.withoutEscapingSlashes]]
+        for options in encodings {
+            let original = try JSONSerialization.data(withJSONObject: document, options: options)
+            try original.write(to: offer)
+            XCTAssertEqual(try FigmaLegalInformation.read(resources: root)["sourceCommit"] as? String, commit)
+            for (field, replacement) in [("repository", "https://github.com/foreign/NoteLite"),
+                                          ("sourceArchiveURL", "https://github.com/Lucas0623z/NoteLite/tree/\(commit).tar.gz")] {
+                var malformed = document
+                malformed[field] = replacement
+                let data = try JSONSerialization.data(withJSONObject: malformed, options: options)
+                XCTAssertNotEqual(data, original, field)
+                let decoded = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+                XCTAssertEqual(decoded[field] as? String, replacement, "Mutation must target the decoded metadata")
+                try data.write(to: offer)
+                XCTAssertThrowsError(try FigmaLegalInformation.read(resources: root), field)
+            }
+        }
     }
 
     func testOnlyFixedResearchAndExactCommitSourceArchiveCanOpenExternally() {
