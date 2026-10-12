@@ -15,7 +15,7 @@ final class NoteWiseStopTailTests: XCTestCase {
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 22050))
         buffer.frameLength = buffer.frameCapacity
         let values = try XCTUnwrap(buffer.floatChannelData?[0])
-        for index in 0..<Int(buffer.frameLength) { values[index] = Float(.2 * sin(2 * Double.pi * 440 * Double(index) / 44100)) }
+        for index in 0..<Int(buffer.frameLength) { values[index] = Float(0.2 * sin(2 * Double.pi * 440 * Double(index) / 44100)) }
         return buffer
     }
     private func payload(_ id: String, kind: String = "microphone") -> [String: Any] {

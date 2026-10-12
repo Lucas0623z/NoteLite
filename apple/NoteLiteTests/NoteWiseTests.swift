@@ -104,7 +104,7 @@ final class NoteWiseTests:XCTestCase {
             let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate / 10)))
             buffer.frameLength = buffer.frameCapacity
             let samples = try XCTUnwrap(buffer.floatChannelData?[0])
-            for index in 0..<Int(buffer.frameLength) { samples[index] = Float(.2 * sin(2 * Double.pi * 440 * Double(index) / rate)) }
+            for index in 0..<Int(buffer.frameLength) { samples[index] = Float(0.2 * sin(2 * Double.pi * 440 * Double(index) / rate)) }
             input.onPCM?(buffer, AVAudioTime(sampleTime: 0, atRate: rate))
         }
         let scope = "https://124.221.211.156|guest"
