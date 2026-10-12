@@ -717,9 +717,17 @@ final class FigmaShellUITests: XCTestCase {
     private func relaunchLocalScore(_ app: XCUIApplication, checkpoint: String) throws -> XCUIApplication {
         let close = button("‹ 我的曲谱", in: app)
         makeReturnNavigationHittable(close, in: app)
-        XCTAssertTrue(close.isHittable)
-        close.tap()
-        XCTAssertTrue(button("查看曲谱", in: app).waitForExistence(timeout: 10))
+        _ = try waitForNativeInteractionGeometry("‹ 我的曲谱", in: app,
+                                                  checkpoint: "\(checkpoint)-before-close-tap")
+        let currentClose = button("‹ 我的曲谱", in: app)
+        XCTAssertTrue(currentClose.isHittable)
+        currentClose.tap()
+        let returnedToLibrary = button("查看曲谱", in: app).waitForExistence(timeout: 10)
+        if !returnedToLibrary {
+            attachHierarchy(app, name: "\(checkpoint)-return-to-library-missing-hierarchy")
+            capture(app, name: "\(checkpoint)-return-to-library-missing")
+        }
+        XCTAssertTrue(returnedToLibrary)
         return try relaunchFromLibrary(app, checkpoint: checkpoint)
     }
 
