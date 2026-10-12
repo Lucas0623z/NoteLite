@@ -12,6 +12,14 @@ static void note(nl_events *e, const char *type, double at, uint64_t sample, con
     char offset[64] = "null";
     if (off) snprintf(offset, sizeof(offset), "%.6f", maxd(e->onset_ms, at));
     double frequency = off ? e->a4 * pow(2, (e->midi - 69 + cents / 100) / 12) : e->last_frequency;
+    if (e->callback) {
+        nl_note_event value = { type, reason, e->id, sample, e->midi, !off,
+            cents, frequency, confidence, e->timing_confidence, e->onset_ms,
+            off ? maxd(e->onset_ms, at) : NAN,
+            strcmp(type, "note-on") == 0 ? 0 : maxd(0, at - e->onset_ms), at };
+        e->callback(e->callback_context, &value);
+        return;
+    }
     printf("{\"type\":\"%s\",\"schemaVersion\":1,\"id\":\"n%llu\",\"midi\":%d,\"cents\":%.6f,\"frequency\":%.8f,\"confidence\":%.6f,\"timingConfidence\":%.3f,\"voiced\":%s,\"onsetMs\":%.6f,\"offsetMs\":%s,\"durationMs\":%.6f,\"timeMs\":%.6f,\"sampleCount\":%llu,\"reason\":\"%s\"}\n",
         type, (unsigned long long)e->id, e->midi, cents, frequency, confidence,
         e->timing_confidence, off ? "false" : "true", e->onset_ms, offset,
@@ -23,6 +31,15 @@ static void uncertainty(nl_events *e, double at, uint64_t sample, int close)
 {
     char offset[64] = "null";
     if (close) snprintf(offset, sizeof(offset), "%.6f", maxd(e->uncertainty_ms, at));
+    if (e->callback) {
+        nl_note_event value = { "uncertainty", e->uncertainty_reason, e->uncertainty_id,
+            sample, -1, -1, NAN, e->last_frequency, e->last_confidence, 0,
+            e->uncertainty_ms, close ? maxd(e->uncertainty_ms, at) : NAN,
+            close ? maxd(0, at - e->uncertainty_ms) : 0, at };
+        e->callback(e->callback_context, &value);
+        e->uncertainty = !close;
+        return;
+    }
     printf("{\"type\":\"uncertainty\",\"schemaVersion\":1,\"id\":\"u%llu\",\"midi\":null,\"cents\":null,\"frequency\":%.8f,\"confidence\":%.6f,\"voiced\":null,\"onsetMs\":%.6f,\"offsetMs\":%s,\"durationMs\":%.6f,\"timeMs\":%.6f,\"sampleCount\":%llu,\"reason\":\"%s\"}\n",
         (unsigned long long)e->uncertainty_id, e->last_frequency, e->last_confidence,
         e->uncertainty_ms, offset, close ? maxd(0, at - e->uncertainty_ms) : 0,
@@ -34,6 +51,9 @@ void nl_events_init(nl_events *e, double a4)
 {
     memset(e, 0, sizeof(*e)); e->a4 = a4; e->candidate = -1;
 }
+
+void nl_events_set_callback(nl_events *e, nl_event_callback callback, void *context)
+{ e->callback = callback; e->callback_context = context; }
 
 void nl_events_push(nl_events *e, const nl_pitch_frame *f)
 {

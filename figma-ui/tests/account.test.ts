@@ -1,0 +1,188 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { AccountClient, accountErrorMessage, authenticationIssue, passwordIssue } from "../src/app/account.ts";
+import { CloudError } from "../src/app/cloud.ts";
+
+const owner = "11111111-1111-4111-8111-111111111111";
+const identity = { authenticated: true, userId: owner, username: "tester", sessionId: owner, deviceName: "Browser", expiresAt: "2026-11-01T00:00:00Z", kind: "browser" };
+test("login verifies existing short credentials while new registrations require 15 Unicode characters", async () => {
+  const calls: { path: string; body: unknown }[] = [];
+  const client = new AccountClient(async (path, init = {}) => { calls.push({ path: String(path), body: JSON.parse(init.body as string) }); return new Response(JSON.stringify(identity)); }, () => false, undefined, () => {});
+  await client.authenticate("login", "  Lucas  ", "synthetic");
+  assert.equal(calls[0].path, "/api/account/login");
+  assert.equal((calls[0].body as { username: string }).username, "Lucas");
+  await assert.rejects(client.authenticate("register", "Lucas", "synthetic"), /15 个字符/);
+  assert.equal(calls.length, 1);
+  assert.equal(authenticationIssue("register", "Lucas", "🎵".repeat(15)), "");
+  assert.match(authenticationIssue("register", "Lucas", "🎵".repeat(14)), /14 个/);
+  assert.match(passwordIssue(""), /请输入当前密码/);
+  assert.match(passwordIssue("a".repeat(257)), /256/);
+  assert.match(passwordIssue("\uD800"), /有效文字/);
+});
+
+test("account feedback preserves credential and username errors without OMR substitutions", () => {
+  assert.match(accountErrorMessage(new CloudError("用户名或密码不正确。", 401)), /用户名或密码/);
+  assert.equal(accountErrorMessage(new CloudError("用户名已被使用。", 409)), "用户名已被使用。");
+  assert.match(accountErrorMessage(new CloudError("unknown", undefined, "write_status_unknown")), /账户操作结果/);
+});
+
+test("an expired native account clears JS identity and notifies its dependents", async () => {
+  let expired = false, changed = 0;
+  const client = new AccountClient(() => { throw new Error("browser transport forbidden"); }, () => true, (async () => {
+    if (expired) throw new CloudError("登录已失效，请重新登录。", 401);
+    return { ...identity, kind: "native" };
+  }) as never, () => { changed++; });
+  await client.me(); expired = true;
+  assert.equal(await client.me(), null); assert.equal(client.current, null); assert.equal(changed, 1);
+  assert.equal(await client.me(), null); assert.equal(changed, 1);
+});
+
+test("failed authentication does not sign out a different valid existing session", async () => {
+  const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { error: "用户名或密码不正确。" }), { status: String(path).endsWith("/me") ? 200 : 401 }), () => false, undefined, () => {});
+  await client.me(); await assert.rejects(client.authenticate("login", "other", "synthetic"), /用户名或密码/);
+  assert.equal(client.current?.userId, owner);
+});
+
+test("revoking one's current session clears JS identity while another session does not", async () => {
+  let changed = 0;
+  const currentSession = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, sessionId: currentSession, csrf: "proof" } : { revoked: true })), () => false, undefined, () => { changed++; });
+  await client.me(); await client.revoke("22222222-2222-4222-8222-222222222222");
+  assert.equal(client.current?.userId, owner); assert.equal(changed, 0);
+  await client.revoke(currentSession.toUpperCase()); assert.equal(client.current, null); assert.equal(changed, 1);
+});
+
+test("explicit logout treats expired identity as signed out but retains it on unavailable service", async () => {
+  for (const status of [401, 503]) {
+    let changed = 0;
+    const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { error: "unavailable" }), { status: String(path).endsWith("/me") ? 200 : status }), () => false, undefined, () => { changed++; });
+    await client.me();
+    if (status === 401) { await client.logout(); assert.equal(client.current, null); assert.equal(changed, 1); }
+    else { await assert.rejects(client.logout()); assert.equal(client.current?.userId, owner); assert.equal(changed, 0); }
+  }
+});
+
+test("malformed successful authentication cannot manufacture a signed-in identity", async () => {
+  for (const value of [null, {}, { ...identity, authenticated: false }, { ...identity, userId: "foreign" }]) {
+    const client = new AccountClient(async () => new Response(JSON.stringify(value)), () => false, undefined, () => {});
+    await assert.rejects(client.authenticate("login", "tester", "synthetic")); assert.equal(client.current, null);
+  }
+});
+
+test("browser account writes use same-origin cookie, CSRF and expected owner; never a Bearer token", async () => {
+  const calls: { path: string; init: RequestInit }[] = [];
+  const client = new AccountClient(async (path, init = {}) => { calls.push({ path: String(path), init }); return new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { id: owner, etag: '"1"' })); }, () => false, undefined, () => {});
+  await client.me(); await client.createScore("练习", "<score-partwise/>", owner);
+  const headers = new Headers(calls[1].init.headers);
+  assert.equal(headers.get("X-NoteLite-CSRF"), "proof"); assert.equal(headers.get("X-NoteLite-Expected-User"), owner);
+  assert.equal(headers.has("Authorization"), false); assert.equal(calls[1].init.credentials, "same-origin");
+  assert.equal(JSON.parse(calls[1].init.body as string).requestId, owner);
+  assert.equal(Object.hasOwn(client.current!, "csrf"), false);
+});
+test("native account requests stay structured and public identity never retains a returned token", async () => {
+  const calls: unknown[] = [];
+  const bridge = async (action: string, payload: unknown) => { calls.push({ action, payload }); return { ...identity, kind: "native", token: "must-not-persist" }; };
+  const client = new AccountClient(() => { throw new Error("Browser fetch forbidden"); }, () => true, bridge as never, () => {});
+  await client.authenticate("login", "tester", "example-not-a-real-password"); await client.history();
+  assert.equal(Object.hasOwn(client.current!, "token"), false);
+  assert.deepEqual(calls[1], { action: "account/request", payload: { path: "/history?limit=200", method: "GET", response: "json", expectedUserId: owner } });
+});
+test("an expired account clears its identity; an unavailable service is reported instead of empty success", async () => {
+  let status = 200;
+  const client = new AccountClient(async () => new Response(JSON.stringify(status === 200 ? identity : { error: "unavailable" }), { status }), () => false, undefined, () => {});
+  await client.me(); status = 401; assert.equal(await client.me(), null); assert.equal(client.current, null);
+  status = 503; await assert.rejects(client.me(), (error) => error instanceof CloudError && error.status === 503);
+});
+test("personal score saves carry the actual version and cannot turn a conflict into a successful overwrite", async () => {
+  const writes: Headers[] = [];
+  const client = new AccountClient(async (path, init = {}) => {
+    if (String(path).endsWith("/me")) return new Response(JSON.stringify({ ...identity, csrf: "proof" }));
+    writes.push(new Headers(init.headers)); return new Response(JSON.stringify({ error: "Changed on another device" }), { status: 409 });
+  }, () => false, undefined, () => {});
+  await assert.rejects(client.updateScore({ id: owner, title: "曲谱", revision: 2, updatedAt: "", etag: '"snapshot:2"' }, "<score-partwise/>"), (error) => error instanceof CloudError && error.status === 409);
+  assert.equal(writes.length, 1); assert.equal(writes[0].get("If-Match"), '"snapshot:2"');
+});
+
+test("a late identity or expired response cannot overwrite a newer login", async () => {
+  const other = { ...identity, userId: "22222222-2222-4222-8222-222222222222", username: "new-account" };
+  let completeOld: (value: Response) => void = () => {};
+  const oldResponse = new Promise<Response>((resolve) => { completeOld = resolve; });
+  const client = new AccountClient(async (path) => String(path).endsWith("/me") ? oldResponse : new Response(JSON.stringify({ ...other, csrf: "new-proof" })), () => false, undefined, () => {});
+  const oldMe = client.me();
+  await client.authenticate("login", other.username, "example-not-a-real-password");
+  completeOld(new Response(JSON.stringify({ error: "Expired" }), { status: 401 }));
+  assert.equal((await oldMe)?.userId, other.userId);
+  assert.equal(client.current?.userId, other.userId);
+});
+
+test("a write waiting for session discovery is stopped when the account changes", async () => {
+  let completeOld: (value: Response) => void = () => {};
+  const oldResponse = new Promise<Response>((resolve) => { completeOld = resolve; });
+  const calls: string[] = [];
+  const other = { ...identity, userId: "22222222-2222-4222-8222-222222222222" };
+  const client = new AccountClient(async (path) => {
+    calls.push(String(path));
+    return String(path).endsWith("/me") ? oldResponse : new Response(JSON.stringify({ ...other, csrf: "new-proof" }));
+  }, () => false, undefined, () => {});
+  const oldWrite = client.createScore("原账户谱子", "<score-partwise/>");
+  const rejection = assert.rejects(oldWrite, (error) => error instanceof CloudError && error.status === 409);
+  await client.authenticate("login", "new-account", "example-not-a-real-password");
+  completeOld(new Response(JSON.stringify({ ...identity, csrf: "old-proof" })));
+  await rejection;
+  assert.equal(calls.some((path) => path.endsWith("/scores")), false);
+  assert.equal(client.current?.userId, other.userId);
+});
+
+test("analysis retains its request identity and uses only the authenticated account route", async () => {
+  const calls: { path: string; init: RequestInit }[] = [];
+  const client = new AccountClient(async (path, init = {}) => {
+    calls.push({ path: String(path), init });
+    return new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { generationStatus: "fallback" }));
+  }, () => false, undefined, () => {});
+  await client.me();
+  await client.analyzePractice([owner], owner);
+  assert.equal(calls[1].path, "/api/account/practice-analysis");
+  assert.deepEqual(JSON.parse(calls[1].init.body as string), { requestId: owner, eventIds: [owner] });
+  assert.equal(new Headers(calls[1].init.headers).get("X-NoteLite-Expected-User"), owner);
+});
+
+
+test("permanent deletion requires the exact accepted response and clears only the authenticated owner's local data", async () => {
+  const deletedIdentity = { ...identity, userId: "55555555-5555-4555-8555-555555555555" };
+  const purged: string[] = [], calls: { path: string; init: RequestInit }[] = [];
+  const client = new AccountClient(async (path, init = {}) => {
+    calls.push({ path: String(path), init });
+    return new Response(JSON.stringify(String(path).endsWith("/me") ? { ...deletedIdentity, csrf: "proof" } : { authenticated: false, accountDeleted: true, deletionRequested: true, deleted: false, status: "pending" }), { status: String(path).endsWith("/me") ? 200 : 202 });
+  }, () => false, undefined, () => {}, async (owner) => { purged.push(owner); });
+  await client.me();
+  const result = await client.deleteAccount("synthetic deletion password");
+  assert.equal(result.status, "pending"); assert.equal(client.current, null);
+  assert.deepEqual(purged, [deletedIdentity.userId]);
+  assert.equal(calls[1].init.method, "DELETE");
+  assert.equal(new Headers(calls[1].init.headers).get("X-NoteLite-Expected-User"), deletedIdentity.userId);
+  assert.deepEqual(JSON.parse(calls[1].init.body as string), { password: "synthetic deletion password", confirmation: "DELETE_ACCOUNT" });
+});
+test("wrong password, unavailable service and malformed success cannot remove identity or purge data", async () => {
+  for (const result of [{ status: 403, body: { error: "wrong password" } }, { status: 503, body: { error: "unavailable" } }, { status: 200, body: { authenticated: false } }, { status: 200, body: { authenticated: 0, accountDeleted: 1, deletionRequested: 1, deleted: 1, status: "completed" } }]) {
+    let purged = false;
+    const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : result.body), { status: String(path).endsWith("/me") ? 200 : result.status }), () => false, undefined, () => {}, async () => { purged = true; });
+    await client.me(); await assert.rejects(client.deleteAccount("synthetic deletion password"));
+    assert.equal(client.current?.userId, owner); assert.equal(purged, false);
+  }
+});
+test("a late accepted deletion purges its original account without signing out a newly authenticated owner", async () => {
+  let finish: (result: Response) => void = () => {};
+  const reply = new Promise<Response>((resolve) => { finish = resolve; });
+  const nextIdentity = { ...identity, userId: "66666666-6666-4666-8666-666666666666" };
+  const purged: string[] = [];
+  const client = new AccountClient(async (path) => String(path).endsWith("/account") ? reply : new Response(JSON.stringify({ ...(String(path).endsWith("/login") ? nextIdentity : identity), csrf: "proof" })), () => false, undefined, () => {}, async (owner) => { purged.push(owner); });
+  await client.me(); const deleting = client.deleteAccount("synthetic deletion password");
+  await client.authenticate("login", "other", "synthetic long password");
+  finish(new Response(JSON.stringify({ authenticated: false, accountDeleted: true, deletionRequested: true, deleted: true, status: "completed" })));
+  await deleting; assert.equal(client.current?.userId, nextIdentity.userId); assert.deepEqual(purged, [owner]);
+});
+test("accepted deletion exposes actual local cleanup failure while retaining the server's deleted state", async () => {
+  const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { authenticated: false, accountDeleted: true, deletionRequested: true, deleted: true, status: "completed" })), () => false, undefined, () => {}, async () => { throw new Error("Synthetic open local file"); });
+  await client.me(); const result = await client.deleteAccount("synthetic deletion password");
+  assert.equal(result.localCleanupPending, true); assert.equal(result.accountDeleted, true); assert.equal(client.current, null);
+});

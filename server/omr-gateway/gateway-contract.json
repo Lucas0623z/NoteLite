@@ -1,0 +1,43 @@
+{
+  "status": "implemented_locally_verified_not_publicly_deployed",
+  "upstream": "http://127.0.0.1:8765",
+  "required_public_transport": "https_with_trusted_certificate",
+  "client_credentials": {
+    "native": "per_device_bearer_from_origin_scoped_keychain",
+    "browser": "httponly_secure_samesite_session_with_csrf_header",
+    "shared_owner_across_personal_devices": true,
+    "embedded_upstream_administrator_token": false
+  },
+  "upstream_headers": {
+    "Host": "127.0.0.1:8765",
+    "Authorization": "server_read_upstream_token_never_returned_to_client",
+    "Origin": "strip_only_after_public_origin_validation",
+    "Content-Length": "buffered_request_actual_byte_length"
+  },
+  "routes": [
+    {"method":"GET","path":"/api/health","authentication":false,"ownership":false},
+    {"method":"POST","path":"/api/jobs","authentication":true,"ownership":"record_created_job_owner","maxBodyBytes":33554432},
+    {"method":"GET","path":"/api/jobs","authentication":true,"ownership":"filter_to_principal_jobs"},
+    {"method":"GET","path":"/api/jobs/{uuid}","authentication":true,"ownership":true},
+    {"method":"GET","path":"/api/jobs/{uuid}/score/notes","authentication":true,"ownership":true},
+    {"method":"GET","path":"/api/jobs/{uuid}/score/musicxml","authentication":true,"ownership":true},
+    {"method":"GET","path":"/api/jobs/{uuid}/score/midi","authentication":true,"ownership":true},
+    {"method":"GET","path":"/api/jobs/{uuid}/original","authentication":true,"ownership":true},
+    {"method":"GET","path":"/api/jobs/{uuid}/project/omr","authentication":true,"ownership":true},
+    {"method":"GET","path":"/api/jobs/{uuid}/log","authentication":true,"ownership":true},
+    {"method":"PATCH","path":"/api/jobs/{uuid}/score/notes","authentication":true,"ownership":true,"maxBodyBytes":131072,"requiredPayload":["revision","score","edits"]},
+    {"method":"PUT","path":"/api/jobs/{uuid}/score","authentication":true,"ownership":true,"maxBodyBytes":10485760,"requiredHeader":"If-Match"}
+  ],
+  "unsupported_methods": ["DELETE","CONNECT","TRACE"],
+  "error_behaviors": {
+    "unknown_or_other_owner_job": 404,
+    "missing_or_invalid_device_credential": 401,
+    "untrusted_origin_or_invalid_csrf": 403,
+    "stale_revision": 409,
+    "oversize_upload": 413,
+    "unrecognized_media": 415,
+    "queue_full": 503
+  },
+  "preview_condition": "local_preview_may_render_recorded_real_engine_output_but_must_not_claim_live_remote_connectivity",
+  "actual_cloud_acceptance_required": true
+}

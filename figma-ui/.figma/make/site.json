@@ -1,0 +1,10 @@
+{
+  "description": "This app offers music enthusiasts a platform to access personal and official sheet music, enhancing their musical experience with a sleek black and white interface.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

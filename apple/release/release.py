@@ -193,6 +193,7 @@ REQUIRED_ENGINE_CLASSES = {
     "org/bytedeco/leptonica/global/leptonica.class",
 }
 PRACTICE_SOURCE = Path(__file__).resolve().parents[2] / "app/res/practice"
+REPO_SOURCE = Path(__file__).resolve().parents[2]
 
 
 def digest(path):
@@ -255,6 +256,32 @@ def verify_embedded_cpp_flags(value):
     return flags
 
 
+def verify_embedded_bridge(project_directory, evidence, options):
+    """Accept only the exact generated bridge to both original native APIs."""
+    combined = contained_file(project_directory, "Generated/NoteLiteEmbedded-Bridging-Header.h")
+    require(Path(options.get("SWIFT_OBJC_BRIDGING_HEADER", "")).resolve() == combined,
+            "The embedded project uses an unexpected combined native bridge header.")
+    require(contained_file(evidence, "NoteLiteEmbedded-Bridging-Header.h").read_bytes() == combined.read_bytes(),
+            "The combined native bridge differs from its build evidence.")
+    for name in ("EmbeddedJVM.h", "EmbeddedJVM.mm"):
+        copied = contained_file(project_directory, "EmbeddedRuntime/" + name)
+        original = contained_file(REPO_SOURCE, "apple/EmbeddedOMRRuntime/Sources/" + name)
+        require(copied.read_bytes() == original.read_bytes(),
+                "The embedded JNI bridge differs from its original source: " + name + ".")
+    notewise = contained_file(REPO_SOURCE, "apple/NoteLite/NoteWise-Bridging-Header.h")
+    # The combined header must include the real repository header, not a
+    # substituted file that merely declares similarly named C functions.
+    contained_file(REPO_SOURCE, "apple/NoteLite/NoteWiseDSP.h")
+    contained_file(REPO_SOURCE, "native/audio/events.h")
+    require(notewise.read_text(encoding="utf-8") == '#include "NoteWiseDSP.h"\n',
+            "The original NoteWise bridge no longer matches its native API contract.")
+    expected = ('#pragma once\n#include "../EmbeddedRuntime/EmbeddedJVM.h"\n#include '
+                + json.dumps(notewise.as_posix(), ensure_ascii=False) + '\n').encode("utf-8")
+    require(combined.read_bytes() == expected,
+            "The combined native bridge must include both original JNI and NoteWise headers exactly.")
+    return combined
+
+
 def embedded_build():
     """Resolve only a verified device composition; there is no baseline fallback."""
     raw = os.environ.get("RELEASE_EMBEDDED_BUILD", "")
@@ -280,11 +307,8 @@ def embedded_build():
             "The embedded project does not enable the production engine.")
     require(target.get("configFiles", {}).get("Release") == "Generated/native-libraries.xcconfig",
             "The Release target does not use the composed native libraries.")
-    bridge = contained_file(project_directory, "EmbeddedRuntime/EmbeddedJVM.h")
-    contained_file(project_directory, "EmbeddedRuntime/EmbeddedJVM.mm")
+    bridge = verify_embedded_bridge(project_directory, evidence, options)
     contained_file(project_directory, "Generated/native-symbols.c")
-    require(Path(options.get("SWIFT_OBJC_BRIDGING_HEADER", "")).resolve() == bridge,
-            "The embedded project uses an unexpected JNI bridge header.")
     inventory_file = contained_file(evidence, "app-inventory.json")
     inventory = json.loads(inventory_file.read_text(encoding="utf-8"))
     require(inventory.get("sdk") == "iphoneos" and inventory.get("architecture") == "arm64"
@@ -335,6 +359,8 @@ def embedded_build():
     app_settings = [item["buildSettings"] for item in settings_output if item.get("target") == "NoteLite"]
     require(len(app_settings) == 1, "Cannot resolve the embedded application's Release build settings.")
     effective = app_settings[0]
+    require(Path(effective.get("SWIFT_OBJC_BRIDGING_HEADER", "")).resolve() == bridge,
+            "Effective Release settings lost the verified combined native bridge header.")
     require("EMBEDDED_OMR_RUNTIME" in shlex.split(effective.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", ""))
             and effective.get("PLATFORM_NAME") == "iphoneos"
             and shlex.split(effective.get("ARCHS", "")) == ["arm64"],

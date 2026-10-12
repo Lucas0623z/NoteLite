@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "upstream": "Spotify Basic Pitch 0.4.0 official Python decoder",
+  "sourceSHA256": "9c813509acf57ed9b902d2b9fcd9f8118b2c5ffe568a06df9cfa60f5c5ee2572",
+  "cases": [
+    {
+      "name": "same-pitch-reattacks",
+      "frames": 120,
+      "tuning": 440,
+      "noteCells": [
+        [
+          39,
+          10,
+          35,
+          0.8
+        ],
+        [
+          39,
+          60,
+          85,
+          0.85
+        ]
+      ],
+      "onsetPeaks": [
+        [
+          39,
+          10,
+          0.9
+        ],
+        [
+          39,
+          60,
+          0.95
+        ]
+      ],
+      "contourShift": 0,
+      "sampleCount": 30768,
+      "expectedNotes": [
+        {
+          "midi": 60,
+          "modelMIDI": 60,
+          "onsetMs": 116.09977324263039,
+          "offsetMs": 406.3492063492063,
+          "confidence": 0.800000011920929,
+          "cents": 0.0
+        },
+        {
+          "midi": 60,
+          "modelMIDI": 60,
+          "onsetMs": 696.5986394557823,
+          "offsetMs": 986.8480725623583,
+          "confidence": 0.8500000834465027,
+          "cents": 0.0
+        }
+      ]
+    },
+    {
+      "name": "simultaneous-chord",
+      "frames": 120,
+      "tuning": 440,
+      "noteCells": [
+        [
+          39,
+          20,
+          65,
+          0.8
+        ],
+        [
+          43,
+          20,
+          65,
+          0.75
+        ],
+        [
+          46,
+          20,
+          65,
+          0.7
+        ]
+      ],
+      "onsetPeaks": [
+        [
+          39,
+          20,
+          0.9
+        ],
+        [
+          43,
+          20,
+          0.9
+        ],
+        [
+          46,
+          20,
+          0.9
+        ]
+      ],
+      "contourShift": 0,
+      "sampleCount": 30768,
+      "expectedNotes": [
+        {
+          "midi": 60,
+          "modelMIDI": 60,
+          "onsetMs": 232.19954648526078,
+          "offsetMs": 754.6485260770976,
+          "confidence": 0.7999998927116394,
+          "cents": 0.0
+        },
+        {
+          "midi": 64,
+          "modelMIDI": 64,
+          "onsetMs": 232.19954648526078,
+          "offsetMs": 754.6485260770976,
+          "confidence": 0.75,
+          "cents": 0.0
+        },
+        {
+          "midi": 67,
+          "modelMIDI": 67,
+          "onsetMs": 232.19954648526078,
+          "offsetMs": 754.6485260770976,
+          "confidence": 0.7000001072883606,
+          "cents": 0.0
+        }
+      ]
+    },
+    {
+      "name": "sustained-without-onset-uses-residual-energy",
+      "frames": 120,
+      "tuning": 440,
+      "noteCells": [
+        [
+          48,
+          20,
+          70,
+          0.8
+        ]
+      ],
+      "onsetPeaks": [],
+      "contourShift": 1,
+      "sampleCount": 30768,
+      "expectedNotes": [
+        {
+          "midi": 69,
+          "modelMIDI": 69,
+          "onsetMs": 232.19954648526078,
+          "offsetMs": 801.0884353741496,
+          "confidence": 0.800000011920929,
+          "cents": 33.33333333333286
+        }
+      ]
+    },
+    {
+      "name": "short-activation-is-not-a-note",
+      "frames": 120,
+      "tuning": 440,
+      "noteCells": [
+        [
+          39,
+          20,
+          27,
+          0.8
+        ]
+      ],
+      "onsetPeaks": [
+        [
+          39,
+          20,
+          0.9
+        ]
+      ],
+      "contourShift": 0,
+      "sampleCount": 30768,
+      "expectedNotes": []
+    },
+    {
+      "name": "coarse-contour-calibrates-a4",
+      "frames": 400,
+      "tuning": 442,
+      "noteCells": [
+        [
+          48,
+          180,
+          230,
+          0.8
+        ]
+      ],
+      "onsetPeaks": [
+        [
+          48,
+          180,
+          0.9
+        ]
+      ],
+      "contourShift": 1,
+      "sampleCount": 102559,
+      "expectedNotes": [
+        {
+          "midi": 69,
+          "modelMIDI": 69,
+          "onsetMs": 2079.4698412698413,
+          "offsetMs": 2659.968707482993,
+          "confidence": 0.800000011920929,
+          "cents": 25.481918293206718
+        }
+      ]
+    },
+    {
+      "name": "silence",
+      "frames": 120,
+      "tuning": 440,
+      "noteCells": [],
+      "onsetPeaks": [],
+      "contourShift": 0,
+      "sampleCount": 30768,
+      "expectedNotes": []
+    }
+  ]
+}

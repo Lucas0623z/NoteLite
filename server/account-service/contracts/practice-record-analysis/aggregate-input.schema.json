@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pre-aggregated practice analysis input",
+  "description": "Program-produced, pre-aggregated practice facts for model interpretation. Raw errors, results, and played records are not accepted.",
+  "$comment": "String length and list size limits are product contract defaults, not model provider limits.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportStatus",
+    "locale",
+    "snapshotId",
+    "aggregateVersion",
+    "coverage",
+    "facts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "reportStatus": {
+      "$ref": "#/$defs/reportStatus"
+    },
+    "locale": {
+      "$ref": "#/$defs/nonEmptyString",
+      "maxLength": 128
+    },
+    "snapshotId": {
+      "$ref": "#/$defs/nonEmptyString",
+      "maxLength": 128
+    },
+    "aggregateVersion": {
+      "$ref": "#/$defs/nonEmptyString",
+      "maxLength": 128
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "facts": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "$ref": "#/$defs/fact"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringList": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "maxLength": 250
+      }
+    },
+    "reportStatus": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial",
+        "investment_only",
+        "pending_review",
+        "no_usable_data"
+      ]
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "omittedDetail",
+        "selectionPolicy",
+        "limitations"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "omittedDetail": {
+          "type": "boolean"
+        },
+        "selectionPolicy": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "limitations": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "factId",
+        "kind",
+        "dimension",
+        "label",
+        "statement",
+        "displayValue",
+        "claimState",
+        "scope",
+        "confidence",
+        "evidenceRefs",
+        "limitations"
+      ],
+      "properties": {
+        "factId": {
+          "$ref": "#/$defs/nonEmptyString",
+          "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "weakness",
+            "strength",
+            "progress",
+            "performance_observation",
+            "practice_investment",
+            "pending_review",
+            "data_quality",
+            "unavailable"
+          ]
+        },
+        "dimension": {
+          "type": "string",
+          "enum": [
+            "interval",
+            "piece_type",
+            "tempo",
+            "technique",
+            "rhythm",
+            "hand_voice",
+            "location",
+            "retention",
+            "consistency",
+            "practice_investment",
+            "other"
+          ]
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString",
+          "maxLength": 80
+        },
+        "statement": {
+          "$ref": "#/$defs/nonEmptyString",
+          "maxLength": 400,
+          "description": "Objective factual statement supplied by the program."
+        },
+        "displayValue": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200,
+          "description": "Display value preformatted by the program; the model must not calculate or derive a replacement value."
+        },
+        "claimState": {
+          "type": "string",
+          "enum": [
+            "verified_fact",
+            "provisional_pattern",
+            "pending_review",
+            "unavailable"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/nonEmptyString",
+          "maxLength": 300
+        },
+        "confidence": {
+          "type": "string",
+          "description": "Confidence level assigned by the program.",
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ]
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString",
+            "maxLength": 128
+          }
+        },
+        "limitations": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    }
+  }
+}

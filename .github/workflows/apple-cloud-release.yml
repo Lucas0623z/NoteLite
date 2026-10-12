@@ -1,0 +1,128 @@
+name: Apple cloud client signed release
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "verify = unsigned iOS device archive; export = signed IPA"
+        type: string
+        default: verify
+      upload:
+        description: "Upload the verified signed IPA for TestFlight processing (export only)"
+        type: boolean
+        default: false
+      acceptance_run_id:
+        description: "Successful Apple clients workflow run for this exact commit, all three native platforms"
+        type: string
+        required: true
+      version:
+        description: "App version"
+        type: string
+        default: "1.0.0"
+      build_number:
+        description: "Build number; empty uses this workflow run number"
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "verify = unsigned iOS device archive; export = signed IPA"
+        type: choice
+        options: [verify, export]
+        default: verify
+      upload:
+        description: "Validate and upload the verified signed IPA to App Store Connect for TestFlight processing (export only)"
+        type: boolean
+        default: false
+      acceptance_run_id:
+        description: "Successful Apple clients workflow run for this exact commit, all three native platforms"
+        type: string
+        required: true
+      version:
+        description: "App version"
+        type: string
+        default: "1.0.0"
+      build_number:
+        description: "Build number; empty uses this workflow run number"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: apple-cloud-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cloud-client:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      RELEASE_MODE: ${{ inputs.mode }}
+      RELEASE_UPLOAD: ${{ inputs.upload && 'true' || 'false' }}
+      RELEASE_BUNDLE_ID: com.lucas0623z.yinban
+      RELEASE_TEAM_ID: G74YSFJX76
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+      RELEASE_ACCEPTANCE_RUN: ${{ inputs.acceptance_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select stable Xcode and check manual release settings
+        run: python3 apple/release/cloud_release.py prepare
+      - name: Test exact-commit acceptance, packaging and signing gates
+        run: python3 -B apple/release/test_cloud_release.py
+      - name: Verify all actual native acceptance results before accessing signing credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 apple/release/cloud_release.py acceptance
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: practice-web/package-lock.json
+      - name: Build the production practice and Figma views
+        run: |
+          npm --prefix practice-web ci
+          npm --prefix practice-web test
+          npm --prefix practice-web run build
+          npm install --global pnpm@11.25.0
+          pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+          pnpm --dir figma-ui typecheck
+          pnpm --dir figma-ui test
+          pnpm --dir figma-ui build
+          python3 apple/scripts/prepare-figma-ui.py
+      - name: Verify the bundled local NoteWise model and generate the cloud-client project
+        run: |
+          node apple/scripts/prepare-notewise-profiles.mjs
+          python3 apple/scripts/prepare-notewise-model.py
+          python3 apple/scripts/prepare-release-features.py --check
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate --spec apple/project.yml
+      - name: Verify the unsigned device archive
+        if: inputs.mode == 'verify'
+        run: python3 apple/release/cloud_release.py archive
+      - name: Export and verify the signed IPA
+        if: inputs.mode == 'export'
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_APP_STORE_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROFILE_BASE64 }}
+          ASC_API_KEY_ID: ${{ inputs.upload && secrets.ASC_API_KEY_ID || '' }}
+          ASC_API_ISSUER_ID: ${{ inputs.upload && secrets.ASC_API_ISSUER_ID || '' }}
+          ASC_API_PRIVATE_KEY_BASE64: ${{ inputs.upload && secrets.ASC_API_PRIVATE_KEY_BASE64 || '' }}
+        run: python3 apple/release/cloud_release.py archive
+      - name: Remove the ephemeral keychain, provisioning profile and private build directory
+        if: always()
+        run: python3 apple/release/cloud_release.py cleanup
+      - name: Retain only the verified client package and public release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: 黑白键AI-iOS-${{ inputs.mode }}-${{ env.RELEASE_BUILD_NUMBER }}
+          path: |
+            ${{ runner.temp }}/yinban-release-output/*.ipa
+            ${{ runner.temp }}/yinban-release-output/*-iOS-device-unsigned.xcarchive.zip
+            ${{ runner.temp }}/yinban-release-output/cloud-release-report.json
+            ${{ runner.temp }}/yinban-release-output/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>音伴-你的音乐搭子</string>
+    <string>黑白键AI-你的陪练搭子</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -11,7 +11,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>音伴-你的音乐搭子</string>
+    <string>黑白键AI-你的陪练搭子</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -30,7 +30,7 @@
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIRequiresFullScreen</key>
-    <false/>
+    <true/>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
@@ -69,5 +69,9 @@
     </array>
     <key>NSMicrophoneUsageDescription</key>
     <string>在你开始麦克风练习后聆听演奏，对照乐谱提示音高与节奏。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>在你选择拍照识谱时拍摄乐谱，并将你选定的乐谱上传到配置的识谱服务。</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>在你选择从相册导入时读取选定的乐谱照片，并上传到配置的识谱服务。</string>
 </dict>
 </plist>

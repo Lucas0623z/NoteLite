@@ -1,0 +1,761 @@
+{
+  "schemaVersion": 1,
+  "source": "practice-web/src/instruments.js",
+  "sourceSha256": "62451dd2a38f3bc79459440c41988ac42f507429fe9d18998e9dd2ca27c03bbc",
+  "profiles": [
+    {
+      "id": "piano",
+      "name": "钢琴 / 键盘",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "midi",
+      "recommendedInput": "midi",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "violin",
+      "name": "小提琴",
+      "minMidi": 55,
+      "maxMidi": 108,
+      "minHz": 195.997717991,
+      "maxHz": 4186.00904481,
+      "windowSize": 4096,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "viola",
+      "name": "中提琴",
+      "minMidi": 48,
+      "maxMidi": 101,
+      "minHz": 130.81278265,
+      "maxHz": 2793.82585146,
+      "windowSize": 4096,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "cello",
+      "name": "大提琴",
+      "minMidi": 36,
+      "maxMidi": 96,
+      "minHz": 65.4063913251,
+      "maxHz": 2093.0045224,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "contrabass",
+      "name": "低音提琴",
+      "minMidi": 24,
+      "maxMidi": 84,
+      "minHz": 32.7031956626,
+      "maxHz": 1046.5022612,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "octave",
+      "variants": [
+        {
+          "id": "octave",
+          "name": "低八度发声",
+          "transpose": -12
+        },
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "harp",
+      "name": "竖琴",
+      "minMidi": 24,
+      "maxMidi": 103,
+      "minHz": 32.7031956626,
+      "maxHz": 3135.96348785,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "flute",
+      "name": "长笛 / 笛类",
+      "minMidi": 48,
+      "maxMidi": 108,
+      "minHz": 130.81278265,
+      "maxHz": 4186.00904481,
+      "windowSize": 4096,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "clarinet",
+      "name": "单簧管",
+      "minMidi": 34,
+      "maxMidi": 103,
+      "minHz": 58.2704701898,
+      "maxHz": 3135.96348785,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "bb",
+      "variants": [
+        {
+          "id": "bb",
+          "name": "降 B 调",
+          "transpose": -2
+        },
+        {
+          "id": "a",
+          "name": "A 调",
+          "transpose": -3
+        },
+        {
+          "id": "eb",
+          "name": "降 E 调",
+          "transpose": 3
+        },
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "bassoon",
+      "name": "巴松",
+      "minMidi": 22,
+      "maxMidi": 89,
+      "minHz": 29.1352350949,
+      "maxHz": 1396.91292573,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "oboe",
+      "name": "双簧管",
+      "minMidi": 53,
+      "maxMidi": 101,
+      "minHz": 174.614115717,
+      "maxHz": 2793.82585146,
+      "windowSize": 4096,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "horn",
+      "name": "圆号",
+      "minMidi": 28,
+      "maxMidi": 96,
+      "minHz": 41.2034446141,
+      "maxHz": 2093.0045224,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "f",
+      "variants": [
+        {
+          "id": "f",
+          "name": "F 调",
+          "transpose": -7
+        },
+        {
+          "id": "bb",
+          "name": "降 B 调",
+          "transpose": -2
+        },
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "trumpet",
+      "name": "小号",
+      "minMidi": 42,
+      "maxMidi": 103,
+      "minHz": 92.4986056779,
+      "maxHz": 3135.96348785,
+      "windowSize": 4096,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "bb",
+      "variants": [
+        {
+          "id": "bb",
+          "name": "降 B 调",
+          "transpose": -2
+        },
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "trombone",
+      "name": "长号",
+      "minMidi": 28,
+      "maxMidi": 91,
+      "minHz": 41.2034446141,
+      "maxHz": 1567.98174393,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "tuba",
+      "name": "大号",
+      "minMidi": 21,
+      "maxMidi": 84,
+      "minHz": 27.5,
+      "maxHz": 1046.5022612,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "euphonium",
+      "name": "上低音号 / 次中音号",
+      "minMidi": 28,
+      "maxMidi": 91,
+      "minHz": 41.2034446141,
+      "maxHz": 1567.98174393,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "bass",
+      "variants": [
+        {
+          "id": "bass",
+          "name": "低音谱号 / 实音",
+          "transpose": 0
+        },
+        {
+          "id": "bb-treble",
+          "name": "降 B 调高音谱号",
+          "transpose": -14
+        }
+      ]
+    },
+    {
+      "id": "voice",
+      "name": "人声",
+      "minMidi": 36,
+      "maxMidi": 101,
+      "minHz": 65.4063913251,
+      "maxHz": 2793.82585146,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "harpsichord",
+      "name": "羽管键琴",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "midi",
+      "recommendedInput": "midi",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "english-horn",
+      "name": "英国管",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "bass",
+      "name": "贝斯",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "organ",
+      "name": "管风琴",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "midi",
+      "recommendedInput": "midi",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "accordion",
+      "name": "手风琴",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "midi",
+      "recommendedInput": "midi",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "harmonica",
+      "name": "口琴",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "piccolo",
+      "name": "短笛",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "recorder",
+      "name": "竖笛",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "guitar",
+      "name": "吉他",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "sax",
+      "name": "萨克斯",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "erhu",
+      "name": "二胡",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "guzheng",
+      "name": "古筝",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "pipa",
+      "name": "琵琶",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "guqin",
+      "name": "古琴",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "suona",
+      "name": "唢呐",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "strings",
+      "name": "提琴",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "winds",
+      "name": "管乐",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    },
+    {
+      "id": "other",
+      "name": "其他有固定音高乐器",
+      "minMidi": 21,
+      "maxMidi": 108,
+      "minHz": 27.5,
+      "maxHz": 4186.00904481,
+      "windowSize": 8192,
+      "input": "microphone",
+      "recommendedInput": "microphone",
+      "realtimeEngine": "mpm",
+      "recordingEngine": "basic-pitch",
+      "defaultVariant": "concert",
+      "variants": [
+        {
+          "id": "concert",
+          "name": "实音 / C 调",
+          "transpose": 0
+        }
+      ]
+    }
+  ]
+}

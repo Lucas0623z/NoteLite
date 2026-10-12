@@ -7,11 +7,17 @@ on:
     paths:
       - "apple/**"
       - "practice-web/**"
+      - "figma-ui/**"
       - "app/res/practice/**"
       - "tools/audiveris-port/**"
       - ".github/workflows/app-store-release.yml"
   workflow_dispatch:
     inputs:
+      client:
+        description: "Application to release: existing embedded client or cloud OMR client"
+        type: choice
+        options: [embedded, cloud]
+        default: embedded
       mode:
         description: "verify = unsigned device archive; export = signed App Store IPA"
         type: choice
@@ -36,7 +42,7 @@ on:
         description: "New build number; empty uses the workflow run number"
         type: string
       acceptance_run_id:
-        description: "Successful full embedded iPhone/iPad acceptance run for this exact commit (required for export)"
+        description: "Successful exact-commit acceptance run: embedded iPhone/iPad for embedded export; all three Apple native platforms for cloud"
         type: string
 
 permissions:
@@ -49,6 +55,7 @@ concurrency:
 
 jobs:
   archive:
+    if: github.event_name != 'workflow_dispatch' || inputs.client != 'cloud'
     runs-on: macos-26
     timeout-minutes: 90
     env:
@@ -83,6 +90,14 @@ jobs:
           npm ci
           npm test
           npm run build
+      - name: Prepare the bundled Figma product interface
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+          pnpm --dir figma-ui typecheck
+          pnpm --dir figma-ui test
+          pnpm --dir figma-ui build
+          python3 apple/scripts/prepare-figma-ui.py
       - name: Prepare complete native artifacts and validate accepted source before export
         env:
           GH_TOKEN: ${{ github.token }}
@@ -154,3 +169,13 @@ jobs:
             build/release-native/accepted-run.json
             build/release-embedded-probe/evidence/
             build/release-embedded-app/evidence/
+  cloud-client:
+    if: github.event_name == 'workflow_dispatch' && inputs.client == 'cloud'
+    uses: ./.github/workflows/apple-cloud-release.yml
+    with:
+      mode: ${{ inputs.mode }}
+      upload: ${{ inputs.upload }}
+      acceptance_run_id: ${{ inputs.acceptance_run_id }}
+      version: ${{ inputs.version }}
+      build_number: ${{ inputs.build_number }}
+    secrets: inherit

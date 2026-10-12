@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "actual_upstream_source": "D:\\Chatgpt\\2026-10-08\\https-chatgpt-com-s-cx-6ac77e641c74819188e28798759e9baf\\work\\server-omr\\module\\server.py",
+  "actual_java_midi_exporter": true,
+  "linux_omr_not_executed": true,
+  "public_tls_not_tested": true,
+  "passed_checks": [
+    "native_pairing",
+    "raw_XML_job_upload",
+    "actual_Module_JobService",
+    "actual_Java_MIDI",
+    "full_job_and_note_schema",
+    "pitch_edit_changes_XML_and_MIDI",
+    "matching_revision_ETags",
+    "stale_revision_409",
+    "invalid_XML_rollback",
+    "owner_job_list"
+  ],
+  "before_midi_sha256": "ba46c7b3cbac8320e87fd07855015915b9acbe5c19a2c4b832b6085975447bb6",
+  "after_midi_sha256": "2ce6fc77240df3bd50aa3d3d80ee7ca4d1aae5c8fd45f5f1cf1c1faee63da1de",
+  "credentials_logged": false
+}

@@ -10,6 +10,13 @@ output=${3:-"$repo/build/embedded-app/$sdk-arm64"}
 test "$(uname -s)" = Darwin
 command -v xcodegen >/dev/null
 command -v python3 >/dev/null
+command -v node >/dev/null
+# Use the same checked local profiles, model and release policy as the native
+# client build. These commands verify committed assets without downloading.
+node "$repo/apple/scripts/prepare-notewise-profiles.mjs"
+python3 "$repo/apple/scripts/prepare-notewise-model.py"
+python3 "$repo/apple/scripts/prepare-release-features.py" --check
+python3 -B "$repo/tools/audiveris-port/test_embedded_notewise_composition.py"
 embedding=$(cd "$embedding" && pwd)
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
@@ -48,6 +55,18 @@ for header in re.findall(r'"([^"]+)"', config.split('HEADER_SEARCH_PATHS = ', 1)
     if not Path(header).is_dir():
         raise SystemExit('Missing JNI include directory: ' + header)
 
+# A Swift target accepts one bridging header. The embedded override used to
+# hide the NoteWise C API inherited from apple/project.yml. Keep both bridges
+# in the same compilation unit without replacing either implementation.
+for name in ('apple/NoteLite/NoteWise-Bridging-Header.h', 'apple/NoteLite/NoteWiseDSP.h',
+             'apple/NoteLite/NoteWiseDSP.c', 'native/audio/pitch.c', 'native/audio/events.c'):
+    if not (repo / name).is_file():
+        raise SystemExit('A local NoteWise native source is missing: ' + name)
+combined_bridge = project / 'Generated/NoteLiteEmbedded-Bridging-Header.h'
+combined_bridge.write_text('#pragma once\n#include "../EmbeddedRuntime/EmbeddedJVM.h"\n#include '
+                           + json.dumps((repo / 'apple/NoteLite/NoteWise-Bridging-Header.h').as_posix(), ensure_ascii=False)
+                           + '\n', encoding='utf8')
+
 # XcodeGen rebases source/package paths from the included project. Explicitly
 # set the Info.plist build setting because arbitrary settings are plain strings.
 spec = {
@@ -63,7 +82,7 @@ spec = {
         ],
         'settings': {'base': {
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS': '$(inherited) EMBEDDED_OMR_RUNTIME',
-            'SWIFT_OBJC_BRIDGING_HEADER': str(project / 'EmbeddedRuntime/EmbeddedJVM.h'),
+            'SWIFT_OBJC_BRIDGING_HEADER': str(combined_bridge),
             'INFOPLIST_FILE': str(repo / 'apple/NoteLite/Info.plist'),
             'CLANG_CXX_LANGUAGE_STANDARD': 'c++17',
             'GCC_SYMBOLS_PRIVATE_EXTERN': 'NO',
@@ -96,6 +115,7 @@ spec = {
 (project / 'embedded-project.json').write_text(json.dumps(spec, indent=2) + '\n')
 PY
 cp "$project/embedded-project.json" "$output/evidence/embedded-project.json"
+cp "$project/Generated/NoteLiteEmbedded-Bridging-Header.h" "$output/evidence/"
 cp "$project/Generated/native-libraries.xcconfig" "$output/evidence/"
 printf '%s\n' "$project" > "$output/evidence/project-location.txt"
 (
@@ -140,7 +160,8 @@ if not re.search(r'\bplatform\s+' + expected_platform + r'\b', load_commands):
     raise SystemExit('The executable has the wrong Mach-O platform for ' + sdk)
 symbols = subprocess.check_output(['xcrun', 'nm', '-gU', str(binary)], text=True)
 required = ['JNI_CreateJavaVM', 'JNI_OnLoad_jnijavacpp',
-            'JNI_OnLoad_jnileptonica', 'JNI_OnLoad_jnitesseract', 'loadfunctions']
+            'JNI_OnLoad_jnileptonica', 'JNI_OnLoad_jnitesseract', 'loadfunctions',
+            'nw_create', 'nw_create_profile', 'nw_destroy', 'nw_push', 'nw_poll', 'nw_finish']
 for symbol in required:
     if not re.search(r'\b_' + re.escape(symbol) + r'$', symbols, re.M):
         raise SystemExit('The app is missing a statically linked native entry point: ' + symbol)
@@ -175,6 +196,25 @@ for original in (repo / 'app/res/practice').rglob('*'):
         if not installed.is_file() or digest(original) != digest(installed):
             raise SystemExit('A bundled practice resource is missing or changed: ' + str(original))
 if not (app / 'Assets.car').is_file(): raise SystemExit('Compiled app icons and assets are missing')
+listening_resources = []
+for name, original in (
+    ('NoteWiseProfiles.json', repo / 'apple/NoteLite/NoteWiseProfiles.json'),
+    ('BASIC-PITCH-LICENSE', repo / 'apple/NoteWiseModels/BASIC-PITCH-LICENSE'),
+    ('MODEL-LOCK.json', repo / 'apple/NoteWiseModels/MODEL-LOCK.json'),
+    ('DIVIDE-NO-NAN-PATCH.json', repo / 'apple/NoteWiseModels/DIVIDE-NO-NAN-PATCH.json'),
+    ('THIRD-PARTY.txt', repo / 'apple/NoteWiseModels/THIRD-PARTY.txt'),
+):
+    installed = app / name
+    checksum = digest(original)
+    if not installed.is_file() or digest(installed) != checksum:
+        raise SystemExit('A bundled local NoteWise resource is missing or changed: ' + name)
+    listening_resources.append({'path': name, 'bytes': installed.stat().st_size, 'sha256': checksum})
+model = app / 'NoteWiseBasicPitch.mlmodelc'
+model_files = sorted(path for path in model.rglob('*') if path.is_file()) if model.is_dir() else []
+if not model_files:
+    raise SystemExit('The compiled local NoteWise polyphonic model is missing')
+for path in model_files:
+    listening_resources.append({'path': path.relative_to(app).as_posix(), 'bytes': path.stat().st_size, 'sha256': digest(path)})
 report = {
     'sdk': sdk, 'architecture': 'arm64', 'bundleIdentifier':info['CFBundleIdentifier'],
     'deviceFamilies':info['UIDeviceFamily'], 'embeddedRuntimeEnabled':True,
@@ -182,6 +222,7 @@ report = {
     'bundledResourceBytes':sum(item['bytes'] for item in inventory),
     'nativeEntryPoints':required, 'resources':inventory,
     'nativePresetBindings':binding_report,
+    'localNoteWiseResources':listening_resources,
     'signedForDistribution':False, 'productionAppRecognitionExecuted':False,
 }
 (evidence / 'app-inventory.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -220,12 +261,20 @@ for entry in inventory['resources']:
     resource = app / 'OMRResources' / entry['path']
     if not resource.is_file() or hashlib.sha256(resource.read_bytes()).hexdigest() != entry['sha256']:
         raise SystemExit('The archive lost or changed an embedded resource: ' + entry['path'])
+for entry in inventory['localNoteWiseResources']:
+    resource = app / entry['path']
+    if not resource.is_file() or hashlib.sha256(resource.read_bytes()).hexdigest() != entry['sha256']:
+        raise SystemExit('The archive lost or changed a local NoteWise resource: ' + entry['path'])
 app_info = plistlib.loads((app / 'Info.plist').read_bytes())
 if set(app_info.get('UIDeviceFamily', [])) != {1, 2}:
     raise SystemExit('The archived app must support iPhone and iPad')
 binary = app / app_info['CFBundleExecutable']
 subprocess.run(['xcrun', 'lipo', str(binary), '-verify_arch', 'arm64'], check=True)
 symbols = subprocess.check_output(['xcrun', 'nm', '-gU', str(binary)], text=True)
+import re
+for symbol in inventory['nativeEntryPoints']:
+    if not re.search(r'\b_' + re.escape(symbol) + r'$', symbols, re.M):
+        raise SystemExit('The archive is missing a statically linked native entry point: ' + symbol)
 (evidence / 'archive-linked-symbols.txt').write_text(symbols)
 binding_jars = sorted(path for path in (app / 'OMRResources/java').glob('*.jar')
                       if path.name.startswith(('leptonica-', 'tesseract-')))

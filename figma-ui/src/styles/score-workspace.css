@@ -1,0 +1,176 @@
+.app-root dialog.scores-dialog:not([data-workspace="true"]) {
+  /* The generic dialog safe-area rule must not erase the sheet's gutters. */
+  box-sizing: border-box;
+  padding: 20px;
+  padding-left: calc(20px + env(safe-area-inset-left, 0px));
+  padding-right: calc(20px + env(safe-area-inset-right, 0px));
+  overflow-wrap: anywhere;
+}
+
+.scores-dialog:not([data-workspace="true"]) > .grid {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.scores-dialog:not([data-workspace="true"]) .scores-action {
+  min-width: 0;
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.scores-dialog[data-workspace="true"] {
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  animation: settings-sheet 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.score-workspace {
+  --score-bg: #f6f6f6;
+  --score-surface: #fff;
+  --score-line: #e5e5e5;
+  --score-muted: #929292;
+  --score-accent: #67db23;
+  --score-accent-edge: #49a619;
+  --score-ink: #333;
+  --score-space: 24px;
+  color: var(--score-ink);
+  background: var(--score-bg);
+  min-height: 100%;
+}
+
+[data-theme="dark"] .score-workspace {
+  --score-bg: #141414;
+  --score-surface: #202020;
+  --score-line: #353535;
+  --score-muted: #aaa;
+  --score-ink: #ededed;
+}
+
+.score-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) calc(var(--score-space) + env(safe-area-inset-right, 0px)) 20px calc(var(--score-space) + env(safe-area-inset-left, 0px));
+  background: var(--score-surface);
+  border-bottom: 2px solid var(--score-line);
+}
+
+.score-workspace h1, .score-workspace h2 { font-size: 21px; font-weight: 800; }
+.score-workspace h3 { font-size: 15px; font-weight: 700; }
+.score-workspace-header p { color: var(--score-muted); font-size: 12px; margin-top: 4px; }
+.score-landscape-hint { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  .score-landscape-hint {
+    display: block;
+    padding: 12px var(--score-space);
+    border-bottom: 1px solid var(--score-line);
+    color: var(--score-accent-edge);
+    background: var(--score-surface);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+}
+.score-workspace-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr) 280px; min-height: calc(100dvh - 104px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.score-tools, .score-inspector { background: var(--score-surface); padding: var(--score-space); min-width: 0; }
+.score-tools { border-right: 2px solid var(--score-line); }
+.score-inspector { border-left: 2px solid var(--score-line); }
+.score-eyebrow { color: var(--score-muted); font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.score-filename { overflow-wrap: anywhere; }
+.score-format, .score-local-badge { display: inline-block; border: 1px solid var(--score-line); border-radius: 8px; padding: 5px 9px; font-size: 11px; color: var(--score-muted); }
+.score-format { margin-top: 12px; }
+.score-local-badge { color: var(--score-accent-edge); white-space: nowrap; }
+.score-tool-section { display: grid; gap: 12px; padding-block: 24px; border-bottom: 1px solid var(--score-line); }
+.score-tool-section p, .score-description, .score-help, .score-empty-inspector p { color: var(--score-muted); font-size: 12px; line-height: 1.9; }
+.score-help { margin-top: 24px; padding: 16px; border: 2px solid var(--score-line); border-radius: 14px; }
+.score-tool {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 42px; padding: 8px 12px; font-size: 13px; font-weight: 700;
+  border: 2px solid var(--score-line); border-bottom-width: 5px;
+  border-radius: 12px; background: var(--score-surface); color: var(--score-accent-edge);
+  cursor: pointer; touch-action: manipulation; transition: transform 75ms;
+}
+.score-tool:enabled:active { transform: translateY(3px); }
+.score-tool:disabled { opacity: 0.45; cursor: default; }
+.score-tool:focus-visible, .score-note-list button:focus-visible { outline: 2px solid var(--score-accent); outline-offset: 3px; }
+.score-tool-primary { background: var(--score-accent); border-color: var(--score-accent-edge); color: #173b09; }
+.score-zoom { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.score-zoom span { font-size: 13px; font-variant-numeric: tabular-nums; }
+.score-preview { padding: var(--score-space); min-width: 0; }
+.score-preview-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.score-preview-heading h2 { overflow-wrap: anywhere; }
+.score-status { margin: 16px 0; color: var(--score-muted); font-size: 12px; line-height: 1.8; }
+.score-paper { background: #fffdf8; color: #333; padding: 24px; border: 2px solid var(--score-line); border-radius: 18px; min-height: 420px; overflow: auto; box-shadow: 0 5px 0 var(--score-line); }
+.score-paper img { width: 100%; height: auto; }
+.score-paper iframe { width: 100%; height: 65dvh; border: 0; }
+.score-description { margin-block: 12px; }
+.score-field { display: grid; gap: 7px; margin-block: 12px; font-size: 11px; color: var(--score-muted); }
+.score-field input, .score-field select { width: 100%; min-width: 0; min-height: 40px; border: 2px solid var(--score-line); border-radius: 10px; padding: 7px; background: var(--score-surface); color: var(--score-ink); font-size: 12px; }
+/* Keep text/number entry readable at the page's scale. Small input text makes
+   iPhone WebKit zoom the entire editor when the keyboard opens. */
+.score-field input { font-size: 16px; line-height: 20px; }
+.score-note-list { max-height: 240px; overflow-y: auto; border: 2px solid var(--score-line); border-radius: 12px; }
+.score-note-list button { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 13px 10px; font-size: 12px; border-bottom: 1px solid var(--score-line); text-align: left; cursor: pointer; }
+.score-note-list button[aria-pressed="true"] { background: var(--score-accent); color: #173b09; font-weight: 700; }
+.score-note-list button span:last-child { opacity: 0.6; }
+.score-edit { padding-top: 20px; margin-top: 20px; border-top: 2px solid var(--score-line); }
+.score-pitch-fields { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; }
+.score-edit > .score-tool { width: 100%; margin-top: 8px; }
+.score-empty-inspector { margin-top: 24px; padding: 20px; border: 2px solid var(--score-line); border-radius: 16px; }
+.score-empty-inspector p { margin-top: 12px; }
+
+@media (max-width: 1199px) {
+  .score-workspace-layout { grid-template-columns: minmax(0, 1fr) 280px; }
+  .score-tools { grid-column: 1 / -1; border-right: 0; border-bottom: 2px solid var(--score-line); display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+  .score-tools .score-eyebrow, .score-tools .score-help, .score-tools .score-tool-section > p, .score-tools .score-tool-section h3 { display: none; }
+  .score-tools .score-format { margin: 0; }
+  .score-tool-section { display: flex; flex-wrap: wrap; padding: 0; border: 0; }
+}
+@media (max-width: 767px) {
+  .score-workspace { --score-space: 16px; }
+  .score-workspace-header { flex-wrap: wrap; }
+  .score-workspace-header > div { flex: 1; }
+  .score-workspace-header h1 { font-size: 17px; }
+  .score-local-badge { display: none; }
+  .score-workspace-layout { grid-template-columns: minmax(0, 1fr); }
+  .score-inspector { border-left: 0; border-top: 2px solid var(--score-line); }
+  .score-paper { padding: 12px; min-height: 300px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scores-dialog[data-workspace="true"] { animation: none; }
+  .score-tool { transition: none; }
+}
+
+.practice-clock { font-size: 48px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 28px; letter-spacing: -0.04em; }
+.practice-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-block: 20px; border-block: 2px solid var(--score-line); }
+.practice-stat-grid span { display: block; font-size: 12px; color: var(--score-muted); }
+.practice-stat-grid strong { display: block; margin-top: 12px; font-size: 24px; }
+.practice-summary > .score-tool { width: 100%; margin-top: 20px; }
+.practice-records p { display: flex; justify-content: space-between; gap: 16px; padding-block: 12px; border-bottom: 1px solid var(--score-line); font-size: 13px; }
+.practice-controls { grid-column: 1 / -1; position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 16px var(--score-space) calc(16px + env(safe-area-inset-bottom, 0px)); background: var(--score-surface); border-top: 2px solid var(--score-line); z-index: 5; }
+.practice-control-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.practice-tempo { color: var(--score-muted); font-size: 12px; }
+.practice-notice { flex-basis: 100%; color: var(--score-muted); font-size: 12px; line-height: 1.8; text-align: center; }
+.practice-settings-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); margin: auto; padding: 24px; border: 2px solid var(--score-line); border-radius: 20px; color: var(--score-ink); background: var(--score-surface); overflow-y: auto; }
+.practice-settings-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.practice-settings-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 2px solid var(--score-line); }
+.practice-settings-dialog .score-tool-section { display: grid; padding-block: 20px; border-bottom: 1px solid var(--score-line); }
+.practice-settings-dialog .score-tool-section h3, .practice-settings-dialog .score-tool-section > p { display: block; }
+.practice-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.practice-confirm { display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 1.8; }
+.practice-confirm input { width: 20px; height: 20px; accent-color: var(--score-accent); }
+.score-workspace[data-practice="true"] .score-paper { min-height: 60dvh; }
+@media (max-width: 767px) {
+  .practice-controls { justify-content: center; }
+  .practice-controls > .score-tool { flex: 1; }
+  .practice-control-actions { flex: 1 1 auto; justify-content: center; }
+  .practice-tempo { flex-basis: 100%; text-align: center; }
+  .practice-clock { font-size: 40px; }
+}

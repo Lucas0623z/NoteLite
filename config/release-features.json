@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "releaseStage": "testflight",
+  "inAppPurchases": false,
+  "purchaseUnavailableMessage": "测试期未开放",
+  "paidActionTokens": ["purchase", "purchases", "subscribe", "subscription", "subscriptions", "payment", "payments", "billing", "checkout", "iap", "storekit", "topup", "recharge", "restore-purchases"],
+  "paidRootTokens": ["store", "coins", "wallet", "membership"]
+}

@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "suite": "python -m unittest -v test_gateway",
+  "tests": 14,
+  "failures": 0,
+  "durationSeconds": 14.901,
+  "realHTTPProxyRequests": true,
+  "strictLocalHostOriginTestUpstream": true,
+  "realAudiverisRecognition": false,
+  "publicTLSDeployment": false,
+  "additionalTargetedChecksAfterHardening": 2,
+  "pythonCompile": "passed",
+  "bashSyntaxAllDeploymentScripts": "passed",
+  "credentialsLogged": false
+}

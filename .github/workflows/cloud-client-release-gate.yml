@@ -1,0 +1,77 @@
+name: Cloud client resource release gate
+
+on:
+  push:
+    branches: [main, master, codex/audiveris-apple-builds]
+    paths:
+      - "figma-ui/**"
+      - "practice-web/**"
+      - "native/audio/THIRD_PARTY_NOTICES.md"
+      - "native/audio/vendor/miniaudio/LICENSE"
+      - "packaging/cloud-client-release/**"
+      - ".github/workflows/cloud-client-release-gate.yml"
+      - "LICENSE"
+  pull_request:
+    paths:
+      - "figma-ui/**"
+      - "practice-web/**"
+      - "native/audio/THIRD_PARTY_NOTICES.md"
+      - "native/audio/vendor/miniaudio/LICENSE"
+      - "packaging/cloud-client-release/**"
+      - ".github/workflows/cloud-client-release-gate.yml"
+      - "LICENSE"
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-client-release-resources-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resources:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build production Windows practice resources
+        working-directory: practice-web
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build production Figma resources
+        shell: pwsh
+        run: |
+          npm install --global pnpm@11.25.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir figma-ui install --frozen-lockfile --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir figma-ui build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check content gates and actual unsigned Windows rejection
+        run: python -B packaging/cloud-client-release/test_release.py
+      - name: Prepare audited unsigned resources
+        run: python -B packaging/cloud-client-release/release.py prepare --output work/cloud-client-resource-candidate
+      - name: Verify manifest against actual resource bytes
+        run: python -B packaging/cloud-client-release/release.py verify --input work/cloud-client-resource-candidate
+      - name: Package and re-read resource ZIP; this is not a signed native release
+        run: python -B packaging/cloud-client-release/release.py package --input work/cloud-client-resource-candidate --platform web-candidate --output work/cloud-client-resource-candidate.zip
+      - name: Retain unsigned resource candidate and honest verification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-cloud-client-resources
+          path: |
+            work/cloud-client-resource-candidate.zip
+            work/cloud-client-resource-candidate.zip.report.json
+          if-no-files-found: error
+          retention-days: 7

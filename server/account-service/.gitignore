@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+accounts.sqlite3*
+recordings/
+internal-key
+# Operator-provided private instruction assets; not a public source dependency.
+/skills/practice-record-analysis/

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-labelledby="08-plum-record-player-title 08-plum-record-player-desc"><title id="08-plum-record-player-title">紫李唱片机</title><desc id="08-plum-record-player-desc">圆角卡通唱片机，黑胶唱片、奶油唱片标签、暖金唱针；纯矢量透明背景，与同色圆盘配套。</desc><rect x="21" y="75" width="12" height="9" rx="4" fill="#26344D"/>
+  <rect x="64" y="75" width="12" height="9" rx="4" fill="#26344D"/>
+  <rect x="11" y="29" width="74" height="50" rx="9" fill="#634D70"/>
+  <rect x="11" y="22" width="74" height="50" rx="9" fill="#8B668C"/>
+  <circle cx="43" cy="45" r="23" fill="#634D70"/>
+  <circle cx="43" cy="42" r="23" fill="#302A2B"/>
+  <circle cx="43" cy="42" r="17" fill="none" stroke="#FFF4DD" stroke-width="1.4" opacity=".1"/><circle cx="43" cy="42" r="10" fill="#FFF4DD"/>
+  <circle cx="43" cy="42" r="5.5" fill="#DCA64E"/>
+  <circle cx="43" cy="42" r="1.8" fill="#302A2B"/>
+  <circle cx="74" cy="30" r="6" fill="#26344D"/>
+  <circle cx="74" cy="30" r="2.5" fill="#DCA64E"/>
+  <path d="M74 35v17c0 4-2 7-5 9l-9 6" fill="none" stroke="#26344D" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m60 60 7 7-6 6-7-7Z" fill="#26344D"/>
+  <path d="m56 66 5 5 3-3" fill="none" stroke="#DCA64E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 28H23" fill="none" stroke="#AB8FAC" stroke-width="3" stroke-linecap="round"/></svg>

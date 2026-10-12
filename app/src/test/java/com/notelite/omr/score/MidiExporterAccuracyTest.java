@@ -153,7 +153,8 @@ public class MidiExporterAccuracyTest
         s = score(); p = part(s); m = measure(p, 480); e = new ArrayList<>();
         Note a = note("C", 4, 480); a.setVoice("1"); tie(a, StartStop.START);
         Note b = note("C", 4, 480); b.setVoice("1"); tie(b, StartStop.STOP);
-        Note d = note("C", 4, 240); d.setVoice("2"); tie(d, StartStop.START);
+        // Both tie starts reach the next measure; voice 2 then ends halfway through it.
+        Note d = note("C", 4, 480); d.setVoice("2"); tie(d, StartStop.START);
         Note f = note("C", 4, 240); f.setVoice("2"); tie(f, StartStop.STOP);
         backup = new Backup(); backup.setDuration(bd(480));
         m.getNoteOrBackupOrForward().addAll(List.of(a, backup, d));

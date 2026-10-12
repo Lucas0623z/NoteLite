@@ -1,0 +1,15 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- outer keyboard -->
+  <rect x="8" y="14" width="40" height="36" rx="8" fill="white" stroke="#2F3136" stroke-width="3"/>
+
+  <!-- three white keys -->
+  <path d="M21.333 15.5V48.5" stroke="#2F3136" stroke-width="2"/>
+  <path d="M34.667 15.5V48.5" stroke="#2F3136" stroke-width="2"/>
+
+  <!-- two black keys centered on the white-key divider lines -->
+  <rect x="18.433" y="16.5" width="5.8" height="13.2" rx="2.4" fill="#2F3136"/>
+  <rect x="31.767" y="16.5" width="5.8" height="13.2" rx="2.4" fill="#2F3136"/>
+
+  <!-- sparkle -->
+  <path d="M50 10L51.6 13.9L55.5 15.5L51.6 17.1L50 21L48.4 17.1L44.5 15.5L48.4 13.9L50 10Z" fill="#9B8CFF"/>
+</svg>

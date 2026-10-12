@@ -246,7 +246,7 @@ function validateRecording(){
   if(!selected.length)throw new Error('所选范围没有可练习的音符。');
   if(score.issues.some(i=>(range.part==='all'||i.part===range.part)&&i.mi>=range.from-1&&i.mi<range.to))throw new Error('所选小节时值超过拍号，请先校对乐谱。');
   if(resolvedSelected().some(p=>!p.reliable)){openSettings('instrument-choice');throw new Error('请先逐声部确认演奏乐器。');}
-  if(!engines.basicPitch)throw new Error('此安装包没有 Basic Pitch 本地组件。');
+  if(!engines.basicPitch)throw new Error('此安装包没有 NoteWise 本机录音分析组件。');
   if(Number($('a4').value)!==440){openSettings('a4');throw new Error('录音分析目前使用标准 A4=440 Hz，请先将调音设为 440。');}
   return selected;
 }

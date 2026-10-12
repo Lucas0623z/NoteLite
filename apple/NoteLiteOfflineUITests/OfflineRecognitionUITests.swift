@@ -31,7 +31,7 @@ final class OfflineRecognitionUITests: XCTestCase {
         // Reopen the stored result without a fixture-import argument or another
         // recognition request. The script also checks its persisted XML/MIDI.
         app.terminate()
-        app.launchArguments = []
+        app.launchArguments = ["--uitesting-legacy"]
         app.launch()
         let restoredScore = app.descendants(matching: .any).matching(identifier: "score-row").firstMatch
         XCTAssertTrue(restoredScore.waitForExistence(timeout: 30))

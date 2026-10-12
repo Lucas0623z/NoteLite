@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 2,
+  "upstream": "Spotify Basic Pitch",
+  "version": "0.4.0",
+  "license": "Apache-2.0",
+  "sourceWheel": {
+    "url": "https://files.pythonhosted.org/packages/99/0e/3a36d22562daeb0ae3c78ac78da3f8dba96543c5576ed57d4acb8ddbab5b/basic_pitch-0.4.0-py2.py3-none-any.whl",
+    "sha256": "738adb503aae7fdfc7d1e1511aa0ce35052315f260a19531ef4c356708425db0",
+    "size": 758279
+  },
+  "model": {
+    "input": "input_2",
+    "shape": [
+      1,
+      43844,
+      1
+    ],
+    "outputs": {
+      "Identity_1": [
+        1,
+        172,
+        88
+      ],
+      "Identity_2": [
+        1,
+        172,
+        88
+      ],
+      "Identity": [
+        1,
+        172,
+        264
+      ]
+    },
+    "sampleRate": 22050,
+    "midiRange": [
+      21,
+      108
+    ]
+  },
+  "files": [
+    {
+      "path": "NoteWiseBasicPitch.mlpackage/Manifest.json",
+      "size": 617,
+      "sha256": "c1fa5ef8acc34703edcd4e90e9a8640bd4673d9f3a68753c3b9d1ca0365e2928"
+    },
+    {
+      "path": "NoteWiseBasicPitch.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+      "size": 124079,
+      "sha256": "554ac08be6f61d262fc99ac3ee0b1a4af8b0a3a8530f96bde0cffbb4d099b183"
+    },
+    {
+      "path": "NoteWiseBasicPitch.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+      "size": 145956,
+      "sha256": "691a6b63c7ddcdde0ee131ff3986dcb1250df47cd738612efde966ba9b4c99cd"
+    },
+    {
+      "path": "BASIC-PITCH-LICENSE",
+      "size": 11384,
+      "sha256": "929c910bae2152fa87199a5d0660e09263419b7eee6d4b301d05ee2aaf211c37"
+    }
+  ],
+  "upstreamFiles": [
+    {
+      "path": "NoteWiseBasicPitch.mlpackage/Manifest.json",
+      "size": 617,
+      "sha256": "c1fa5ef8acc34703edcd4e90e9a8640bd4673d9f3a68753c3b9d1ca0365e2928"
+    },
+    {
+      "path": "NoteWiseBasicPitch.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+      "size": 123027,
+      "sha256": "af7bf7d49bc167e0bf0c30aa2ca6b432c3e10df048d2dd4173ff3a738c020858"
+    },
+    {
+      "path": "NoteWiseBasicPitch.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+      "size": 145956,
+      "sha256": "691a6b63c7ddcdde0ee131ff3986dcb1250df47cd738612efde966ba9b4c99cd"
+    },
+    {
+      "path": "BASIC-PITCH-LICENSE",
+      "size": 11384,
+      "sha256": "929c910bae2152fa87199a5d0660e09263419b7eee6d4b301d05ee2aaf211c37"
+    }
+  ],
+  "localPatches": [
+    {
+      "patchId": "tf-divide-no-nan-coreml5-v1",
+      "upstreamModelSha256": "af7bf7d49bc167e0bf0c30aa2ca6b432c3e10df048d2dd4173ff3a738c020858",
+      "patchedModelSha256": "554ac08be6f61d262fc99ac3ee0b1a4af8b0a3a8530f96bde0cffbb4d099b183",
+      "semantics": "Return zero wherever denominator equals exactly zero; otherwise preserve x/y. No epsilon, weight or activation threshold change.",
+      "weightsChanged": false,
+      "provenanceFiles": [
+        {
+          "path": "scripts/patch-notewise-coreml.py",
+          "size": 5460,
+          "sha256": "e2b194c36df435cb154efe311d93f137d3492a428037745a97c52807da96ecfe"
+        },
+        {
+          "path": "NoteWiseModels/DIVIDE-NO-NAN-PATCH.json",
+          "size": 2960,
+          "sha256": "43bae33a69b167b2cad751ddf9c3ea9738c732e526dcba1e8bed976ac1afe7d5"
+        }
+      ]
+    }
+  ]
+}

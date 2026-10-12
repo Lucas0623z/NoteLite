@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 2,
+  "contract": "notewise-history-1",
+  "status": "uncertain",
+  "source": "client-reported",
+  "verifiedByServer": false,
+  "takeId": "33333333-3333-4333-8333-333333333333",
+  "eventId": "33333333-3333-4333-8333-333333333333",
+  "sourceScoreSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scoreRevision": 1,
+  "inputKind": "midi",
+  "detectorVersion": "midi-stream-2",
+  "matcherVersion": "online-occurrence-2",
+  "judgeRulesVersion": "active-feedback-2",
+  "normalizerVersion": "musicxml-repeat-tie-2",
+  "mode": "strict",
+  "bpm": 60,
+  "tuning": 440,
+  "captureClock": {
+    "source": "host-monotonic",
+    "unit": "ms",
+    "timingCalibrated": false,
+    "phaseAnchor": "midi-1"
+  },
+  "capabilities": {
+    "pitch": true,
+    "onset": true,
+    "duration": true,
+    "intonation": false,
+    "polyphony": true,
+    "recording": false
+  },
+  "attempts": [
+    {
+      "attemptId": "33333333-3333-4333-8333-333333333333:1",
+      "startMs": 0,
+      "endMs": 2200,
+      "interrupted": false
+    }
+  ],
+  "expected": [
+    {
+      "partId": "P1",
+      "measureIndex": 0,
+      "noteIndex": 0,
+      "sourceNoteId": "P1:0:0",
+      "occurrenceId": "P1:0:0@1",
+      "occurrenceOrdinal": 1,
+      "midi": 60,
+      "writtenMidi": 60,
+      "step": "C",
+      "alter": 0,
+      "octave": 4,
+      "transpose": 0,
+      "voice": "1",
+      "staff": "1",
+      "startMs": 0,
+      "durationMs": 1000,
+      "onsetBeat": 0,
+      "durationBeat": 1
+    },
+    {
+      "partId": "P1",
+      "measureIndex": 0,
+      "noteIndex": 1,
+      "sourceNoteId": "P1:0:1",
+      "occurrenceId": "P1:0:1@1",
+      "occurrenceOrdinal": 1,
+      "midi": 62,
+      "writtenMidi": 62,
+      "step": "D",
+      "alter": 0,
+      "octave": 4,
+      "transpose": 0,
+      "voice": "1",
+      "staff": "1",
+      "startMs": 1000,
+      "durationMs": 1000,
+      "onsetBeat": 1,
+      "durationBeat": 1
+    }
+  ],
+  "actualEvents": [
+    {
+      "eventId": "midi-1",
+      "type": "on",
+      "midi": 60,
+      "timeMs": 150,
+      "confidence": 1,
+      "timingConfidence": 1,
+      "centsEvidence": "none"
+    },
+    {
+      "eventId": "midi-1",
+      "type": "off",
+      "midi": 60,
+      "timeMs": 1150,
+      "confidence": 1,
+      "timingConfidence": 1,
+      "releaseReliable": true,
+      "centsEvidence": "none"
+    },
+    {
+      "eventId": "midi-2",
+      "type": "on",
+      "midi": 62,
+      "timeMs": 1150,
+      "confidence": 1,
+      "timingConfidence": 1,
+      "centsEvidence": "none"
+    },
+    {
+      "eventId": "midi-2",
+      "type": "off",
+      "midi": 62,
+      "timeMs": 2150,
+      "confidence": 1,
+      "timingConfidence": 1,
+      "releaseReliable": true,
+      "centsEvidence": "none"
+    }
+  ],
+  "opportunities": [
+    {
+      "opportunityId": "33333333-3333-4333-8333-333333333333:1:P1:0:0@1:60",
+      "attemptId": "33333333-3333-4333-8333-333333333333:1",
+      "occurrenceId": "P1:0:0@1",
+      "sourceNoteIds": [
+        "P1:0:0"
+      ],
+      "expectedMidi": 60,
+      "entered": true,
+      "terminal": true,
+      "completed": true,
+      "evaluated": true,
+      "outcome": "correct",
+      "actualEventIds": [
+        "midi-1"
+      ],
+      "dimensions": {
+        "pitch": {
+          "eligible": true,
+          "outcome": "correct"
+        },
+        "onset": {
+          "eligible": true,
+          "outcome": "correct",
+          "error": 0
+        },
+        "duration": {
+          "eligible": true,
+          "outcome": "correct",
+          "error": 0
+        },
+        "intonation": {
+          "eligible": false,
+          "outcome": "unavailable",
+          "reason": "MIDI不提供连续音准证据"
+        }
+      },
+      "partId": "P1",
+      "measureIndex": 0,
+      "noteIndex": 0,
+      "voice": "1",
+      "staff": "1",
+      "onsetBeat": 0,
+      "durationBeat": 1,
+      "firstTryCorrect": true
+    },
+    {
+      "opportunityId": "33333333-3333-4333-8333-333333333333:1:P1:0:1@1:62",
+      "attemptId": "33333333-3333-4333-8333-333333333333:1",
+      "occurrenceId": "P1:0:1@1",
+      "sourceNoteIds": [
+        "P1:0:1"
+      ],
+      "expectedMidi": 62,
+      "entered": true,
+      "terminal": true,
+      "completed": true,
+      "evaluated": true,
+      "outcome": "correct",
+      "actualEventIds": [
+        "midi-2"
+      ],
+      "dimensions": {
+        "pitch": {
+          "eligible": true,
+          "outcome": "correct"
+        },
+        "onset": {
+          "eligible": true,
+          "outcome": "correct",
+          "error": 0
+        },
+        "duration": {
+          "eligible": true,
+          "outcome": "correct",
+          "error": 0
+        },
+        "intonation": {
+          "eligible": false,
+          "outcome": "unavailable",
+          "reason": "MIDI不提供连续音准证据"
+        }
+      },
+      "partId": "P1",
+      "measureIndex": 0,
+      "noteIndex": 1,
+      "voice": "1",
+      "staff": "1",
+      "onsetBeat": 1,
+      "durationBeat": 1,
+      "firstTryCorrect": true
+    }
+  ],
+  "errors": [],
+  "coverageByDimension": {
+    "pitch": {
+      "eligible": 2,
+      "evaluated": 2,
+      "failed": 0,
+      "pending": 0
+    },
+    "onset": {
+      "eligible": 2,
+      "evaluated": 2,
+      "failed": 0,
+      "pending": 0
+    },
+    "duration": {
+      "eligible": 2,
+      "evaluated": 2,
+      "failed": 0,
+      "pending": 0
+    },
+    "intonation": {
+      "eligible": 0,
+      "evaluated": 0,
+      "failed": 0,
+      "pending": 0
+    }
+  },
+  "uncertainty": [],
+  "completed": true,
+  "terminal": true,
+  "performanceDurationMs": 2200
+}

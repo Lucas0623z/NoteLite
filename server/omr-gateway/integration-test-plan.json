@@ -1,0 +1,24 @@
+{
+  "status": "test_design_not_yet_executed",
+  "cases": [
+    {"name":"secure_entry","check":"Trusted HTTPS certificate at the actual entry; no ATS exceptions; no credential redirects"},
+    {"name":"real_png_round_trip","input":"official allegretto.png","check":"Upload from frontend, complete real cloud OMR, render all 17 bars, export MusicXML and MIDI"},
+    {"name":"real_pdf_all_pages","input":"official Dichterliebe01.pdf","check":"Recognize both pages, show all 27 bars and all movements, verify MIDI and XML"},
+    {"name":"pitch_edit","check":"Change one pitched note in actual design editing UI, save revision, verify changed XML pitch and corresponding MIDI note events"},
+    {"name":"duration_edit","check":"Change note duration, save revision, verify XML duration and MIDI note length agree"},
+    {"name":"reload_saved","check":"Refresh app, reopen same job, preserve saved revision and edited note"},
+    {"name":"stale_revision","check":"Two editors save conflicting changes; second gets 409 and preserves unsaved local edits"},
+    {"name":"failed_edit_rollback","check":"Invalid MusicXML and failing MIDI conversion leave current revision, XML and MIDI unchanged"},
+    {"name":"revision_export_consistency","check":"If job changes during parallel downloads, mismatched ETags trigger re-fetch, never combining different revisions"},
+    {"name":"owner_authorization","check":"Different owner's guessed UUID cannot read, edit, export or inspect original/log; returns 404"},
+    {"name":"same_owner_devices","check":"Different authorized device credentials for same owner can access the same saved job"},
+    {"name":"credential_absence","check":"No administrator bearer or client device bearer embedded in generated bundle, source, URLs or logs"},
+    {"name":"origin_csrf","check":"Browser request from an untrusted origin or without required CSRF header cannot create/edit jobs"},
+    {"name":"offline_resume","check":"Once a job ID is saved, transient polling failure resumes query rather than re-uploading"},
+    {"name":"restart_persistence","check":"Restart only own service, retain job owner mapping, completed revision and exports"},
+    {"name":"iphone_orientation","check":"Compare actual frontend iPhone portrait/landscape proportions and layout with the supplied Figma reference"},
+    {"name":"ipad_orientation","check":"Compare actual frontend iPad portrait/landscape proportions and layout with the supplied Figma reference"},
+    {"name":"mac_layout","check":"Compare actual frontend Mac layout and resize rules with the supplied Figma reference"}
+  ],
+  "audio_integration_gate": "Only begin actual listening-engine integration after layout comparison and real cloud OMR/editor acceptance have passed"
+}
