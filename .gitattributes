@@ -17,3 +17,4 @@ apple/NoteLite/ReleaseFeatures.swift text eol=lf
 # CoreML provenance checksums describe exact asset and patch-script bytes.
 apple/NoteWiseModels/** -text
 apple/scripts/patch-notewise-coreml.py text eol=lf
+apple/scripts/fixtures/NoteLite-Xcode-26.6-original.xctestrun -text

@@ -321,9 +321,11 @@ jobs:
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY=-
       - name: Package and verify complete signed simulator test products
         id: package_products
+        env:
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
         run: |
           python3 -B apple/scripts/simulator_test_products.py package \
-            --archive apple/NoteLite-simulator-tests.tar.gz
+            --archive apple/NoteLite-simulator-tests.tar.gz --device-id "$DEVICE_ID"
       - uses: actions/upload-artifact@v4
         id: upload_products
         with:
@@ -369,15 +371,6 @@ jobs:
           merge-multiple: true
       - name: Prepare the current commit source offer
         run: python3 -B apple/release/legal_resources.py prepare
-      - name: Verify and restore the same-run signed test products
-        id: restore_products
-        env:
-          PRODUCT_ARCHIVE_SHA256: ${{ needs.simulator-test-build.outputs.archive_sha256 }}
-        run: |
-          python3 -B apple/scripts/simulator_test_products.py restore \
-            --archive apple/SimulatorTestDownload/NoteLite-simulator-tests.tar.gz \
-            --destination "$RUNNER_TEMP/notelite-simulator-tests" \
-            --expected-sha256 "$PRODUCT_ARCHIVE_SHA256"
       - name: Create and boot dedicated screenshot simulator
         id: simulator
         timeout-minutes: 5
@@ -391,6 +384,16 @@ jobs:
           echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$DEVICE_ID"
           xcrun simctl bootstatus "$DEVICE_ID" -b | tee apple/SimulatorResults/boot.log
+      - name: Verify and restore the same-run signed test products
+        id: restore_products
+        env:
+          PRODUCT_ARCHIVE_SHA256: ${{ needs.simulator-test-build.outputs.archive_sha256 }}
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+        run: |
+          python3 -B apple/scripts/simulator_test_products.py restore \
+            --archive apple/SimulatorTestDownload/NoteLite-simulator-tests.tar.gz \
+            --destination "$RUNNER_TEMP/notelite-simulator-tests" \
+            --expected-sha256 "$PRODUCT_ARCHIVE_SHA256" --device-id "$DEVICE_ID"
       - name: Test native interface and model
         if: ${{ success() && steps.restore_products.outcome == 'success' }}
         timeout-minutes: 25

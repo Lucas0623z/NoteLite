@@ -26,12 +26,17 @@ import unicodedata
 
 ARCHIVE_ROOT = "SimulatorTestProducts"
 TARGETS = {"NoteLiteTests", "NoteLiteUITests"}
-IDENTITY_FIELDS = ("sourceCommit", "runId", "runAttempt", "toolchain", "sourceInputs")
+IDENTITY_FIELDS = ("sourceCommit", "runId", "runAttempt", "toolchain", "simulatorRuntime", "sourceInputs")
 LEGAL_NAMES = {"AGPL-3.0-LICENSE.txt", "AUDIVERISCORE-NOTICE.md", "CORRESPONDING-SOURCE.md",
                "AUDIVERISCORE-PROVENANCE.json", "SOURCE-OFFER.json"}
 MAX_MEMBERS = 100000
 MAX_BYTES = 16 * 1024 ** 3
 ENGINEERING_PATH_KEYS = {"BlueprintPath", "BlueprintProviderRelativePath"}
+SYSTEM_INJECTION_HOOKS = {"/usr/lib/libRPAC.dylib",
+                          "__SIMRUNTIMEROOT__/usr/lib/libMainThreadChecker.dylib"}
+SEARCH_ENVIRONMENT_KEYS = {"DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH",
+                           "__XPC_DYLD_FRAMEWORK_PATH", "__XPC_DYLD_LIBRARY_PATH",
+                           "__XCODE_BUILT_PRODUCTS_DIR_PATHS"}
 INPUTS = ("practice-web/package-lock.json", "figma-ui/pnpm-lock.yaml", "apple/project.yml",
           "apple/NoteLite/NoteWiseProfiles.json", "apple/NoteWiseModels/MODEL-LOCK.json",
           "apple/NoteWiseModels/DIVIDE-NO-NAN-PATCH.json", "apple/NoteWiseModels/BASIC-PITCH-LICENSE",
@@ -39,7 +44,8 @@ INPUTS = ("practice-web/package-lock.json", "figma-ui/pnpm-lock.yaml", "apple/pr
           "apple/scripts/prepare-figma-ui.py", "apple/scripts/prepare-notewise-model.py",
           "apple/scripts/prepare-notewise-profiles.mjs", "apple/scripts/select-xcode.sh",
           "apple/scripts/install-xcodegen.sh",
-          "apple/release/legal_resources.py", ".github/workflows/apple-client.yml")
+          "apple/release/legal_resources.py", "tools/audiveris-port/manage-embedded-simulators.py",
+          ".github/workflows/apple-client.yml")
 
 
 def require(condition, message):
@@ -230,9 +236,10 @@ def _targets(document):
     return version, values
 
 
-def _runtime_path(value, products, platforms, host=None):
-    require(isinstance(value, str) and value and "\n" not in value and "\0" not in value
-            and "\\" not in value, "Invalid xctestrun runtime path")
+def _portable_path(value, products, platforms, host=None):
+    require(isinstance(value, str) and value and len(value) <= 2048
+            and not re.search(r"[\x00-\x1f\x7f]", value) and "\\" not in value,
+            "Invalid xctestrun runtime path")
     choices = {"__TESTROOT__": products, "__PLATFORMS__": platforms}
     if host is not None:
         choices["__TESTHOST__"] = host
@@ -243,8 +250,38 @@ def _runtime_path(value, products, platforms, host=None):
             "Escaping xctestrun runtime path")
     root = choices[token]
     output = root / suffix if suffix else root
-    within(output, platforms if token == "__PLATFORMS__" else products)
+    return output, platforms if token == "__PLATFORMS__" else products
+
+
+def _runtime_path(value, products, platforms, host=None):
+    output, boundary = _portable_path(value, products, platforms, host)
+    within(output, boundary)
     return output
+
+
+def _search_path(value, products, platforms, host=None):
+    """dyld search directories may be absent, but no existing ancestor may escape."""
+    output, boundary = _portable_path(value, products, platforms, host)
+    try:
+        output.resolve(strict=False).relative_to(boundary.resolve(strict=True))
+        existing = output
+        while not existing.exists() and not existing.is_symlink():
+            existing = existing.parent
+        actual = within(existing, boundary)
+        require(actual.is_dir(), "A dynamic loader search ancestor must be a directory")
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ValueError("Dynamic loader search path escaped its root or has an invalid ancestor") from error
+    return output
+
+
+def _injection_path(value, products, platforms, host=None):
+    # These exact hooks occur in the original Xcode test plan; package/restore bind
+    # the actual simulator runtime. Do not claim an ordinary product file exists.
+    # This exception never applies to search paths, test bundles or arbitrary paths.
+    if value in SYSTEM_INJECTION_HOOKS:
+        return
+    output = _runtime_path(value, products, platforms, host)
+    require(output.is_file() and output.suffix == ".dylib", "Missing actual dynamic loader injection library")
 
 
 def validate_xctestrun(document: dict, products: Path, platforms: Path) -> dict:
@@ -296,12 +333,15 @@ def validate_xctestrun(document: dict, products: Path, platforms: Path) -> dict:
             elif key.endswith("EnvironmentVariables"):
                 require(isinstance(value, dict), "Invalid test environment")
                 for env_key, env_value in value.items():
-                    if env_key in ("DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES"):
-                        require(isinstance(env_value, str), "Invalid dynamic loader environment")
+                    if env_key in SEARCH_ENVIRONMENT_KEYS or env_key == "DYLD_INSERT_LIBRARIES":
+                        require(isinstance(env_value, str) and len(env_value) <= 8192, "Invalid dynamic loader environment")
                         for path in env_value.split(":"):
                             if path:
                                 try:
-                                    _runtime_path(path, products, platforms, host)
+                                    if env_key == "DYLD_INSERT_LIBRARIES":
+                                        _injection_path(path, products, platforms, host)
+                                    else:
+                                        _search_path(path, products, platforms, host)
                                 except ValueError as error:
                                     raise ValueError(name + "." + key + "." + env_key + ": " + str(error)) from error
         if name == "NoteLiteUITests":
@@ -413,7 +453,43 @@ def command(*arguments):
     return subprocess.run(arguments, check=True, capture_output=True, text=True, timeout=120).stdout.strip()
 
 
-def current_identity(repo):
+def simulator_runtime_identity(device_id):
+    """Bind to the available, booted destination's actual runtime, not its mount path or UDID."""
+    require(isinstance(device_id, str) and re.fullmatch(r"[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}", device_id),
+            "A real created simulator device ID is required")
+    device_document = json.loads(command("xcrun", "simctl", "list", "devices", "--json"))
+    require(isinstance(device_document, dict), "Invalid actual CoreSimulator device listing")
+    devices = device_document.get("devices")
+    require(isinstance(devices, dict) and all(isinstance(values, list) for values in devices.values()),
+            "Invalid actual CoreSimulator device listing")
+    matches = [(identifier, device) for identifier, values in devices.items() for device in values
+               if isinstance(device, dict) and str(device.get("udid", "")).upper() == device_id.upper()]
+    require(len(matches) == 1, "The simulator destination must identify exactly one actual device")
+    identifier, device = matches[0]
+    require(device.get("isAvailable") is True and device.get("state") == "Booted",
+            "The actual simulator destination must be available and booted")
+    runtime_document = json.loads(command("xcrun", "simctl", "list", "runtimes", "--json"))
+    require(isinstance(runtime_document, dict), "Invalid actual CoreSimulator runtime listing")
+    runtimes = runtime_document.get("runtimes")
+    require(isinstance(runtimes, list), "Invalid actual CoreSimulator runtime listing")
+    matches = [runtime for runtime in runtimes if isinstance(runtime, dict) and runtime.get("identifier") == identifier]
+    require(len(matches) == 1, "The actual simulator runtime must have exactly one installed identity")
+    runtime = matches[0]
+    version = runtime.get("version")
+    build = runtime.get("buildversion")
+    require(isinstance(version, str) and re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", version)
+            and isinstance(identifier, str) and re.fullmatch(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9]+(?:-[0-9]+){1,2}", identifier)
+            and int(version.split(".")[0]) >= 26
+            and isinstance(build, str) and re.fullmatch(r"[A-Za-z0-9]{1,32}", build)
+            and runtime.get("isAvailable") is True and isinstance(runtime.get("supportedArchitectures"), list)
+            and "arm64" in runtime["supportedArchitectures"],
+            "An available iOS 26 or newer arm64 simulator runtime with an exact build is required")
+    architecture = command("xcrun", "simctl", "spawn", device_id, "uname", "-m")
+    require(architecture == "arm64", "The actual booted simulator architecture must be arm64")
+    return {"identifier": identifier, "version": version, "buildVersion": build, "architecture": architecture}
+
+
+def current_identity(repo, device_id):
     commit = command("git", "-C", str(repo), "rev-parse", "HEAD")
     require(re.fullmatch(r"[a-f0-9]{40}", commit) and commit == os.environ.get("GITHUB_SHA"),
             "Expected a clean checkout of the exact GitHub source commit")
@@ -436,7 +512,8 @@ def current_identity(repo):
     require(re.fullmatch(r"[0-9]+", os.environ.get("GITHUB_RUN_ID", "")) and
             re.fullmatch(r"[0-9]+", os.environ.get("GITHUB_RUN_ATTEMPT", "")), "Missing current GitHub run identity")
     return {"sourceCommit": commit, "runId": os.environ["GITHUB_RUN_ID"],
-            "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"], "toolchain": toolchain, "sourceInputs": inputs}
+            "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"], "toolchain": toolchain,
+            "simulatorRuntime": simulator_runtime_identity(device_id), "sourceInputs": inputs}
 
 
 def verify_resources(repo, products, plan, expected=None):
@@ -466,8 +543,8 @@ def output(name, value):
         stream.write(name + "=" + str(value) + "\n")
 
 
-def package(repo, archive):
-    identity = current_identity(repo)
+def package(repo, archive, device_id):
+    identity = current_identity(repo, device_id)
     derived = Path.home() / "Library/Developer/Xcode/DerivedData"
     candidates = sorted(derived.glob("NoteLite-*/Build/Products/*.xctestrun"))
     require(len(candidates) == 1, "Expected exactly one original NoteLite xctestrun product")
@@ -500,10 +577,10 @@ def package(repo, archive):
                       "testPlan": plan, "productFiles": len(inventory)}, indent=2))
 
 
-def restore(repo, archive, destination, expected_sha):
+def restore(repo, archive, destination, expected_sha, device_id):
     require(re.fullmatch(r"[a-f0-9]{64}", expected_sha) and sha256(archive) == expected_sha,
             "Simulator product archive differs from the producer's checksum")
-    expected = current_identity(repo)
+    expected = current_identity(repo, device_id)
     root = safe_extract(archive, destination)
     manifest_path = root / "manifest.json"
     require(manifest_path.is_file() and not manifest_path.is_symlink() and manifest_path.stat().st_size <= 20 * 1024 ** 2,
@@ -524,7 +601,7 @@ def restore(repo, archive, destination, expected_sha):
     verify_resources(repo, products, plan, manifest.get("generatedResources"))
     evidence = {"sourceCommit": expected["sourceCommit"], "runId": expected["runId"],
                 "runAttempt": expected["runAttempt"], "archiveSHA256": expected_sha,
-                "toolchain": expected["toolchain"], "testPlan": plan,
+                "toolchain": expected["toolchain"], "simulatorRuntime": expected["simulatorRuntime"], "testPlan": plan,
                 "fullProductInventoryVerified": True, "generatedResourcesVerified": True,
                 "hostAndRunnerSignaturesVerified": True, "actualTestResults": "not run by this helper"}
     diagnostics = repo / "apple/Screenshots/native-diagnostics"
@@ -540,13 +617,14 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--expected-sha256")
+    parser.add_argument("--device-id", required=True, help="Already created and booted actual simulator destination")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     if args.action == "package":
-        package(repo, args.archive.absolute())
+        package(repo, args.archive.absolute(), args.device_id)
     else:
         require(args.destination is not None and args.expected_sha256 is not None, "Restore requires destination and producer checksum")
-        restore(repo, args.archive.absolute(), args.destination.absolute(), args.expected_sha256)
+        restore(repo, args.archive.absolute(), args.destination.absolute(), args.expected_sha256, args.device_id)
 
 
 if __name__ == "__main__":

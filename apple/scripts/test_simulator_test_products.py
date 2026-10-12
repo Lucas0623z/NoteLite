@@ -520,6 +520,141 @@ class XctestrunTests(Fixture):
         self.assertFalse((directory / "original-xctestrun-identity.json").exists())
         self.assertEqual(original.read_bytes(), raw)
 
+    def testActualXcodeProducerPlistValidatesWithoutChangingItsBytesOrDictionary(self):
+        source = Path(__file__).parent / "fixtures/NoteLite-Xcode-26.6-original.xctestrun"
+        raw = source.read_bytes()
+        self.assertEqual(len(raw), 8997)
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         "3cb5b43304f4ce03d2784e1b4e52d194a563f56c7bf6550d3b57749137e6e5d0")
+        # The original plist is genuine; this local resource tree is only a validator fixture.
+        local_injection = self.debug / "NoteLite.app/Frameworks/libXCTestBundleInject.dylib"
+        local_injection.parent.mkdir(parents=True)
+        local_injection.write_bytes(b"local injection file fixture")
+        (self.platforms / "iPhoneSimulator.platform/Developer/usr/lib").mkdir(parents=True)
+        document = plistlib.loads(raw)
+        original = copy.deepcopy(document)
+        products.check_diagnostic_environment(document)
+        plan = self.validate(document)
+        self.assertEqual(plan["formatVersion"], 1)
+        self.assertEqual({target["name"] for target in plan["targets"]}, products.TARGETS)
+        self.assertEqual(document, original)
+        self.assertEqual(source.read_bytes(), raw)
+        self.assertFalse((self.debug / "PackageFrameworks").exists())
+
+    def testOnlyTwoExactSystemHooksAreAcceptedAsInsertedLibrariesInBothFormats(self):
+        hooks = "/usr/lib/libRPAC.dylib:__SIMRUNTIMEROOT__/usr/lib/libMainThreadChecker.dylib"
+        for version in (1, 2):
+            document = self.document(version)
+            for name in products.TARGETS:
+                target = self.target(document, version, name)
+                for environment in ["EnvironmentVariables", "TestingEnvironmentVariables",
+                                    "UITargetAppEnvironmentVariables"]:
+                    target.setdefault(environment, {})["DYLD_INSERT_LIBRARIES"] = hooks
+            original = copy.deepcopy(document)
+            plan = self.validate(document)
+            self.assertEqual({target["name"] for target in plan["targets"]}, products.TARGETS)
+            self.assertEqual(document, original)
+
+    def testOtherAbsoluteOrSimulatorRootInjectionsRemainRejected(self):
+        for version in (1, 2):
+            for path in ["/usr/lib/libOther.dylib", "/usr/lib/libRPAC.dylib/extra",
+                         "__SIMRUNTIMEROOT__/usr/lib/libOther.dylib",
+                         "__SIMRUNTIMEROOT__/../usr/lib/libMainThreadChecker.dylib",
+                         "__SIMRUNTIMEROOT__/usr/lib/libMainThreadChecker.dylib/extra"]:
+                document = self.document(version)
+                self.target(document, version, "NoteLiteTests")["EnvironmentVariables"]["DYLD_INSERT_LIBRARIES"] = path
+                with self.subTest(version=version, path=path), self.assertRaises(ValueError):
+                    self.validate(document)
+
+    def testExactSystemHooksAreNotGeneralRuntimeOrSearchPathExceptions(self):
+        search_keys = ["DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH", "__XPC_DYLD_FRAMEWORK_PATH",
+                       "__XPC_DYLD_LIBRARY_PATH", "__XCODE_BUILT_PRODUCTS_DIR_PATHS"]
+        for version in (1, 2):
+            for hook in ["/usr/lib/libRPAC.dylib", "__SIMRUNTIMEROOT__/usr/lib/libMainThreadChecker.dylib"]:
+                for key in search_keys:
+                    document = self.document(version)
+                    self.target(document, version, "NoteLiteTests")["TestingEnvironmentVariables"][key] = hook
+                    with self.subTest(version=version, key=key, hook=hook), self.assertRaises(ValueError):
+                        self.validate(document)
+                for name, field in [("NoteLiteTests", "TestHostPath"), ("NoteLiteTests", "TestBundlePath"),
+                                    ("NoteLiteUITests", "UITargetAppPath"),
+                                    ("NoteLiteTests", "DependentProductPaths")]:
+                    document = self.document(version)
+                    self.target(document, version, name)[field] = [hook] if field.endswith("Paths") else hook
+                    with self.subTest(version=version, field=field, hook=hook), self.assertRaises(ValueError):
+                        self.validate(document)
+
+    def testLocalBundleInjectionMustBeAnExistingOrdinaryFile(self):
+        injection = self.debug / "NoteLite.app/Frameworks/libXCTestBundleInject.dylib"
+        injection.parent.mkdir(parents=True)
+        injection.write_bytes(b"local injection file fixture")
+        document = self.document(1)
+        document["NoteLiteTests"]["TestingEnvironmentVariables"]["DYLD_INSERT_LIBRARIES"] = \
+            "__TESTHOST__/Frameworks/libXCTestBundleInject.dylib"
+        self.validate(document)
+        injection.unlink()
+        with self.assertRaises(ValueError):
+            self.validate(document)
+        injection.mkdir()
+        with self.assertRaises(ValueError):
+            self.validate(document)
+
+    def testMissingBoundedSearchDirectoriesAndAuxiliarySearchRootsAreValid(self):
+        missing = "__TESTROOT__/Debug-iphonesimulator/PackageFrameworks"
+        keys = ["DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH", "__XPC_DYLD_FRAMEWORK_PATH",
+                "__XPC_DYLD_LIBRARY_PATH", "__XCODE_BUILT_PRODUCTS_DIR_PATHS"]
+        self.assertFalse((self.debug / "PackageFrameworks").exists())
+        for version in (1, 2):
+            document = self.document(version)
+            for name in products.TARGETS:
+                for group in ["EnvironmentVariables", "TestingEnvironmentVariables",
+                              "UITargetAppEnvironmentVariables"]:
+                    target = self.target(document, version, name)
+                    for key in keys:
+                        target.setdefault(group, {})[key] = missing
+            original = copy.deepcopy(document)
+            self.assertEqual(len(self.validate(document)["targets"]), 2)
+            self.assertEqual(document, original)
+        self.assertFalse((self.debug / "PackageFrameworks").exists(), "Do not synthesize absent search directories")
+
+    def testSearchRootsRejectAbsoluteTraversalAndExistingNonDirectoryPaths(self):
+        (self.debug / "ordinary-file").write_bytes(b"not a directory")
+        keys = ["DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH", "__XPC_DYLD_FRAMEWORK_PATH",
+                "__XPC_DYLD_LIBRARY_PATH", "__XCODE_BUILT_PRODUCTS_DIR_PATHS"]
+        for version in (1, 2):
+            for key in keys:
+                for path in ["/Users/compiler/DerivedData/PackageFrameworks", "__TESTROOT__/../missing",
+                             "__TESTROOT__/Debug-iphonesimulator/../../outside",
+                             "__TESTROOT__/Debug-iphonesimulator/ordinary-file"]:
+                    document = self.document(version)
+                    self.target(document, version, "NoteLiteTests")["TestingEnvironmentVariables"][key] = path
+                    with self.subTest(version=version, key=key, path=path), self.assertRaises(ValueError):
+                        self.validate(document)
+
+    def testSearchDirectorySymlinkCannotEscapeRootsEvenWhenFinalDirectoryIsMissing(self):
+        outside = self.base / "outside-search"
+        outside.mkdir()
+        self.link(self.debug / "external-search", "../../outside-search", directory=True)
+        for key in ["DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH", "__XPC_DYLD_FRAMEWORK_PATH",
+                    "__XPC_DYLD_LIBRARY_PATH", "__XCODE_BUILT_PRODUCTS_DIR_PATHS"]:
+            document = self.document(1)
+            document["NoteLiteTests"]["TestingEnvironmentVariables"][key] = \
+                "__TESTROOT__/Debug-iphonesimulator/external-search/missing-directory"
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.validate(document)
+
+    def testMissingRequiredHostBundlesAndDependentProductsAreNeverSearchExceptions(self):
+        for version in (1, 2):
+            self.validate(self.document(version))
+            for name, field, path in [("NoteLiteTests", "TestHostPath", "__TESTROOT__/missing.app"),
+                                      ("NoteLiteTests", "TestBundlePath", "__TESTHOST__/PlugIns/Missing.xctest"),
+                                      ("NoteLiteUITests", "UITargetAppPath", "__TESTROOT__/missing.app"),
+                                      ("NoteLiteTests", "DependentProductPaths", "__TESTROOT__/missing.app")]:
+                document = self.document(version)
+                self.target(document, version, name)[field] = [path] if field.endswith("Paths") else path
+                with self.subTest(version=version, field=field), self.assertRaises(ValueError):
+                    self.validate(document)
+
     def testDefaultFormatOneAndAbsentEmptySwiftPathsRemainValid(self):
         document = copy.deepcopy(self.targets)
         for target in document.values():
@@ -634,10 +769,126 @@ class XctestrunTests(Fixture):
             self.validate(document)
 
 
+class SimulatorRuntimeTests(unittest.TestCase):
+    device_id = "12345678-1234-1234-1234-123456789ABC"
+    runtime_id = "com.apple.CoreSimulator.SimRuntime.iOS-26-6"
+
+    def fixtures(self):
+        devices = {"devices": {self.runtime_id: [{"udid": self.device_id,
+                    "isAvailable": True, "state": "Booted"}]}}
+        runtimes = {"runtimes": [{"identifier": self.runtime_id, "version": "26.6",
+                    "buildversion": "23A123", "isAvailable": True,
+                    "supportedArchitectures": ["arm64"]}]}
+        return devices, runtimes
+
+    def resolve(self, devices, runtimes, architecture="arm64", device_id=None):
+        destination = self.device_id if device_id is None else device_id
+        calls = []
+
+        def command(*arguments):
+            calls.append(arguments)
+            if arguments == ("xcrun", "simctl", "list", "devices", "--json"):
+                return json.dumps(devices)
+            if arguments == ("xcrun", "simctl", "list", "runtimes", "--json"):
+                return json.dumps(runtimes)
+            if arguments == ("xcrun", "simctl", "spawn", destination, "uname", "-m"):
+                return architecture
+            raise AssertionError("Unexpected simulator identity command: " + repr(arguments))
+
+        with mock.patch.object(products, "command", side_effect=command):
+            identity = products.simulator_runtime_identity(destination)
+        return identity, calls
+
+    def testActualBootedDeviceRuntimeIdentityAndZeroPatchVersionAreAccepted(self):
+        for identifier, version in [(self.runtime_id, "26.6"),
+                                    ("com.apple.CoreSimulator.SimRuntime.iOS-26-5", "26.5.0")]:
+            devices, runtimes = self.fixtures()
+            devices["devices"][identifier] = devices["devices"].pop(self.runtime_id)
+            runtimes["runtimes"][0].update(identifier=identifier, version=version)
+            original = copy.deepcopy((devices, runtimes))
+            identity, calls = self.resolve(devices, runtimes)
+            with self.subTest(identifier=identifier, version=version):
+                self.assertEqual(identity, {"identifier": identifier, "version": version,
+                                            "buildVersion": "23A123", "architecture": "arm64"})
+                self.assertEqual(calls, [("xcrun", "simctl", "list", "devices", "--json"),
+                                        ("xcrun", "simctl", "list", "runtimes", "--json"),
+                                        ("xcrun", "simctl", "spawn", self.device_id, "uname", "-m")])
+                self.assertEqual((devices, runtimes), original)
+                self.assertNotIn(self.device_id, json.dumps(identity))
+
+    def testDeviceMustBeUniqueAvailableBootedAndBoundToItsInstalledRuntime(self):
+        devices, runtimes = self.fixtures()
+        self.resolve(devices, runtimes)
+        variants = []
+        for field, value in [("udid", "00000000-0000-0000-0000-000000000000"),
+                             ("isAvailable", False), ("isAvailable", 1), ("state", "Shutdown")]:
+            altered = copy.deepcopy(devices)
+            altered["devices"][self.runtime_id][0][field] = value
+            variants.append((field + "=" + str(value), altered))
+        altered = copy.deepcopy(devices)
+        altered["devices"][self.runtime_id].append(copy.deepcopy(altered["devices"][self.runtime_id][0]))
+        variants.append(("duplicated within runtime", altered))
+        altered = copy.deepcopy(devices)
+        altered["devices"]["com.apple.CoreSimulator.SimRuntime.iOS-26-5"] = copy.deepcopy(
+            altered["devices"][self.runtime_id])
+        variants.append(("duplicated across runtimes", altered))
+        altered = copy.deepcopy(devices)
+        altered["devices"]["com.apple.CoreSimulator.SimRuntime.iOS-26-5"] = altered["devices"].pop(self.runtime_id)
+        variants.append(("actual device runtime is not installed", altered))
+        variants.extend([("missing devices", {}), ("devices not a dictionary", {"devices": []}),
+                         ("runtime devices not a list", {"devices": {self.runtime_id: {}}})])
+        for label, altered in variants:
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                self.resolve(altered, runtimes)
+        for destination in ["iPhone 17", "", "/tmp/device", "12345678-1234-1234-1234-123456789ABZ"]:
+            with self.subTest(destination=destination), self.assertRaises(ValueError):
+                self.resolve(devices, runtimes, device_id=destination)
+
+    def testRuntimeRequiresUniqueAvailableModernIOSIdentityExactBuildAndArm64Support(self):
+        devices, runtimes = self.fixtures()
+        self.resolve(devices, runtimes)
+        variants = []
+        for field, value in [("identifier", "com.apple.CoreSimulator.SimRuntime.iOS-26-5"),
+                             ("version", "25.9"), ("version", "26"), ("version", "26.6\n"),
+                             ("buildversion", ""), ("buildversion", "23A123/foreign"),
+                             ("buildversion", "A" * 33), ("isAvailable", False),
+                             ("isAvailable", 1), ("supportedArchitectures", ["x86_64"]),
+                             ("supportedArchitectures", "arm64")]:
+            altered = copy.deepcopy(runtimes)
+            altered["runtimes"][0][field] = value
+            variants.append((field + "=" + str(value), devices, altered))
+        for field in ("version", "buildversion", "isAvailable", "supportedArchitectures"):
+            altered = copy.deepcopy(runtimes)
+            altered["runtimes"][0].pop(field)
+            variants.append(("missing " + field, devices, altered))
+        altered = copy.deepcopy(runtimes)
+        altered["runtimes"].append(copy.deepcopy(altered["runtimes"][0]))
+        variants.append(("duplicated runtime", devices, altered))
+        variants.extend([("missing runtimes", devices, {}), ("runtimes not a list", devices, {"runtimes": {}}),
+                         ("no matching runtime", devices, {"runtimes": []})])
+        for identifier in ("com.apple.CoreSimulator.SimRuntime.tvOS-26-6", self.runtime_id + "/escape"):
+            altered_devices, altered_runtimes = copy.deepcopy((devices, runtimes))
+            altered_devices["devices"][identifier] = altered_devices["devices"].pop(self.runtime_id)
+            altered_runtimes["runtimes"][0]["identifier"] = identifier
+            variants.append(("foreign identifier " + identifier, altered_devices, altered_runtimes))
+        for label, altered_devices, altered_runtimes in variants:
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                self.resolve(altered_devices, altered_runtimes)
+
+    def testActualSpawnedArchitectureMustBeExactlyArm64(self):
+        devices, runtimes = self.fixtures()
+        self.resolve(devices, runtimes)
+        for architecture in ("x86_64", "arm64e", "arm64\nx86_64", "", "ARM64"):
+            with self.subTest(architecture=architecture), self.assertRaises(ValueError):
+                self.resolve(devices, runtimes, architecture=architecture)
+
+
 class IdentityTests(unittest.TestCase):
     def fixture(self):
         return {"sourceCommit": "a" * 40, "runId": "123456", "runAttempt": "2",
                 "toolchain": {"xcodebuild": "Xcode 26.0\nBuild version 17A123", "architecture": "arm64"},
+                "simulatorRuntime": {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-6",
+                                     "version": "26.6", "buildVersion": "23A123", "architecture": "arm64"},
                 "sourceInputs": {"figma-ui/pnpm-lock.yaml": {"bytes": 12, "sha256": "b" * 64}}}
 
     def testExactlyMatchingFiveIdentityFieldsAreAccepted(self):
@@ -676,6 +927,17 @@ class IdentityTests(unittest.TestCase):
             actual = copy.deepcopy(expected)
             actual["sourceInputs"]["figma-ui/pnpm-lock.yaml"][key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
+                products.assert_identity(actual, expected)
+
+    def testEachSimulatorRuntimeIdentityFieldMustMatchTheProducerExactly(self):
+        for field, value in [("identifier", "com.apple.CoreSimulator.SimRuntime.iOS-26-5"),
+                             ("version", "26.5"), ("buildVersion", "23A124"),
+                             ("architecture", "x86_64")]:
+            expected = self.fixture()
+            actual = copy.deepcopy(expected)
+            self.assertIsNone(products.assert_identity(actual, expected))
+            actual["simulatorRuntime"][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
                 products.assert_identity(actual, expected)
 
 
