@@ -159,6 +159,12 @@ class ScoreToolsTest(unittest.TestCase):
         manual=normalize(data,{"instrument":"piano","metadata":{"origin":"local-omr","parts":[{"id":"P1","confirmed":False}]}})
         self.assertTrue(manual["parts"][0]["reliable"])
 
+    def test_confirmed_omr_correction_replaces_synthesized_playback_heading(self):
+        data=xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>').replace(b'<part-name>Clarinet</part-name>',b'<part-name>Piano</part-name>')
+        result=normalize(data,{"metadata":{"origin":"local-omr","parts":[{"id":"P1","name":"Flute","program":74,"confirmed":True}]}})
+        self.assertEqual("flute",result["parts"][0]["instrument"])
+        self.assertTrue(result["parts"][0]["transpositionConfirmed"])
+
     def test_imported_named_part_is_inferred_without_automatic_transposition(self):
         result=normalize(xml('<measure number="1">'+ATTR.format('')+note("C",2)+'</measure>'),{})
         self.assertEqual("clarinet",result["parts"][0]["instrument"])

@@ -59,19 +59,22 @@ def part_instrument(tree, part, options):
     if provenance.get("confirmed") is False or provenance.get("instrumentConfirmed") is False:
         return result
     score_part = next((p for p in tree.findall("part-list/score-part") if p.get("id") == part.id),None)
-    heading = score_part.findtext("part-name",part.part_name or "") if score_part is not None else part.part_name or ""
-    score_names = [p.findtext("instrument-name","") for p in score_part.findall("score-instrument")] if score_part is not None else []
-    score_names += provenance.get("instrumentNames",[]) or []
+    confirmed_omr = meta.get("origin")=="local-omr" and bool(provenance)
+    heading = (provenance.get("name") or provenance.get("abbreviation") or f"声部 {part.id}") if confirmed_omr else score_part.findtext("part-name",part.part_name or "") if score_part is not None else part.part_name or ""
+    # A confirmed OMR correction is authoritative over synthesized playback
+    # headers. Explicit per-note references are still resolved separately.
+    score_names = [] if confirmed_omr else [p.findtext("instrument-name","") for p in score_part.findall("score-instrument")] if score_part is not None else []
+    if not confirmed_omr: score_names += provenance.get("instrumentNames",[]) or []
     named_part = name_profile(heading)
     names = ([heading]+score_names) if named_part and named_part not in ("piano","voice") else (score_names+[heading])
     names += [provenance.get("name",""),provenance.get("abbreviation","")]
-    if score_part is not None:
+    if score_part is not None and not confirmed_omr:
         names += [score_part.findtext("part-abbreviation","")]+[p.findtext("instrument-abbreviation","") for p in score_part.findall("score-instrument")]
     for name in names:
         inferred = name_profile(name)
         if inferred:
             return result|{"instrument":inferred,"reliable":True,"provenance":"score-name","metadataName":name}
-    program_text = score_part.findtext("midi-instrument/midi-program") if score_part is not None else None
+    program_text = score_part.findtext("midi-instrument/midi-program") if score_part is not None and not confirmed_omr else None
     program = int(program_text) if program_text else int(provenance.get("program",0) or 0)
     explicit = program_text is not None or provenance.get("programExplicit",program>0)
     inferred = program_profile(program)
