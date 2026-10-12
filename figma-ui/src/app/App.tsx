@@ -1051,10 +1051,10 @@ function AccountPage({ isDark, streak, practiceCount, statisticsKnown, avatarSrc
       </section>
       <section className="mt-8"><h2 className="mb-4 text-[15px] font-medium text-[#aaa]">概览</h2>
         <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-[17px] font-bold">
-          <button type="button" onClick={() => onAction("连胜")} className="flex cursor-pointer items-center gap-2 text-left"><StreakNote active={streak > 0} isDark={isDark} className="h-7 w-7" /><span className={streak > 0 ? "" : "text-[#aaa]"}>{statisticsKnown ? streak : "—"} 天</span></button>
+          <button type="button" onClick={() => onAction("连胜")} className="flex cursor-pointer items-center gap-2 text-left"><StreakNote active={streak > 0} isDark={isDark} className="h-7 w-7" /><span className={streak > 0 ? "" : "text-[#aaa]"}>{statisticsKnown ? streak : 0} 天</span></button>
           <div className="flex items-center gap-2"><img src={isDark ? experienceDarkIcon : experienceLightIcon} alt="" className="h-7 w-7 object-contain" /><span>0 经验</span></div>
           <div className="flex items-center gap-2"><img src={isDark ? leaderboardDarkIcon : leaderboardLightIcon} alt="" className="h-7 w-7 object-contain" /><span>未上榜</span></div>
-          <div className="flex items-center gap-2"><img src={isDark ? checkinDarkIcon : checkinLightIcon} alt="" className="h-7 w-7 object-contain" /><span>{statisticsKnown ? practiceCount : "—"} 天打卡</span></div>
+          <div className="flex items-center gap-2"><img src={isDark ? checkinDarkIcon : checkinLightIcon} alt="" className="h-7 w-7 object-contain" /><span>{statisticsKnown ? practiceCount : 0} 天打卡</span></div>
         </div>
       </section>
       <section className="mt-8">
@@ -1268,7 +1268,7 @@ export default function App() {
             className={`flex h-11 min-w-16 cursor-pointer items-center justify-center gap-1.5 rounded-full px-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current ${streak > 0 ? isDark ? "text-[#d4d4d4]" : "text-[#666666]" : "text-[#8a8a8a]"} ${isDark ? "active:bg-white/15" : "active:bg-black/10"}`}
           >
             <StreakNote active={streak > 0} isDark={isDark} className="h-7 w-[25px] shrink-0" />
-            <span aria-live="polite" className="text-[17px] font-medium tabular-nums">{summary.known ? streak : "—"}</span>
+            <span aria-live="polite" className="text-[17px] font-medium tabular-nums">{summary.known ? streak : 0}</span>
           </button>
             </>
           )}
@@ -1353,7 +1353,7 @@ export default function App() {
             <div className="px-5 py-3">
               <section aria-label={summary.known ? `连续练琴 ${historyStreak} 天` : "练习记录尚未读取"} className="flex h-[clamp(90px,15dvh,130px)] items-center justify-between gap-3">
                 <div className="flex flex-col items-start">
-                  {!summary.known ? <span className="text-[clamp(60px,9dvh,86px)] font-extrabold leading-none">—</span> : historyStreak === 0 ? <svg role="img" aria-label="0" viewBox="0 0 110 160" className="h-[clamp(60px,9dvh,86px)] w-auto">
+                  {!summary.known || historyStreak === 0 ? <svg role="img" aria-label="0" viewBox="0 0 110 160" className="h-[clamp(60px,9dvh,86px)] w-auto">
                     <ellipse cx="55" cy="80" rx="49" ry="76" fill="#b3e38d" />
                     <ellipse cx="55" cy="80" rx="32" ry="58" fill="white" />
                     <ellipse cx="55" cy="80" rx="14" ry="38" fill="#b3e38d" />
@@ -1362,7 +1362,7 @@ export default function App() {
                     <span aria-hidden="true" className="[grid-area:1/1] text-white [-webkit-text-stroke:5px_white]">{historyStreak}</span>
                     <span className="[grid-area:1/1] text-[#b3e38d]">{historyStreak}</span>
                   </span>}
-                  <span className="mt-1 pl-5 text-[20px] font-bold leading-7 text-[#25351e]">{!summary.known ? "记录待读取" : historyStreak > 0 ? "天连胜啦！" : "天连续练琴"}</span>
+                  <span className="mt-1 pl-5 text-[20px] font-bold leading-7 text-[#25351e]">{summary.known && historyStreak > 0 ? "天连胜啦！" : "天连续练琴"}</span>
                 </div>
                 <StreakNote active={historyStreak > 0} isDark={isDark} className="mr-3 h-full w-[110px] shrink-0" />
               </section>
@@ -1393,11 +1393,11 @@ export default function App() {
               <div className="grid shrink-0 grid-cols-2 gap-3">
               <div className={`flex items-start gap-2 rounded-[20px] border-2 px-3 py-3 ${isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-1 shrink-0"><circle cx="12" cy="12" r="12" fill="#67db23" /><path d="m7 12 3 3 7-7" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                <div><span className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? monthlyPracticeDays : "—"}</span><p className="text-[15px] text-[#aaaaaa]">打卡天数</p></div>
+                <div><span className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? monthlyPracticeDays : 0}</span><p className="text-[15px] text-[#aaaaaa]">打卡天数</p></div>
               </div>
               <div className={`flex items-start gap-2 rounded-[20px] border-2 px-3 py-3 ${isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-1 shrink-0"><circle cx="12" cy="12" r="12" fill="#adadb7" /><path d="M7 12h10" stroke="white" strokeWidth="2.5" strokeLinecap="round" /></svg>
-                <div><span aria-describedby="checkin-rules" className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? missedPracticeDays : "—"}</span><p className="whitespace-nowrap text-[15px] text-[#aaaaaa]">未打卡天数</p></div>
+                <div><span aria-describedby="checkin-rules" className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? missedPracticeDays : 0}</span><p className="whitespace-nowrap text-[15px] text-[#aaaaaa]">未打卡天数</p></div>
               </div>
               </div>
               <p id="checkin-rules" className="mt-2 shrink-0 text-[11px] leading-4 text-[#999]">练琴按本机开始日期打卡，试听不计；未打卡从首次练琴起统计，不含今天。</p>
