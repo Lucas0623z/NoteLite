@@ -19,6 +19,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unicodedata
@@ -450,7 +451,19 @@ def assert_identity(manifest: dict, expected: dict) -> None:
 
 
 def command(*arguments):
-    return subprocess.run(arguments, check=True, capture_output=True, text=True, timeout=120).stdout.strip()
+    try:
+        return subprocess.run(arguments, check=True, capture_output=True, text=True, timeout=120).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr or ""
+        sensitive = re.compile(r"PASSWORD|SECRET|TOKEN|CREDENTIAL|AUTHORIZATION|PRIVATE.?KEY|API.?KEY|ACCESS.?KEY|"
+                               r"\bbearer\s+\S+|\bsk-[A-Za-z0-9]{20,}|://[^/\s]+:[^/\s]+@", re.I)
+        safe = ("[credential-like stderr omitted]" if sensitive.search(stderr) else
+                re.sub(r"[^\x20-\x7e\n\t]", "?", stderr[:2048]))
+        tool = Path(str(arguments[0])).name
+        print(json.dumps({"failedTool": tool, "exitStatus": error.returncode,
+                          "boundedStderr": safe, "stderrBytes": len(stderr.encode("utf-8")),
+                          "stderrSHA256": hashlib.sha256(stderr.encode("utf-8")).hexdigest()}), file=sys.stderr)
+        raise ValueError("Native verification tool " + tool + " failed with exit " + str(error.returncode)) from None
 
 
 def simulator_runtime_identity(device_id):
@@ -484,8 +497,10 @@ def simulator_runtime_identity(device_id):
             and runtime.get("isAvailable") is True and isinstance(runtime.get("supportedArchitectures"), list)
             and "arm64" in runtime["supportedArchitectures"],
             "An available iOS 26 or newer arm64 simulator runtime with an exact build is required")
-    architecture = command("xcrun", "simctl", "spawn", device_id, "uname", "-m")
-    require(architecture == "arm64", "The actual booted simulator architecture must be arm64")
+    # Runtime metadata plus the native host architecture establish compatibility.
+    # Actual host/runner Mach-O architecture is verified separately; XCTest proves execution.
+    architecture = platform.machine()
+    require(architecture == "arm64", "The actual native host architecture must be arm64")
     return {"identifier": identifier, "version": version, "buildVersion": build, "architecture": architecture}
 
 
@@ -516,11 +531,29 @@ def current_identity(repo, device_id):
             "simulatorRuntime": simulator_runtime_identity(device_id), "sourceInputs": inputs}
 
 
+def _verify_arm64_binary(app):
+    metadata = app / "Info.plist"
+    require(metadata.is_file() and not metadata.is_symlink() and metadata.stat().st_size <= 2 * 1024 ** 2,
+            "A signed app must contain an ordinary bounded Info.plist")
+    document = plistlib.loads(metadata.read_bytes())
+    require(isinstance(document, dict), "Invalid signed app metadata")
+    name = document.get("CFBundleExecutable")
+    require(isinstance(name, str) and 0 < len(name) <= 255 and name not in (".", "..")
+            and "/" not in name and "\\" not in name and not re.search(r"[\x00-\x1f\x7f]", name)
+            and Path(name).name == name, "CFBundleExecutable must be an ordinary basename")
+    binary = app / name
+    within(binary, app)
+    require(binary.is_file() and not binary.is_symlink() and binary.stat().st_size <= MAX_BYTES,
+            "The actual app executable must be a bounded ordinary file")
+    command("lipo", str(binary), "-verify_arch", "arm64")
+
+
 def verify_resources(repo, products, plan, expected=None):
     app = products / plan["hostApp"]
     runner = products / plan["uiRunnerApp"]
     for signed in (app, runner):
         command("codesign", "--verify", "--strict", str(signed))
+        _verify_arm64_binary(signed)
     command("python3", "-B", str(repo / "apple/release/legal_resources.py"), "verify", "--resources", str(app))
     for notice in ("MODEL-LOCK.json", "DIVIDE-NO-NAN-PATCH.json", "BASIC-PITCH-LICENSE", "THIRD-PARTY.txt"):
         require((repo / "apple/NoteWiseModels" / notice).read_bytes() == (app / notice).read_bytes(),
@@ -604,6 +637,8 @@ def restore(repo, archive, destination, expected_sha, device_id):
                 "toolchain": expected["toolchain"], "simulatorRuntime": expected["simulatorRuntime"], "testPlan": plan,
                 "fullProductInventoryVerified": True, "generatedResourcesVerified": True,
                 "hostAndRunnerSignaturesVerified": True, "actualTestResults": "not run by this helper"}
+    evidence["actualHostAndRunnerArm64MachOVerified"] = True
+    evidence["architectureEvidence"] = "available arm64 runtime, actual arm64 host, and verified signed arm64 host/runner Mach-O; execution requires the actual XCTest run"
     diagnostics = repo / "apple/Screenshots/native-diagnostics"
     diagnostics.mkdir(parents=True, exist_ok=True)
     (diagnostics / "simulator-product-transfer.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")

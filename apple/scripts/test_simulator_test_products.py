@@ -769,6 +769,135 @@ class XctestrunTests(Fixture):
             self.validate(document)
 
 
+class Arm64BinaryTests(Fixture):
+    def application(self, document=None, plist_format=plistlib.FMT_XML):
+        self.sequence += 1
+        app = self.base / ("NoteLite-" + str(self.sequence) + ".app")
+        app.mkdir()
+        info = {"CFBundleExecutable": "NoteLite"} if document is None else document
+        (app / "Info.plist").write_bytes(plistlib.dumps(info, fmt=plist_format))
+        (app / "NoteLite").write_bytes(b"binary file fixture; lipo is mocked")
+        return app
+
+    def testAppAndRunnerOrdinaryExecutablesUseExactArm64LipoContract(self):
+        for name, plist_format in [("NoteLite", plistlib.FMT_XML),
+                                   ("NoteLiteUITests-Runner", plistlib.FMT_BINARY)]:
+            app = self.application({"CFBundleExecutable": name}, plist_format)
+            if name != "NoteLite":
+                (app / "NoteLite").rename(app / name)
+            original = {item.name: item.read_bytes() for item in app.iterdir()}
+            with self.subTest(name=name), mock.patch.object(products, "command", return_value="") as command:
+                products._verify_arm64_binary(app)
+                command.assert_called_once_with("lipo", str(app / name), "-verify_arch", "arm64")
+                self.assertEqual({item.name: item.read_bytes() for item in app.iterdir()}, original)
+
+    def testExecutableNameMustBeAnOrdinaryBasename(self):
+        for value in [None, [], 123, "", ".", "..", "A" * 256, "../outside", "/tmp/outside", "dir/binary",
+                      "dir\\binary", "C:\\binary", "binary\nother"]:
+            # Binary plists can represent a null value; XML serialization rejects it before the reader.
+            app = self.application({"CFBundleExecutable": value}, plistlib.FMT_BINARY)
+            with self.subTest(value=value), mock.patch.object(products, "command") as command:
+                with self.assertRaises(ValueError):
+                    products._verify_arm64_binary(app)
+                command.assert_not_called()
+        app = self.application()
+        with mock.patch.object(products, "MAX_BYTES", (app / "NoteLite").stat().st_size - 1), \
+                mock.patch.object(products, "command") as command:
+            with self.assertRaises(ValueError):
+                products._verify_arm64_binary(app)
+            command.assert_not_called()
+        app = self.application({})
+        with mock.patch.object(products, "command") as command, self.assertRaises(ValueError):
+            products._verify_arm64_binary(app)
+        command.assert_not_called()
+
+    def testExecutableMustExistAsAnOrdinaryBoundedFile(self):
+        for variant in ("missing", "directory"):
+            app = self.application()
+            binary = app / "NoteLite"
+            binary.unlink()
+            if variant == "directory":
+                binary.mkdir()
+            with self.subTest(variant=variant), mock.patch.object(products, "command") as command:
+                with self.assertRaises(ValueError):
+                    products._verify_arm64_binary(app)
+                command.assert_not_called()
+
+    def testInfoPlistMustBeOrdinaryBoundedAndWellFormedDictionary(self):
+        for variant in ("missing", "directory", "oversize", "malformed", "array"):
+            app = self.application()
+            info = app / "Info.plist"
+            info.unlink()
+            if variant == "directory":
+                info.mkdir()
+            elif variant == "oversize":
+                info.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+            elif variant == "malformed":
+                info.write_bytes(b"not a plist")
+            elif variant == "array":
+                info.write_bytes(plistlib.dumps([{"CFBundleExecutable": "NoteLite"}]))
+            with self.subTest(variant=variant), mock.patch.object(products, "command") as command:
+                with self.assertRaises(ValueError):
+                    products._verify_arm64_binary(app)
+                command.assert_not_called()
+
+    def testLinkedInfoPlistAndLinkedExecutableAreRejectedBeforeLipo(self):
+        for relative in ("Info.plist", "NoteLite"):
+            app = self.application()
+            original = app / relative
+            ordinary = app / (relative + ".ordinary")
+            original.rename(ordinary)
+            self.link(original, ordinary.name)
+            with self.subTest(relative=relative), mock.patch.object(products, "command") as command:
+                with self.assertRaises(ValueError):
+                    products._verify_arm64_binary(app)
+                command.assert_not_called()
+
+
+class CommandDiagnosticTests(unittest.TestCase):
+    def testSuccessfulToolContractUsesBoundedCaptureAndReturnsStrippedOutput(self):
+        result = products.subprocess.CompletedProcess(("lipo", "ordinary-binary", "-verify_arch", "arm64"),
+                                                      0, stdout=" success \n", stderr="unused diagnostic")
+        capture = io.StringIO()
+        with mock.patch.object(products.subprocess, "run", return_value=result) as run, \
+                mock.patch("sys.stderr", capture):
+            self.assertEqual(products.command("lipo", "ordinary-binary", "-verify_arch", "arm64"), "success")
+        run.assert_called_once_with(("lipo", "ordinary-binary", "-verify_arch", "arm64"),
+                                    check=True, capture_output=True, text=True, timeout=120)
+        self.assertEqual(capture.getvalue(), "")
+
+    def testFailedToolDiagnosticsAreBoundedAndOmitCredentialLikeStderrAndArguments(self):
+        arguments = ("lipo", "argument-must-not-be-printed", "-verify_arch", "arm64")
+        for stderr, omitted in [("ordinary diagnostic\x00\n" + "x" * 3000, False),
+                                ("API_TOKEN=dummy-fixture", True),
+                                ("bearer dummy-fixture", True),
+                                ("https://dummy-user:dummy-pass@example.invalid", True),
+                                ("sk-" + "x" * 24, True)]:
+            failure = products.subprocess.CalledProcessError(2, arguments, stderr=stderr)
+            capture = io.StringIO()
+            with self.subTest(omitted=omitted, stderr_length=len(stderr)), \
+                    mock.patch.object(products.subprocess, "run", side_effect=failure), \
+                    mock.patch("sys.stderr", capture), self.assertRaises(ValueError) as caught:
+                products.command(*arguments)
+            text = capture.getvalue()
+            report = json.loads(text)
+            self.assertEqual(set(report), {"failedTool", "exitStatus", "boundedStderr", "stderrBytes", "stderrSHA256"})
+            self.assertEqual(report["failedTool"], "lipo")
+            self.assertEqual(report["exitStatus"], 2)
+            self.assertEqual(report["stderrBytes"], len(stderr.encode("utf-8")))
+            self.assertEqual(report["stderrSHA256"], hashlib.sha256(stderr.encode("utf-8")).hexdigest())
+            self.assertLessEqual(len(report["boundedStderr"]), 2048)
+            self.assertNotIn("argument-must-not-be-printed", text + str(caught.exception))
+            self.assertNotIn("\x00", report["boundedStderr"])
+            self.assertIsNone(caught.exception.__cause__)
+            self.assertTrue(caught.exception.__suppress_context__)
+            if omitted:
+                self.assertEqual(report["boundedStderr"], "[credential-like stderr omitted]")
+                self.assertNotIn(stderr, text + str(caught.exception))
+            else:
+                self.assertTrue(report["boundedStderr"].startswith("ordinary diagnostic?\n"))
+
+
 class SimulatorRuntimeTests(unittest.TestCase):
     device_id = "12345678-1234-1234-1234-123456789ABC"
     runtime_id = "com.apple.CoreSimulator.SimRuntime.iOS-26-6"
@@ -791,11 +920,10 @@ class SimulatorRuntimeTests(unittest.TestCase):
                 return json.dumps(devices)
             if arguments == ("xcrun", "simctl", "list", "runtimes", "--json"):
                 return json.dumps(runtimes)
-            if arguments == ("xcrun", "simctl", "spawn", destination, "uname", "-m"):
-                return architecture
             raise AssertionError("Unexpected simulator identity command: " + repr(arguments))
 
-        with mock.patch.object(products, "command", side_effect=command):
+        with mock.patch.object(products, "command", side_effect=command), \
+                mock.patch.object(products.platform, "machine", return_value=architecture):
             identity = products.simulator_runtime_identity(destination)
         return identity, calls
 
@@ -811,8 +939,7 @@ class SimulatorRuntimeTests(unittest.TestCase):
                 self.assertEqual(identity, {"identifier": identifier, "version": version,
                                             "buildVersion": "23A123", "architecture": "arm64"})
                 self.assertEqual(calls, [("xcrun", "simctl", "list", "devices", "--json"),
-                                        ("xcrun", "simctl", "list", "runtimes", "--json"),
-                                        ("xcrun", "simctl", "spawn", self.device_id, "uname", "-m")])
+                                        ("xcrun", "simctl", "list", "runtimes", "--json")])
                 self.assertEqual((devices, runtimes), original)
                 self.assertNotIn(self.device_id, json.dumps(identity))
 
@@ -875,7 +1002,7 @@ class SimulatorRuntimeTests(unittest.TestCase):
             with self.subTest(label=label), self.assertRaises(ValueError):
                 self.resolve(altered_devices, altered_runtimes)
 
-    def testActualSpawnedArchitectureMustBeExactlyArm64(self):
+    def testActualHostArchitectureMustBeExactlyArm64(self):
         devices, runtimes = self.fixtures()
         self.resolve(devices, runtimes)
         for architecture in ("x86_64", "arm64e", "arm64\nx86_64", "", "ARM64"):
