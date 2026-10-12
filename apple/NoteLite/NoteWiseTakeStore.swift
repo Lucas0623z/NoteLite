@@ -47,6 +47,21 @@ struct NoteWiseTakeStore: Sendable {
         return url
     }
 
+    /// Cloud history can describe a recording from another device. Only this
+    /// device's ownership sidecar and saved audio file establish local availability.
+    func hasRecording(_ raw: String, scope: String) throws -> Bool {
+        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
+        let id = try identifier(raw), root = try self.root()
+        let metadata = root.appendingPathComponent(id + ".json")
+        guard FileManager.default.fileExists(atPath: metadata.path),
+              let value = try sidecar(metadata), value["takeId"] as? String == id,
+              value["scope"] as? String == scope, value["inputKind"] as? String == "microphone" else { return false }
+        let audio = root.appendingPathComponent(id + ".wav")
+        guard FileManager.default.fileExists(atPath: audio.path) else { return false }
+        let properties = try audio.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        return properties.isRegularFile == true && properties.isSymbolicLink != true && (properties.fileSize ?? 0) > 0
+    }
+
     private func marker() throws -> URL { try root().appendingPathComponent(".account-purges.json") }
     func checkAccountScope(_ scope: String) throws {
         guard let separator = scope.lastIndex(of: "|"), separator != scope.startIndex,

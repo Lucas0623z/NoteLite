@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import normal from "../imports/my-scores-upload-normal.png";
 import pressed from "../imports/my-scores-upload-pressed.png";
 import ScoreWorkspace from "./ScoreWorkspace";
-import { cloud, CloudError, createUUID, errorMessage, isNativeCloud, nativeRequest, type CloudJob } from "./cloud";
+import { AccountFileSelection, cloud, CloudError, createUUID, errorMessage, isNativeCloud, nativeRequest, recheckImportAuthentication, scopedAccountWrite, type AccountOperationScope, type CloudJob, type ScoreFileSource } from "./cloud";
 import { completedJobNotice, uploadedJobNotice, type ScoreNotice } from "./job-notice";
 import { startJobPolling } from "./job-polling";
 import { openOwnedDatabase, ownedStores, guardAccountWrite, isDeletedAccountOwner } from "./account-local-data";
@@ -10,7 +10,7 @@ import { account, ACCOUNT_EVENT, type PersonalScore } from "./account";
 
 type Score = { id: string; name: string; format: string; file?: Blob; sample?: boolean; job?: CloudJob; removed?: boolean; owner?: string; personal?: PersonalScore; officialId?: string };
 const scoreOwner = (score: Score) => score.owner || "guest";
-type Panel = "import" | "rename" | "delete" | "view" | "practice" | "settings" | null;
+type Panel = "import" | "rename" | "delete" | "view" | "practice" | null;
 type DialogEvent = "mounted" | "unmounted" | "trigger-pointer-down" | "trigger-pointer-up" | "trigger-click" | "open-request" | "effect" | "show-modal-before" | "show-modal-after" | "close-before" | "close-after" | "cancel" | "close-event" | "backdrop-click" | "inside-click";
 function traceDialog(event: DialogEvent, dialog: HTMLDialogElement | null, panel: Panel) {
   if (!import.meta.env.DEV) return;
@@ -66,7 +66,7 @@ async function persistPolledJobs(jobs: CloudJob[], signal: AbortSignal, owner: s
   });
 }
 
-export default function MyScoresPage({ isDark }: { isDark: boolean }) {
+export default function MyScoresPage({ isDark, onRequestSignIn }: { isDark: boolean; onRequestSignIn?: () => void }) {
   const [scores, setScores] = useState<Score[]>([]);
   const [loading, setLoading] = useState(true);
   const [importPage, setImportPage] = useState(false);
@@ -77,9 +77,6 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   const message = notice.text;
   function setMessage(text: string) { setNotice({ text }); }
   const [busy, setBusy] = useState(false);
-  const [baseURL, setBaseURL] = useState(() => isNativeCloud() ? "https://124.221.211.156" : window.location.origin);
-  const [pairCode, setPairCode] = useState("");
-  const [connected, setConnected] = useState(false);
   const [orientationNotice, setOrientationNotice] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   const files = useRef<HTMLInputElement>(null);
@@ -91,9 +88,10 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
   const fullscreenOwned = useRef(false);
   const orientationOwned = useRef(false);
   const nativeOrientationOwned = useRef(false);
-  const pendingFile = useRef<File | null>(null);
   const owner = useRef(account.current?.userId || "guest");
   const libraryGeneration = useRef(0);
+  const fileSelections = useRef(new AccountFileSelection());
+  const pageMounted = useRef(true);
   const workspaceOpen = panel === "view" || panel === "practice";
   const importing = importPage || scores.length === 0;
   const waitingKey = JSON.stringify(scores.filter((score) => score.job?.state === "queued" || score.job?.state === "running").map((score) => score.id).sort());
@@ -154,13 +152,17 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
 
   useEffect(() => {
     let live = true;
+    pageMounted.current = true;
     const reload = async () => {
       const generation = ++libraryGeneration.current;
+      fileSelections.current.clear();
       owner.current = account.current?.userId || "guest";
-      setPanel(null); setSelected(null); setScores([]); setLoading(true);
-      try { await account.me(); } catch { /* The existing paired-device and local library remain available. */ }
+      cloud.useAccount(account.current?.userId || null);
+      setPanel(null); setSelected(null); setScores([]); setLoading(true); setBusy(false);
+      try { await account.me(); } catch { /* Cached scores remain usable offline. */ }
       if (!live || generation !== libraryGeneration.current) return;
       const currentOwner = owner.current = account.current?.userId || "guest";
+      cloud.useAccount(account.current?.userId || null);
       try {
         const saved = await scoreStore("readonly", (store) => store.getAll()) as Score[];
         if (!live || generation !== libraryGeneration.current) return;
@@ -182,7 +184,7 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
       finally { if (live && generation === libraryGeneration.current) setLoading(false); }
     };
     void reload(); window.addEventListener(ACCOUNT_EVENT, reload);
-    return () => { live = false; ++libraryGeneration.current; window.removeEventListener(ACCOUNT_EVENT, reload); };
+    return () => { live = false; pageMounted.current = false; ++libraryGeneration.current; fileSelections.current.clear(); window.removeEventListener(ACCOUNT_EVENT, reload); };
   }, []);
 
   useEffect(() => {
@@ -240,11 +242,14 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
     });
   }
 
-  async function acceptJob(job: CloudJob, existing?: Score) {
+  async function acceptJob(job: CloudJob, existing?: Score, requestOwner = owner.current) {
+    if (requestOwner !== owner.current || requestOwner !== account.current?.userId) return;
+    const generation = libraryGeneration.current;
     const previous = existing || scores.find((item) => item.id === job.id);
     if (previous?.removed) return;
-    const imported = { ...scoreFromJob(job, previous), owner: owner.current };
+    const imported = { ...scoreFromJob(job, previous), owner: requestOwner };
     await save(imported);
+    if (generation !== libraryGeneration.current || requestOwner !== owner.current || requestOwner !== account.current?.userId) return;
     setNotice((current) => completedJobNotice(current, job));
     setSelected((current) => current?.id === imported.id ? imported : current);
     return imported;
@@ -252,41 +257,68 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
 
   async function refreshCloud(saved?: Score[]) {
     const requestOwner = owner.current;
+    if (requestOwner !== account.current?.userId) return;
+    cloud.useAccount(requestOwner);
     try {
-      const configuration = await cloud.configuration();
-      setBaseURL(configuration.baseURL);
-      if (!configuration.hasCredentials) { setConnected(false); return; }
       const local = (saved || await scoreStore("readonly", (store) => store.getAll()) as Score[]).filter((score) => scoreOwner(score) === requestOwner);
+      if (requestOwner !== owner.current || requestOwner !== account.current?.userId) return;
       const jobs = await cloud.jobs();
-      if (requestOwner !== owner.current) return;
-      setConnected(true);
-      for (const job of jobs) { if (requestOwner !== owner.current) return; await acceptJob(job, local.find((score) => score.id === job.id)); }
+      if (requestOwner !== owner.current || requestOwner !== account.current?.userId) return;
+      for (const job of jobs) { if (requestOwner !== owner.current) return; await acceptJob(job, local.find((score) => score.id === job.id), requestOwner); }
     } catch (error) {
-      if (error instanceof CloudError && error.status === 401) setConnected(false);
+      if (requestOwner !== owner.current || requestOwner !== account.current?.userId) return;
       // A first visit remains the original empty library. Imported scores remain usable offline.
       if (saved?.some((score) => score.job && !score.removed)) setMessage(errorMessage(error));
     }
   }
 
-  async function connectDevice() {
-    setBusy(true);
-    try {
-      await cloud.configure(baseURL);
-      if (pairCode.trim()) await cloud.pair(pairCode, isNativeCloud() ? "NoteLite Apple" : "NoteLite 浏览器");
-      const configuration = await cloud.configuration();
-      if (!configuration.hasCredentials) throw new CloudError("请输入服务器提供的设备连接码。", 401);
-      await cloud.health();
-      await cloud.jobs();
-      setConnected(true); setPairCode(""); setMessage("设备已连接，可以上传曲谱并保存校对。");
-      await refreshCloud(); setPanel(null);
-      const file = pendingFile.current; pendingFile.current = null;
-      if (file) await importFile(file);
-    } catch (error) { setMessage(errorMessage(error)); }
-    finally { setBusy(false); }
+  function requestSignIn(text = "请先登录账户，再选择要识别的曲谱。") {
+    setPanel(null);
+    setMessage(text);
+    onRequestSignIn?.();
   }
 
-  async function importFile(file?: File) {
-    if (!file) return;
+  function requireImportAccount() {
+    const userId = account.current?.userId;
+    if (!userId) { requestSignIn(); return null; }
+    cloud.useAccount(userId);
+    return { owner: userId, sessionId: account.current!.sessionId, generation: libraryGeneration.current };
+  }
+
+  function operationStillCurrent(scope: AccountOperationScope) {
+    return scope.generation === libraryGeneration.current && scope.owner === owner.current && scope.owner === (account.current?.userId || "guest") && scope.sessionId === (account.current?.sessionId || null);
+  }
+
+  function captureScoreScope(score: Score): AccountOperationScope {
+    return { owner: scoreOwner(score), sessionId: account.current?.sessionId || null, generation: libraryGeneration.current };
+  }
+
+  function chooseImage(source: "photos" | "camera", input: HTMLInputElement | null) {
+    const scope = requireImportAccount();
+    if (scope && input && operationStillCurrent(scope)) { fileSelections.current.begin(source, scope); input.click(); }
+  }
+
+  function selectedFile(source: ScoreFileSource, input: HTMLInputElement) {
+    const file = input.files?.[0], scope = fileSelections.current.take(source, operationStillCurrent);
+    input.value = "";
+    if (file && scope) void importFile(file, scope);
+  }
+
+  async function reportImportError(error: unknown, scope: AccountOperationScope) {
+    if (!operationStillCurrent(scope)) return;
+    if (error instanceof CloudError && error.status === 401) {
+      const state = await recheckImportAuthentication({ userId: scope.owner, sessionId: scope.sessionId! }, account, () => operationStillCurrent(scope));
+      if (!pageMounted.current) return;
+      if (state === "expired") requestSignIn("登录已失效，请重新登录后选择曲谱。");
+      else if (state === "active") setMessage("账户已登录，识谱服务暂时未接受当前会话。请稍后重试，或在个人档案中重新登录。");
+      else if (state === "unavailable") setMessage("暂时无法确认登录状态，请检查网络后重试。");
+      return;
+    }
+    if (!(error instanceof CloudError && error.code === "cancelled")) setMessage(errorMessage(error));
+  }
+
+  async function importFile(file: File, scope: AccountOperationScope) {
+    if (!operationStillCurrent(scope)) return;
     setBusy(true);
     try {
       const extension = file.name.split(".").pop()?.toLowerCase() || "";
@@ -294,30 +326,33 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
         throw new Error("请选择 PNG、JPEG、PDF 或 MusicXML 曲谱文件。");
       }
       setMessage("正在上传曲谱…");
-      const requestOwner = owner.current;
       const job = await cloud.upload(file, file.name);
-      if (requestOwner !== owner.current) return;
-      const imported = await acceptJob(job, { id: job.id, name: file.name, format: extension.toUpperCase(), file });
-      if (!imported) return;
+      if (!operationStillCurrent(scope)) return;
+      const imported = await acceptJob(job, { id: job.id, name: file.name, format: extension.toUpperCase(), file }, scope.owner);
+      if (!imported || !operationStillCurrent(scope)) return;
       setSelected(imported);
       setPanel(null);
       setImportPage(false);
       setNotice(uploadedJobNotice(job));
     } catch (error) {
-      if (error instanceof CloudError && error.status === 401) { pendingFile.current = file; setPanel("settings"); }
-      setMessage(errorMessage(error));
-    } finally { setBusy(false); }
+      await reportImportError(error, scope);
+    } finally { if (operationStillCurrent(scope)) setBusy(false); }
   }
 
   async function chooseFile() {
-    if (!isNativeCloud()) { files.current?.click(); return; }
-    if (!connected) { setPanel("settings"); setMessage("先连接设备，再选择要识别的曲谱。"); return; }
+    const scope = requireImportAccount();
+    if (!scope) return;
+    if (!isNativeCloud()) { if (files.current && operationStillCurrent(scope)) { fileSelections.current.begin("files", scope); files.current.click(); } return; }
     setBusy(true);
     try {
-      const job = await cloud.importNative(); await acceptJob(job);
+      const job = await cloud.importNative();
+      if (!operationStillCurrent(scope)) return;
+      const imported = await acceptJob(job, undefined, scope.owner);
+      if (!imported || !operationStillCurrent(scope)) return;
       setPanel(null); setImportPage(false); setNotice(uploadedJobNotice(job));
-    } catch (error) { if (!(error instanceof CloudError && error.code === "cancelled")) setMessage(errorMessage(error)); }
-    finally { setBusy(false); }
+    } catch (error) {
+      await reportImportError(error, scope);
+    } finally { if (operationStillCurrent(scope)) setBusy(false); }
   }
 
   async function loadSample() {
@@ -343,20 +378,25 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
 
   async function confirmEdit() {
     if (!selected) return;
+    const score = selected, scope = captureScoreScope(score);
+    if (!operationStillCurrent(scope)) return;
     setBusy(true);
     try {
       if (panel === "rename") {
-        const personal = selected.personal ? await account.updateScore(selected.personal, await (selected.file ? selected.file.text() : account.scoreXML(selected.id)), name.trim()) : undefined;
-        await save({ ...selected, name: name.trim(), ...(personal ? { personal } : {}) });
+        const personal = score.personal ? await scopedAccountWrite(() => operationStillCurrent(scope), () => score.file ? score.file.text() : account.scoreXML(score.id), (xml) => account.updateScore(score.personal!, xml, name.trim())) : undefined;
+        if (!operationStillCurrent(scope)) return;
+        await save({ ...score, name: name.trim(), ...(personal ? { personal } : {}) });
       }
       else {
-        if (selected.job || selected.personal) await scoreStore("readwrite", (store) => store.put({ ...selected, removed: true }), scoreOwner(selected));
-        else await scoreStore("readwrite", (store) => store.delete(selected.id), scoreOwner(selected));
-        setScores((previous) => previous.filter((score) => score.id !== selected.id));
+        if (score.job || score.personal) await scoreStore("readwrite", (store) => store.put({ ...score, removed: true }), scope.owner);
+        else await scoreStore("readwrite", (store) => store.delete(score.id), scope.owner);
+        if (!operationStillCurrent(scope)) return;
+        setScores((previous) => previous.filter((item) => item.id !== score.id));
       }
+      if (!operationStillCurrent(scope)) return;
       setPanel(null);
-    } catch (error) { setMessage(errorMessage(error)); }
-    finally { setBusy(false); }
+    } catch (error) { if (operationStillCurrent(scope)) setMessage(errorMessage(error)); }
+    finally { if (operationStillCurrent(scope)) setBusy(false); }
   }
 
   async function openPanel(next: Panel, score?: Score) {
@@ -371,15 +411,10 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
       }
     }
     setSelected(score || null); setName(score?.name || ""); setMessage(""); setPanel(next);
-    if (next === "settings") void cloud.configuration().then(async (configuration) => {
-      setBaseURL(configuration.baseURL);
-      if (!configuration.hasCredentials) { setConnected(false); return; }
-      await cloud.jobs(); setConnected(true);
-    }).catch((error) => { if (error instanceof CloudError && error.status === 401) setConnected(false); setMessage(errorMessage(error)); });
   }
   const outline = isDark ? "border-white/15" : "border-[#e5e5e5]";
   const button = `scores-action cursor-pointer rounded-[12px] border-2 border-b-[5px] px-3 py-2 text-sm font-bold text-[#67db23] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current disabled:opacity-50 ${outline} ${isDark ? "bg-[#252525]" : "bg-white"}`;
-  const title = panel === "import" ? "导入曲谱" : panel === "rename" ? "重命名" : panel === "delete" ? "删除曲谱" : panel === "view" ? selected?.name : panel === "practice" ? "开始练习" : "云端识谱设置";
+  const title = panel === "import" ? "导入曲谱" : panel === "rename" ? "重命名" : panel === "delete" ? "删除曲谱" : panel === "view" ? selected?.name : panel === "practice" ? "开始练习" : "曲谱";
 
   return <section className={`scores-library flex h-full min-h-0 flex-col ${isDark ? "text-white" : "text-[#333]"}`}>
     {loading ? <p role="status" className="m-auto text-sm text-[#999]">正在读取曲谱…</p> : <>
@@ -406,39 +441,36 @@ export default function MyScoresPage({ isDark }: { isDark: boolean }) {
             </div>
           </article>)}
         </div>
-        <div className="mt-4 grid gap-3"><button type="button" className={button} onClick={() => openPanel("settings")}>云端识谱设置</button><button type="button" disabled={busy} className={button} onClick={loadSample}>载入示例曲谱</button>{account.current && <button type="button" disabled={busy} className={button} onClick={loadOfficialSample}>官方基础练习</button>}</div>
+        <div className="mt-4 grid gap-3"><button type="button" disabled={busy} className={button} onClick={loadSample}>载入示例曲谱</button>{account.current && <button type="button" disabled={busy} className={button} onClick={loadOfficialSample}>官方基础练习</button>}</div>
       </div>}
       {message && <p role="status" className="px-4 pb-4 text-center text-sm leading-6 text-[#999]">{message}</p>}
     </>}
-    <input ref={files} type="file" accept="image/png,image/jpeg,.pdf,.musicxml,.mxl,.xml" className="hidden" aria-label="选择曲谱文件" onChange={(event) => { void importFile(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
-    <input ref={photos} type="file" accept="image/*" className="hidden" aria-label="从相册选择曲谱" onChange={(event) => { void importFile(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
-    <input ref={camera} type="file" accept="image/*" capture="environment" className="hidden" aria-label="拍照识谱" onChange={(event) => { void importFile(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
+    <input ref={files} type="file" accept="image/png,image/jpeg,.pdf,.musicxml,.mxl,.xml" className="hidden" aria-label="选择曲谱文件" onChange={(event) => selectedFile("files", event.currentTarget)} />
+    <input ref={photos} type="file" accept="image/*" className="hidden" aria-label="从相册选择曲谱" onChange={(event) => selectedFile("photos", event.currentTarget)} />
+    <input ref={camera} type="file" accept="image/*" capture="environment" className="hidden" aria-label="拍照识谱" onChange={(event) => selectedFile("camera", event.currentTarget)} />
     <dialog ref={dialog} data-workspace={panel === "view" || panel === "practice"} aria-labelledby="score-panel-title" onCancel={() => { traceDialog("cancel", dialog.current, panel); setPanel(null); }} onClose={() => { traceDialog("close-event", dialog.current, panel); setPanel(null); }} onClick={(event) => { traceDialog(event.target === event.currentTarget ? "backdrop-click" : "inside-click", dialog.current, panel); if (event.target === event.currentTarget && !busy) setPanel(null); }} className={`scores-dialog fixed rounded-[20px] border-0 p-5 font-sans backdrop:bg-black/70 ${isDark ? "bg-[#191919] text-white" : "bg-white text-[#333]"}`}>
       {(panel === "view" || panel === "practice") && selected ? <ScoreWorkspace practice={panel === "practice"} name={selected.name} format={selected.format} file={selected.file} job={selected.job} recordIdentity={selected.id} practiceSource={selected.personal ? { kind: "personal", scoreId: selected.personal.id, revision: selected.personal.revision } : selected.officialId ? { kind: "official", scoreId: selected.officialId, revision: 1 } : undefined} orientationNotice={orientationNotice} onJob={async (job) => { await acceptJob(job, selected); }} onClose={() => setPanel(null)} onSave={async (file) => {
-        if (scoreOwner(selected) !== owner.current) throw new Error("账户已切换，请重新打开曲谱。");
-        const personal = selected.personal ? await account.updateScore(selected.personal, await file.text()) : selected.officialId && account.current ? await account.createScore(`${selected.name} · 校对版`, await file.text(), createUUID()) : undefined;
-        const updated = { ...selected, file, ...(personal ? { id: personal.id, personal, officialId: undefined, name: personal.title } : {}) }; await save(updated); setSelected(updated);
+        const score = selected, scope = captureScoreScope(score);
+        const personal = score.personal || score.officialId && account.current ? await scopedAccountWrite(() => operationStillCurrent(scope), () => file.text(), (xml) => score.personal ? account.updateScore(score.personal, xml) : account.createScore(`${score.name} · 校对版`, xml, createUUID())) : undefined;
+        if (!operationStillCurrent(scope)) throw new CloudError("账户已切换，请重新打开曲谱。", 409, "identity_changed");
+        const updated = { ...score, file, ...(personal ? { id: personal.id, personal, officialId: undefined, name: personal.title } : {}) }; await save(updated);
+        if (!operationStillCurrent(scope)) throw new CloudError("账户已切换，请重新打开曲谱。", 409, "identity_changed");
+        setSelected(updated);
       }} /> : <>
       <h2 id="score-panel-title" className="mb-3 break-all text-lg font-bold">{title}</h2>
       {panel === "import" ? <>
-        <p className="mb-4 text-xs leading-6 text-[#999]">支持 PNG、JPEG、PDF 和 MusicXML。选择的曲谱上传到识谱服务；完成后可校对并导出 MusicXML、MIDI。</p>
+        <p className="mb-4 text-xs leading-6 text-[#999]">支持 PNG、JPEG、PDF 和 MusicXML。{account.current ? "选择文件即可开始识谱" : "登录账户后即可选择文件识谱"}；完成后可校对并导出 MusicXML、MIDI。</p>
         <div className="grid gap-3">
           <button type="button" disabled={busy} className={button} onClick={() => void chooseFile()}>选择文件</button>
-          <button type="button" disabled={busy} className={button} onClick={() => photos.current?.click()}>从相册选择</button>
-          <button type="button" disabled={busy} className={button} onClick={() => camera.current?.click()}>拍照识谱</button>
+          <button type="button" disabled={busy} className={button} onClick={() => chooseImage("photos", photos.current)}>从相册选择</button>
+          <button type="button" disabled={busy} className={button} onClick={() => chooseImage("camera", camera.current)}>拍照识谱</button>
           <button type="button" disabled={busy} className={button} onClick={loadSample}>载入示例曲谱</button>
           {account.current && <button type="button" disabled={busy} className={button} onClick={loadOfficialSample}>官方基础练习</button>}
-          <button type="button" disabled={busy} className={button} onClick={() => openPanel("settings")}>云端识谱设置</button>
         </div>
       </> : panel === "rename" ? <form onSubmit={(event) => { event.preventDefault(); if (name.trim()) void confirmEdit(); }}>
         <input aria-label="曲谱名称" autoFocus value={name} maxLength={160} onChange={(event) => setName(event.currentTarget.value)} className={`mb-4 w-full rounded-xl border-2 bg-transparent p-3 ${outline}`} />
         <button type="submit" disabled={busy || !name.trim()} className={`${button} w-full`}>保存</button>
-      </form> : panel === "delete" ? <><p className="mb-4 text-sm leading-6">{selected?.job || selected?.personal ? `从本机曲谱列表移除「${selected.name}」？账户曲谱和练习历史会保留。` : `确定删除「${selected?.name}」？删除后无法恢复。`}</p><button type="button" disabled={busy} className={`${button} w-full !text-[#e16c6c]`} onClick={confirmEdit}>确认删除</button></> : <form onSubmit={(event) => { event.preventDefault(); void connectDevice(); }}>
-        <p className="text-sm leading-7 text-[#999]">{connected ? "设备已连接。曲谱上传后可识谱、校对及导出。" : "填写服务地址和设备连接码，连接后再上传曲谱。"}</p>
-        <label className="score-field">识谱服务地址<input aria-label="识谱服务地址" type="url" value={baseURL} disabled={!isNativeCloud()} onChange={(event) => setBaseURL(event.currentTarget.value)} /></label>
-        <label className="score-field">设备连接码<input aria-label="设备连接码" value={pairCode} autoComplete="off" maxLength={80} onChange={(event) => setPairCode(event.currentTarget.value)} placeholder={connected ? "已连接；更换设备时填写" : "输入服务器提供的连接码"} /></label>
-        <button type="submit" disabled={busy} className={`${button} w-full`}>{busy ? "正在连接…" : connected && !pairCode ? "检查连接" : "连接设备"}</button>
-      </form>}
+      </form> : panel === "delete" ? <><p className="mb-4 text-sm leading-6">{selected?.job || selected?.personal ? `从本机曲谱列表移除「${selected.name}」？账户曲谱和练习历史会保留。` : `确定删除「${selected?.name}」？删除后无法恢复。`}</p><button type="button" disabled={busy} className={`${button} w-full !text-[#e16c6c]`} onClick={confirmEdit}>确认删除</button></> : null}
       {message && <p role="status" className="mt-3 text-sm leading-6 text-[#999]">{message}</p>}
       <button type="button" disabled={busy} className={`${button} mt-3 w-full !text-[#999]`} onClick={() => setPanel(null)}>{panel === "import" || panel === "delete" || panel === "rename" ? "取消" : "关闭"}</button>
       </>}

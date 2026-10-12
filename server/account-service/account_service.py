@@ -7,6 +7,8 @@ The OMR ownership and legacy-claim adapters are explicitly fail-closed hooks.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -38,6 +40,17 @@ MAX_BODY = MAX_XML * 2 + 4096
 MAX_CHUNK = 8 * 1024 * 1024
 MAX_ANALYSIS = 1024 * 1024
 MAX_ANALYSIS_STORAGE = 128 * MAX_ANALYSIS
+MAX_REJECT_DRAIN = 64 * 1024
+REJECT_DRAIN_SECONDS = 0.25
+MAX_PROFILE = 256 * 1024
+MAX_AVATAR_CHARACTERS = 196608
+MAX_ACCOUNT_EXPORT = 16 * 1024 * 1024
+PROFILE_FIELDS = {"displayName", "avatar", "avatarImage", "email", "phone", "selectedCourse", "theme", "options"}
+PROFILE_COURSES = {
+    "弦乐-小提琴", "弦乐-中提琴", "弦乐-大提琴", "弦乐-低音提琴", "弦乐-竖琴", "打击乐-钢琴",
+    "木管-长笛", "木管-单簧管", "木管-巴松管", "木管-双簧管", "铜管-圆号", "铜管-小号",
+    "铜管-长号", "铜管-大号", "铜管-上低音号",
+}
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 AUDIO_TYPES = {"audio/wav", "audio/mpeg", "audio/ogg", "audio/mp4"}
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -80,6 +93,51 @@ def fields(value, allowed, required=()):
         raise APIError(400, "请求字段无效或缺少必要字段。")
 
 
+def profile_json(value):
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(encoded.encode("utf8")) > MAX_PROFILE:
+            raise APIError(413, "个人设置超过 256 KiB 大小限制。")
+        return encoded
+    except (TypeError, ValueError, UnicodeError, RecursionError) as error:
+        raise APIError(400, "个人设置须为有效的 JSON 数据。") from error
+
+
+def profile_changes(value):
+    fields(value, PROFILE_FIELDS)
+    profile_json(value)
+    for key, maximum in (("displayName", 80), ("email", 254), ("phone", 40)):
+        if key in value and (not isinstance(value[key], str) or len(value[key]) > maximum or any(ord(c) < 32 or ord(c) == 127 for c in value[key])):
+            raise APIError(400, "个人设置的文字字段无效。")
+    for key, choices in (("avatar", {"mascot", "portrait", "custom"}), ("theme", {"light", "dark"})):
+        if key in value and (not isinstance(value[key], str) or value[key] not in choices):
+            raise APIError(400, "个人设置的选项无效。")
+    if "selectedCourse" in value and value["selectedCourse"] is not None and (not isinstance(value["selectedCourse"], str) or value["selectedCourse"] not in PROFILE_COURSES):
+        raise APIError(400, "所选课程无效。")
+    if "options" in value:
+        options = value["options"]
+        if not isinstance(options, dict) or len(options) > 200:
+            raise APIError(400, "个人设置的开关数量无效。")
+        for key, enabled in options.items():
+            if not isinstance(key, str) or not 1 <= len(key) <= 80 or key in {"__proto__", "prototype", "constructor"} or any(ord(c) < 32 or ord(c) == 127 for c in key) or not isinstance(enabled, bool):
+                raise APIError(400, "个人设置的开关无效。")
+    if "avatarImage" in value and value["avatarImage"] is not None:
+        image = value["avatarImage"]
+        if not isinstance(image, str) or len(image) > MAX_AVATAR_CHARACTERS:
+            raise APIError(413 if isinstance(image, str) else 400, "头像图片超过大小限制或格式无效。")
+        match = re.fullmatch(r"data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})", image)
+        if not match:
+            raise APIError(400, "头像须为 PNG、JPEG 或 WebP 图片。")
+        try:
+            data = base64.b64decode(match[2], validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise APIError(400, "头像图片编码无效。") from error
+        valid = (match[1] == "png" and data.startswith(b"\x89PNG\r\n\x1a\n")) or (match[1] == "jpeg" and data.startswith(b"\xff\xd8\xff")) or (match[1] == "webp" and len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+        if not valid:
+            raise APIError(400, "头像图片内容与格式不一致。")
+    return value
+
+
 def analysis_json(value):
     """Canonical UTF-8 bytes are bounded before storage and after normalization."""
     try:
@@ -113,21 +171,23 @@ def csrf_value(token):
     return hashlib.sha256(("NoteLite-account-CSRF:" + token).encode("ascii")).hexdigest()
 
 
-def password_bytes(value):
+def password_bytes(value, *, creating=True):
     # No MFA is configured: OWASP recommends at least 15 characters.
-    if not isinstance(value, str) or not 15 <= len(value) <= 256:
-        raise APIError(400, "密码须为 15 至 256 个字符。")
+    minimum = 15 if creating else 1
+    requirement = "新密码须为 15 至 256 个字符。" if creating else "请输入当前密码（最多 256 个字符）。"
+    if not isinstance(value, str) or not minimum <= len(value) <= 256:
+        raise APIError(400, requirement)
     try:
         raw = value.encode("utf8")
     except UnicodeError as error:
         raise APIError(400, "密码须为有效文字。") from error
     if len(raw) > 1024:
-        raise APIError(400, "密码须为 15 至 256 个字符。")
+        raise APIError(400, requirement)
     return raw
 
 
-def password_hash(value, salt=None):
-    raw = password_bytes(value)
+def password_hash(value, salt=None, *, creating=True):
+    raw = password_bytes(value, creating=creating)
     salt = secrets.token_bytes(16) if salt is None else bytes.fromhex(salt)
     with HASH_LOCK:
         hashed = hashlib.scrypt(raw, salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, maxmem=192 * 1024 * 1024, dklen=32)
@@ -201,6 +261,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS account_deletions(user_id TEXT PRIMARY KEY,recordings TEXT NOT NULL,created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),kind TEXT NOT NULL,name TEXT NOT NULL,token_hash TEXT UNIQUE NOT NULL,csrf_hash TEXT NOT NULL,expires REAL NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL);
             CREATE INDEX IF NOT EXISTS user_sessions ON sessions(user_id);
+            CREATE TABLE IF NOT EXISTS profiles(user_id TEXT PRIMARY KEY REFERENCES users(id),preferences TEXT NOT NULL,revision INTEGER NOT NULL,updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS profile_requests(user_id TEXT NOT NULL REFERENCES users(id),request_id TEXT NOT NULL,payload_hash TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(user_id,request_id));
             CREATE TABLE IF NOT EXISTS catalog(id TEXT PRIMARY KEY,title TEXT NOT NULL,composer TEXT NOT NULL,license TEXT NOT NULL,source TEXT NOT NULL,xml TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS scores(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),title TEXT NOT NULL,xml TEXT NOT NULL,revision INTEGER NOT NULL,updated REAL NOT NULL,job_id TEXT,score_index INTEGER,omr_revision INTEGER);
             CREATE INDEX IF NOT EXISTS user_scores ON scores(user_id);
@@ -264,6 +326,84 @@ class Store:
         finally:
             self.owner_context.reset(token)
 
+    @staticmethod
+    def default_preferences():
+        return {"displayName": "名字", "avatar": "mascot", "avatarImage": None, "email": "", "phone": "", "selectedCourse": None, "theme": "light", "options": {}}
+
+    def profile_meta(self, db, user_id):
+        self.require_active_user(db, user_id)
+        row = db.execute("SELECT * FROM profiles WHERE user_id=?", (user_id,)).fetchone()
+        revision = row["revision"] if row else 0
+        updated = row["updated"] if row else db.execute("SELECT created FROM users WHERE id=?", (user_id,)).fetchone()[0]
+        return {"userId": user_id, "revision": revision, "etag": f'"profile-{revision}"', "updatedAt": now_stamp(updated), "preferences": json.loads(row["preferences"]) if row else self.default_preferences()}
+
+    def read_profile(self, user_id):
+        with self.connect() as db:
+            return self.profile_meta(db, user_id)
+
+    def update_profile(self, user_id, data, etag):
+        fields(data, {"requestId", "changes"}, {"requestId", "changes"})
+        request_id = uid(data["requestId"])
+        changes = profile_changes(data["changes"])
+        digest = hashlib.sha256(profile_json(changes).encode("utf8")).hexdigest()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.require_active_user(db, user_id)
+            old = db.execute("SELECT * FROM profile_requests WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone()
+            if old:
+                if not hmac.compare_digest(old["payload_hash"], digest):
+                    raise APIError(409, "个人设置保存标识已用于其他内容。")
+                # A lost response can be replayed with its original, now stale
+                # precondition. It returns the original result and writes nothing.
+                return json.loads(old["result"])
+            current = self.profile_meta(db, user_id)
+            if etag != current["etag"]:
+                raise APIError(412, "另一台设备已修改个人设置，请重新读取后合并。")
+            merged = {**current["preferences"], **changes}
+            if "options" in changes:
+                merged["options"] = {**current["preferences"]["options"], **changes["options"]}
+            preferences = profile_json(profile_changes(merged))
+            db.execute("INSERT INTO profiles VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET preferences=excluded.preferences,revision=excluded.revision,updated=excluded.updated", (user_id, preferences, current["revision"] + 1, self.clock()))
+            result = self.profile_meta(db, user_id)
+            db.execute("INSERT INTO profile_requests VALUES(?,?,?,?,?)", (user_id, request_id, digest, json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False), self.clock()))
+            return result
+
+    def export_account(self, user_id):
+        # This is a bounded owner-only user export, not an importable database
+        # backup. Never include authentication secrets or another pupil's data.
+        with self.connect() as db:
+            db.execute("BEGIN")
+            self.require_active_user(db, user_id)
+            user = db.execute("SELECT id,username,created FROM users WHERE id=?", (user_id,)).fetchone()
+            value = {"schemaVersion": 1, "exportedAt": now_stamp(self.clock()), "user": {"id": user["id"], "username": user["username"], "createdAt": now_stamp(user["created"])}, "profile": self.profile_meta(db, user_id), "recordings": "Local practice recordings remain on their original device; explicitly submitted classroom recordings are metadata only."}
+            used = len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf8"))
+            def rows(name, query, args=(user_id,), transform=None):
+                nonlocal used
+                result = []
+                for row in db.execute(query, args):
+                    item = transform(row) if transform else dict(row)
+                    used += len(json.dumps(item, ensure_ascii=False, allow_nan=False).encode("utf8")) + 2
+                    if used > MAX_ACCOUNT_EXPORT:
+                        raise APIError(413, "完整数据导出超过 16 MiB，请分别导出曲谱与练习记录。")
+                    result.append(item)
+                value[name] = result
+                used += len(name) + 8
+            rows("profileRequests", "SELECT request_id,payload_hash,result,created FROM profile_requests WHERE user_id=? ORDER BY created,request_id", transform=lambda r: {"requestId": r["request_id"], "payloadHash": r["payload_hash"], "result": json.loads(r["result"]), "createdAt": now_stamp(r["created"])})
+            rows("scores", "SELECT * FROM scores WHERE user_id=? ORDER BY id", transform=lambda r: {**self.score_meta(r), "musicxml": r["xml"]})
+            rows("history", "SELECT * FROM history WHERE user_id=? ORDER BY created,event_id", transform=lambda r: {"event": self.history_meta(db, r), "musicxml": r["score_xml"], "scoreSha256": r["score_sha256"], "scoreRevision": r["score_revision"]})
+            rows("historyAnalyses", "SELECT event_id,version,parent_version,request_id,source_hash,analysis_hash,payload,created FROM history_analysis_versions WHERE user_id=? ORDER BY event_id,version", transform=lambda r: {**{k: r[k] for k in r.keys() if k != "payload"}, "analysis": json.loads(r["payload"])})
+            rows("classrooms", "SELECT c.id,c.title,c.creator,c.created,CASE WHEN c.creator=? THEN 'teacher' ELSE 'student' END AS role FROM courses c WHERE c.creator=? OR EXISTS(SELECT 1 FROM memberships m WHERE m.course_id=c.id AND m.user_id=?) ORDER BY c.id", (user_id, user_id, user_id))
+            rows("courseDeliveries", "SELECT course_id,course_score_id,score_id FROM course_deliveries WHERE user_id=?")
+            rows("submissions", "SELECT id,assignment_id,event_id,upload_id,analysis,analysis_version,analysis_hash,source_hash,created FROM submissions WHERE user_id=?", transform=lambda r: {**{k: r[k] for k in r.keys() if k != "analysis"}, "analysis": json.loads(r["analysis"])})
+            rows("classroomRecordingMetadata", "SELECT id,assignment_id,size,offset,mime,sha256,complete,expires,created FROM uploads WHERE user_id=?")
+            tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table, label in (("practice_analysis_v2_requests", "practiceAnalysisRequests"), ("practice_analysis_v2_cache", "practiceAnalysisCache")):
+                if table in tables:
+                    rows(label, "SELECT * FROM " + table + " WHERE user_id=?", transform=lambda r: {**{k: r[k] for k in r.keys() if k not in {"user_id", "result"}}, "result": json.loads(r["result"]) if r["result"] else None})
+            if len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf8")) > MAX_ACCOUNT_EXPORT:
+                raise APIError(413, "完整数据导出超过 16 MiB，请分别导出曲谱与练习记录。")
+            return value
+
     def install_analysis_guards(self, db):
         # Old schema versions intentionally lacked a foreign key. Guard both
         # INSERT and UPDATE so a delayed provider response cannot resurrect data.
@@ -281,7 +421,7 @@ class Store:
             row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
             if not row:
                 raise APIError(401, "账户已注销。")
-        _, candidate = password_hash(data["password"], row["salt"])
+        _, candidate = password_hash(data["password"], row["salt"], creating=False)
         if not hmac.compare_digest(candidate, row["password_hash"]):
             raise APIError(403, "当前密码不正确，账户未注销。")
         # The gateway writer transaction is uncommitted until the account
@@ -316,6 +456,8 @@ class Store:
                         for table in ("practice_analysis_v2_requests", "practice_analysis_v2_cache", "practice_analysis_requests", "practice_analysis_cache"):
                             if table in tables:
                                 db.execute("DELETE FROM " + table + " WHERE user_id=?", (user_id,))
+                        db.execute("DELETE FROM profile_requests WHERE user_id=?", (user_id,))
+                        db.execute("DELETE FROM profiles WHERE user_id=?", (user_id,))
                         db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
                         # Only opaque IDs remain while filesystem/OMR cancellation retries.
                         # The actual username, password hash and account record are deleted.
@@ -391,7 +533,7 @@ class Store:
         self.session_options(data)
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE username=?", (name,)).fetchone()
-        _, candidate = password_hash(data["password"], row["salt"] if row else self.dummy_salt)
+        _, candidate = password_hash(data["password"], row["salt"] if row else self.dummy_salt, creating=False)
         if not hmac.compare_digest(candidate, row["password_hash"] if row else self.dummy_hash) or not row:
             raise APIError(401, "用户名或密码不正确。")
         with self.connect() as db:
@@ -1245,6 +1387,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         if status in {429, 503}:
             self.send_header("Retry-After", "60" if status == 429 else "5")
         for key, value in extra:
@@ -1263,6 +1407,7 @@ class Handler(BaseHTTPRequestHandler):
             raise APIError(413, "请求超过大小限制。")
         if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
             raise APIError(415, "请求须使用 application/json。")
+        self._body_started = True
         raw = self.rfile.read(size)
         if len(raw) != size:
             raise APIError(400, "请求体未完整传输。")
@@ -1395,6 +1540,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.command == "GET" and route == "/me" and not query:
             self.respond(200, store.identity(session, session.get("request_csrf")))
+            return
+        if route == "/profile" and not query:
+            if self.command == "GET":
+                result = store.read_profile(user_id)
+                self.respond(200, result, [("ETag", result["etag"])])
+                return
+            if self.command == "PUT":
+                etags = self.headers.get_all("If-Match", [])
+                if len(etags) != 1 or not etags[0] or len(etags[0]) > 80:
+                    raise APIError(428, "保存必须提供 If-Match 个人设置版本。")
+                result = store.update_profile(user_id, self.body(MAX_PROFILE), etags[0])
+                self.respond(200, result, [("ETag", result["etag"])])
+                return
+        if route == "/account/export" and self.command == "GET" and not query:
+            self.server.limiter.check(("account-export", user_id), 6, 3600)
+            self.respond(200, store.export_account(user_id), [("Content-Disposition", 'attachment; filename="notelite-account.json"')])
             return
         if self.command == "GET" and route == "/sessions" and not query:
             self.respond(200, {"sessions": store.session_list(user_id)})
@@ -1624,16 +1785,48 @@ class Handler(BaseHTTPRequestHandler):
             raise APIError(413, "录音分块须为 1 至 8 MiB。")
         if self.headers.get("Content-Type") != "application/octet-stream":
             raise APIError(415, "录音分块须为 application/octet-stream。")
+        self._body_started = True
         raw = self.rfile.read(size)
         if len(raw) != size:
             raise APIError(400, "录音分块未完整传输。")
         return raw
 
+    def discard_rejected_body(self):
+        # Closing with a small unread request body can reset TCP and hide the
+        # error response (RFC 9112 section 9.6). Never parse or authorize it.
+        if getattr(self, "_body_started", False) or self.headers.get("Transfer-Encoding") or self.headers.get("Expect"):
+            return 0
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,10}", lengths[0]):
+            return 0
+        remaining = size = int(lengths[0])
+        if not 0 < size <= MAX_REJECT_DRAIN:
+            return 0
+        self._body_started = True
+        deadline, previous_timeout = time.monotonic() + REJECT_DRAIN_SECONDS, self.connection.gettimeout()
+        try:
+            while remaining:
+                available = deadline - time.monotonic()
+                if available <= 0:
+                    break
+                self.connection.settimeout(available)
+                chunk = self.rfile.read1(remaining)
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except (OSError, ValueError):
+            pass
+        finally:
+            self.connection.settimeout(previous_timeout)
+        return size - remaining
+
     def handle_api(self):
+        self._body_started = False
         try:
             self.dispatch()
         except APIError as error:
             self.close_connection = True
+            self.discard_rejected_body()
             self.respond(error.status, {"error": error.message})
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection = True

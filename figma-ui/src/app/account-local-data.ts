@@ -1,4 +1,5 @@
 /** Account deletion fences late IndexedDB writers without removing another owner or guest. */
+import { purgeProfileStorage } from "./profile-storage.ts";
 const OWNERS = "deletedOwners";
 const DELETED_KEY = "notelite-deleted-account-owners-v1";
 const ownerID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -48,6 +49,8 @@ export async function purgeDeletedAccountData(owner: string): Promise<void> {
   if (!ownerID.test(owner)) throw new Error("注销账户标识无效。");
   deletedOwners.add(owner);
   try { if (typeof localStorage !== "undefined") localStorage.setItem(DELETED_KEY, JSON.stringify([...deletedOwners])); } catch { /* Each database also persists its own owner tombstone. */ }
+  // Profile cache and its durable outbox belong to this exact account only.
+  purgeProfileStorage(owner);
   if (typeof indexedDB === "undefined") return;
   await Promise.all([
     purgeDatabase("notelite-practice-records", "records", "eventId", owner, "userId"),

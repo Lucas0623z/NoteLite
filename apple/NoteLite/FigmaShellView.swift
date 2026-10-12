@@ -72,12 +72,15 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     private(set) var webView: WKWebView!
     private var requests: [String: Task<Void, Never>] = [:]
     private var requestAccountScopes: [String: String] = [:]
+    private var requestOMRIdentities: [String: FigmaCloudRequestIdentity] = [:]
+    private var requestPracticeIdentities: [String: FigmaPracticeRequestIdentity] = [:]
     private var deletedAccountScopes = Set<String>()
     private var importContinuation: CheckedContinuation<URL, Error>?
     private var exportContinuation: CheckedContinuation<String, Error>?
     private var importRequestID: String?
     private var exportRequestID: String?
     private var previewDirectory: URL?
+    private var previewAccountScope: String?
     private var audioFile: CloudAccountAudioFile?
     private var audioAccountScope: String?
     private var accountClients: [String: CloudAccountClient] = [:]
@@ -87,7 +90,11 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     private var filePanel: FigmaNativeFilePanel?
     private var javaScriptDialogCompletion: ((Bool) -> Void)?
     private var loaded = false
-    private static let originKey = "NoteLite.figma.cloudOrigin"
+    private static let accountOMRActions: Set<String> = [
+        "session", "jobs/list", "jobs/get", "jobs/upload", "jobs/import",
+        "score/get", "score/put", "notes/get", "notes/patch",
+        "files/get", "files/export", "files/view", "notewise/recording/status"
+    ]
 
     override init() {
         super.init()
@@ -136,6 +143,15 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.alwaysBounceHorizontal = false
+        webView.scrollView.isDirectionalLockEnabled = true
+        if #available(iOS 17.4, *) {
+            webView.scrollView.bouncesHorizontally = false
+        } else {
+            // Earlier UIKit only exposes a combined outer-scroll bounce flag.
+            // Scrolling remains enabled; the score's own horizontal scroller is untouched.
+            webView.scrollView.bounces = false
+        }
         FigmaOrientationPolicy.shared.onError = { [weak self] message in
             self?.event(["type": "orientationError", "message": message])
         }
@@ -193,7 +209,12 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         }
         requests[requestID] = Task { [weak self] in
             guard let self else { return }
-            defer { requests.removeValue(forKey: requestID); requestAccountScopes.removeValue(forKey: requestID) }
+            defer {
+                requests.removeValue(forKey: requestID)
+                requestAccountScopes.removeValue(forKey: requestID)
+                requestOMRIdentities.removeValue(forKey: requestID)
+                requestPracticeIdentities.removeValue(forKey: requestID)
+            }
             do {
                 let result = try await perform(action, payload: payload, requestID: requestID)
                 if Task.isCancelled, action == "account/digest/start", let value = result as? [String: Any],
@@ -201,13 +222,16 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                     _ = try? accountDigests.cancel(id: id, scope: scope)
                 }
                 try Task.checkCancellation()
+                try validateOMRIdentity(requestID)
                 resolve(requestID, result: result)
             } catch { resolve(requestID, error: error) }
         }
     }
 
     private var origin: String {
-        UserDefaults.standard.string(forKey: Self.originKey) ?? CloudOMRClient.defaultOrigin
+        // The ordinary account client always uses the official service. Never
+        // move or reuse credentials saved under a previous manual server origin.
+        CloudOMRClient.defaultOrigin
     }
 
     private func configuration() throws -> [String: Any] {
@@ -244,6 +268,25 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
 
     private func perform(_ action: String, payload: [String: Any], requestID: String) async throws -> Any {
         try ReleaseFeatures.requireAllowedRequest(action, payload: payload)
+        if ["notewise/start", "notewise/pause", "notewise/stop", "files/save"].contains(action),
+           payload["expectedUserId"] != nil || payload["expectedSessionId"] != nil {
+            let identity = try FigmaPracticeRequestIdentity(origin: origin,
+                credential: accountClient().credential(), expectedUserID: payload["expectedUserId"], expectedSessionID: payload["expectedSessionId"])
+            guard !deletedAccountScopes.contains(identity.ownerScope) else {
+                throw CloudOMRError(code: "account_deleted", message: "此账户已注销。", status: 410)
+            }
+            requestAccountScopes[requestID] = identity.ownerScope
+            requestPracticeIdentities[requestID] = identity
+        }
+        if Self.accountOMRActions.contains(action) || (action == "notewise/recording/play" && payload["expectedUserId"] != nil) {
+            let identity = try FigmaCloudRequestIdentity(origin: origin,
+                credential: accountClient().credential(), expectedUserID: payload["expectedUserId"])
+            guard !deletedAccountScopes.contains(identity.ownerScope) else {
+                throw CloudOMRError(code: "account_deleted", message: "此账户已注销。", status: 410)
+            }
+            requestAccountScopes[requestID] = identity.ownerScope
+            requestOMRIdentities[requestID] = identity
+        }
         if action.hasPrefix("notewise/") || action.hasPrefix("account/") {
             let scope = origin + "|" + (try accountClient().credential()?.userID ?? "guest")
             guard !deletedAccountScopes.contains(scope) else {
@@ -257,8 +300,19 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             guard xml.utf8.count <= 10 * 1024 * 1024 else { throw NoteLiteError.invalidResponse }
             return ["sha256": SHA256.hash(data: Data(xml.utf8)).map { String(format: "%02x", $0) }.joined()]
         case "notewise/start":
-            let scope = try accountClient().credential()?.userID ?? "guest"
-            return try await noteWise.start(payload, scope: origin + "|" + scope)
+            let scope: String
+            if let identity = requestPracticeIdentities[requestID] { scope = identity.ownerScope }
+            else { scope = origin + "|" + (try accountClient().credential()?.userID ?? "guest") }
+            do {
+                let result = try await noteWise.start(payload, scope: scope)
+                try validateOMRIdentity(requestID)
+                return result
+            } catch {
+                // A permission prompt may finish after logout or a new login.
+                // Detach only this old take; never stop the new account's input.
+                if let takeId = payload["takeId"] as? String, (try? noteWise.checkActive(takeId, scope: scope)) != nil { _ = await noteWise.stop() }
+                throw error
+            }
         case "notewise/pause":
             try noteWise.checkActive(try string(payload, "takeId"), scope: origin + "|" + (accountClient().credential()?.userID ?? "guest"))
             noteWise.pause()
@@ -266,6 +320,9 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         case "notewise/stop":
             try noteWise.checkActive(try string(payload, "takeId"), scope: origin + "|" + (accountClient().credential()?.userID ?? "guest"))
             return await noteWise.stop()
+        case "notewise/recording/status":
+            guard let identity = requestOMRIdentities[requestID] else { throw NoteLiteError.invalidResponse }
+            return try noteWise.recordingStatus(string(payload, "takeId"), scope: identity.ownerScope)
         case "notewise/recording/play":
             guard audioPreview == nil, previewURL == nil, filePanel == nil else { throw CloudOMRError(code:"busy", message:"请先关闭当前播放器或文件窗口。") }
             let scope = try accountClient().credential()?.userID ?? "guest"
@@ -293,12 +350,10 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         case "configuration/get": return try configuration()
         case "configuration/set":
             let value = try ServerConfiguration(string(payload, "baseURL")).key
-            for (id, task) in requests where id != requestID { task.cancel() }
-            accountDigests.clear()
-            _ = await noteWise.stop()
-            clearAudio()
-            accountClients.removeAll()
-            UserDefaults.standard.set(value, forKey: Self.originKey)
+            let officialOrigin = try ServerConfiguration(CloudOMRClient.defaultOrigin).key
+            guard value == officialOrigin else {
+                throw CloudOMRError(code: "official_service_required", message: "应用使用官方云端服务，无需设置地址或设备配对码。")
+            }
             return try configuration()
         case "account/request":
             let capturedOrigin = origin
@@ -394,11 +449,9 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             guard importContinuation == nil, exportContinuation == nil, filePanel == nil, previewURL == nil, audioPreview == nil else {
                 throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。")
             }
-            // Pairing must be completed before asking the user for a score file.
-            _ = try client()
-            guard (try configuration())["hasCredentials"] as? Bool == true else {
-                throw CloudOMRError(code: "pairing_required", message: "请先连接识谱服务。")
-            }
+            // Capture the authenticated client before the picker suspends. A
+            // later account switch must not upload this selection as another user.
+            let capturedClient = try client()
             let selected = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
                 importRequestID = requestID
                 importContinuation = continuation
@@ -407,6 +460,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                     filePanel = try FigmaNativeFilePanel.open(in: webView) { [weak self] in self?.importSelected($0) }
                 } catch { importSelected(.failure(error)) }
             }
+            try validateOMRIdentity(requestID)
             let scoped = selected.startAccessingSecurityScopedResource()
             defer { if scoped { selected.stopAccessingSecurityScopedResource() } }
             let data = try await Task.detached(priority: .userInitiated) {
@@ -416,7 +470,8 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                 }
                 return try Data(contentsOf: selected)
             }.value
-            return try await upload(data, filename: selected.lastPathComponent, requestID: requestID)
+            try validateOMRIdentity(requestID)
+            return try await upload(data, filename: selected.lastPathComponent, requestID: requestID, using: capturedClient)
         case "score/get":
             return try await client().musicxml(jobID: string(payload, "jobId"), score: integer(payload, "score", default: 0))
         case "notes/get":
@@ -443,6 +498,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
             let kind = try string(payload, "kind")
             let score = try integer(payload, "score", default: 0)
             let data = try await client().file(jobID: string(payload, "jobId"), score: score, kind: kind)
+            try validateOMRIdentity(requestID)
             guard exportContinuation == nil else { throw CloudOMRError(code: "busy", message: "结果保存窗口已经打开。") }
             let ext = kind == "midi" ? "mid" : kind == "musicxml" ? "musicxml" : kind == "log" ? "txt" : kind == "omr" ? "omr" : "bin"
             return try await saveFile(data, filename: (payload["filename"] as? String) ?? "score-\(score + 1).\(ext)", requestID: requestID)
@@ -465,6 +521,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                 throw CloudOMRError(code: "invalid_file", message: "原稿预览支持 PDF、PNG 与 JPEG。")
             }
             let data = try await client().file(jobID: string(payload, "jobId"), score: integer(payload, "score", default: 0), kind: "original")
+            try validateOMRIdentity(requestID)
             guard data.count <= CloudOMRClient.maximumUploadBytes else {
                 throw CloudOMRError(code: "file_too_large", message: "原稿预览不能超过 32 MiB。")
             }
@@ -477,12 +534,15 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
                 catch { try? FileManager.default.removeItem(at: directory); throw error }
             }.value
             if Task.isCancelled { try? FileManager.default.removeItem(at: directory); throw CancellationError() }
+            do { try validateOMRIdentity(requestID) }
+            catch { try? FileManager.default.removeItem(at: directory); throw error }
             guard previewURL == nil, filePanel == nil, audioPreview == nil else {
                 try? FileManager.default.removeItem(at: directory)
                 throw CloudOMRError(code: "busy", message: "请先关闭当前文件窗口。")
             }
             clearPreview()
             previewDirectory = directory
+            previewAccountScope = requestOMRIdentities[requestID]?.ownerScope
             previewURL = fileURL
             return ["presented": true]
         case "orientation/set":
@@ -497,8 +557,23 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         }
     }
 
-    private func upload(_ data: Data, filename: String, requestID: String) async throws -> [String: Any] {
-        try await client().upload(data: data, filename: filename) { [weak self] progress in
+    private func validateOMRIdentity(_ requestID: String) throws {
+        if let identity = requestOMRIdentities[requestID] {
+            try identity.validate(origin: origin, credential: accountClient().credential())
+            try Task.checkCancellation()
+        }
+        if let identity = requestPracticeIdentities[requestID] {
+            try identity.validate(origin: origin, credential: accountClient().credential())
+            try Task.checkCancellation()
+        }
+    }
+
+    private func upload(_ data: Data, filename: String, requestID: String, using capturedClient: CloudOMRClient? = nil) async throws -> [String: Any] {
+        try validateOMRIdentity(requestID)
+        let uploadClient: CloudOMRClient
+        if let capturedClient { uploadClient = capturedClient }
+        else { uploadClient = try client() }
+        return try await uploadClient.upload(data: data, filename: filename) { [weak self] progress in
             Task { @MainActor [weak self] in
                 self?.event(["type": "uploadProgress", "requestId": requestID, "progress": progress])
             }
@@ -522,6 +597,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
         }.value
         defer { try? FileManager.default.removeItem(at: directory) }
         try Task.checkCancellation()
+        try validateOMRIdentity(requestID)
         guard exportContinuation == nil, importContinuation == nil, filePanel == nil, previewURL == nil, audioPreview == nil else {
             throw CloudOMRError(code: "busy", message: "文件选择窗口已经打开。")
         }
@@ -579,6 +655,7 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
     func clearPreview() {
         if let previewDirectory { try? FileManager.default.removeItem(at: previewDirectory) }
         previewDirectory = nil
+        previewAccountScope = nil
     }
 
     func clearAudio() {
@@ -591,16 +668,43 @@ final class FigmaShellController: NSObject, ObservableObject, WKScriptMessageHan
 
     private func purgeDeletedAccount(_ scope: String, excluding requestID: String) async throws {
         deletedAccountScopes.insert(scope)
-        let pending = requests.compactMap { id, task in
-            id != requestID && requestAccountScopes[id] == scope ? task : nil
+        let pending = requests.compactMap { id, task -> (id: String, task: Task<Void, Never>)? in
+            id != requestID && requestAccountScopes[id] == scope ? (id, task) : nil
         }
-        pending.forEach { $0.cancel() }
+        // A cancelled Task cannot resume a system picker's continuation by
+        // itself. Close its panel and resume it before draining the original tasks.
+        pending.forEach { cancelRequest($0.id) }
         accountDigests.clear(accountScope: scope)
+        if previewAccountScope == scope {
+            previewURL = nil
+            clearPreview()
+        }
         if audioAccountScope == scope { clearAudio() }
         // deleteRecordings detaches input and persists its cleanup marker before
         // the first suspension. Drain/cancel native readers before removing WAVs.
-        _ = try await noteWise.deleteRecordings(accountScope: scope, waitingFor: pending)
+        _ = try await noteWise.deleteRecordings(accountScope: scope, waitingFor: pending.map { $0.task })
     }
+
+    #if DEBUG
+    // XCTest installs real suspended continuations without opening a system
+    // window or authenticating a user. Release builds contain no fixture API.
+    func installDeletionTestRequest(_ id: String, scope: String, task: Task<Void, Never>,
+                                    importing: CheckedContinuation<URL, Error>? = nil,
+                                    exporting: CheckedContinuation<String, Error>? = nil) {
+        requests[id] = task
+        requestAccountScopes[id] = scope
+        if let importing { importRequestID = id; importContinuation = importing; self.importing = true }
+        if let exporting { exportRequestID = id; exportContinuation = exporting; self.exporting = true }
+    }
+
+    func installDeletionTestPreview(directory: URL, file: URL, scope: String) {
+        previewDirectory = directory; previewAccountScope = scope; previewURL = file
+    }
+
+    func purgeDeletionTestScope(_ scope: String) async throws {
+        try await purgeDeletedAccount(scope, excluding: "deletion-test")
+    }
+    #endif
 
     private func cancelRequest(_ requestID: String) {
         requests[requestID]?.cancel()

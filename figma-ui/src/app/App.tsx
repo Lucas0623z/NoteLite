@@ -1,14 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import aiIcon from "../imports/image.png";
-import appLogo from "../imports/app-logo.png";
 import { releaseFeatures } from "./release-features";
 import { isPurchaseEntry, requestPurchase } from "./purchases";
 import MyScoresPage from "./MyScoresPage";
 import AccountSettings from "./AccountSettings";
 import ClassroomSettings from "./ClassroomSettings";
 import PrivacyDetails from "./PrivacyDetails";
+import { useAccountProfile } from "./profile-hook";
+import { accountAvatarImage } from "./profile-avatar";
+import { exportOwnerLocalData, savePersonalDataExport } from "./profile-export";
+import type { ProfileChanges } from "./profile-model";
 import PracticeHistory, { usePracticeHistory } from "./PracticeHistory";
-import { analysisRequestID, ownedPracticeRecords, practiceSummary, shouldAllowPracticeAnalysis, type PracticeHistoryState } from "./practice-summary";
+import { analysisRequestID, nextLocalPracticeDay, ownedPracticeRecords, practiceCalendarLabel, practiceDay, practiceMonthSummary, practiceSummary, shouldAllowPracticeAnalysis, type PracticeHistoryState } from "./practice-summary";
 import { account, type AccountIdentity, type AggregateFact, type AggregateObservation, type PracticeAnalysisResult } from "./account";
 import { CloudError, createUUID, errorMessage } from "./cloud";
 import tuningForkDisc from "../imports/01-tuning-fork.svg";
@@ -255,7 +258,7 @@ function TabIcon({ kind, isDark }: { kind: string; isDark: boolean }) {
   }
 
   if (kind === "ai") {
-    return <img src={appLogo} alt="" className="h-[27px] w-[27px] object-contain" />;
+    return <img src={aiIcon} alt="" className="h-[27px] w-[27px] object-contain" />;
   }
 
   if (kind === "practice") {
@@ -271,24 +274,6 @@ function TabIcon({ kind, isDark }: { kind: string; isDark: boolean }) {
   }
 
   return null;
-}
-
-function currentPracticeDay() {
-  const date = new Date();
-  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000;
-}
-
-function useSavedOptions() {
-  const [options, setOptions] = useState<Record<string, boolean>>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("music-settings") || "{}");
-      return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
-    } catch { return {}; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem("music-settings", JSON.stringify(options)); } catch {}
-  }, [options]);
-  return { options, toggle: (key: string, fallback: boolean) => setOptions((previous) => ({ ...previous, [key]: !(previous[key] ?? fallback) })) };
 }
 
 function SettingSwitch({ label, description, checked, onChange }: { label: string; description?: string; checked: boolean; onChange: () => void }) {
@@ -344,13 +329,15 @@ function CoursesPage({ isDark, selectedCourse, onCourseChange, onContinue }: { i
   </div>;
 }
 
-function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, identity, history, onReload, onScores }: { title: string; isDark: boolean; toggleTheme: () => void; name: string; onNameChange: (name: string) => void; identity: AccountIdentity | null; history: PracticeHistoryState; onReload: () => void; onScores: () => void }) {
-  const { options, toggle } = useSavedOptions();
+function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, identity, history, onReload, onScores, personalProfile }: { title: string; isDark: boolean; toggleTheme: () => void; name: string; onNameChange: (name: string) => void; identity: AccountIdentity | null; history: PracticeHistoryState; onReload: () => void; onScores: () => void; personalProfile: ReturnType<typeof useAccountProfile> }) {
+  const { options, email, phone, avatar, avatarImage } = personalProfile.preferences;
+  const changePreferences = (changes: ProfileChanges) => { try { personalProfile.change(changes); return true; } catch (error) { setMessage(error instanceof Error ? error.message : "个人设置尚未保存。"); return false; } };
+  const toggle = (key: string, fallback: boolean) => changePreferences({ options: { [key]: !(options[key] ?? fallback) } });
   const [message, setMessage] = useState("");
   const [notificationGroup, setNotificationGroup] = useState<string | null>(null);
-  const [avatar, setAvatar] = useState<string | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
-  const [profile, setProfile] = useState({ username: "", email: "", phone: "" });
+  const avatarSelection = useRef<{ scope: string; change: (changes: ProfileChanges) => void } | null>(null);
+  const [exporting, setExporting] = useState(false);
   const outline = isDark ? "border-white/15" : "border-[#e5e5e5]";
   const field = `mt-2 h-12 w-full rounded-[13px] border-2 px-4 text-[18px] font-normal outline-none focus:border-[#67db23] ${isDark ? "border-white/15 bg-white/5" : "border-[#e5e5e5] bg-[#f7f7f7]"}`;
   const action = `h-12 w-full cursor-pointer rounded-[14px] border-2 border-b-[5px] text-[16px] font-bold text-[#67db23] focus-visible:outline-2 focus-visible:outline-current ${outline} ${pressFeedback}`;
@@ -365,7 +352,7 @@ function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, ident
       <h2 className="mb-4 text-[15px] font-medium text-[#aaa]">专注模式设置</h2>
       {toggleRow("屏蔽其他应用", false)}
       <button type="button" onClick={() => setMessage("当前为网页预览，无法屏蔽其他手机应用。")} className="flex h-14 w-full cursor-pointer items-center justify-between text-[18px] font-bold text-[#aaa]"><span>屏蔽设置</span><span className="text-[15px]">设置</span></button>
-      <p className="text-[12px] leading-6 text-[#aaa]">以上开关保存在当前浏览器，练习功能接入后生效。</p>
+      <p className="text-[12px] leading-6 text-[#aaa]">{personalProfile.message} 学习体验开关与系统能力按实际支持生效。</p>
       <div className={`my-6 border-t-2 ${outline}`} />
       <h2 className="mb-2 text-[15px] font-medium text-[#aaa]">外观</h2>
       <SettingSwitch label="深色模式" checked={isDark} onChange={toggleTheme} />
@@ -376,33 +363,38 @@ function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, ident
   if (title === "个人档案") return (
     <div className="px-4 py-5">
       <div className="mb-7 flex flex-col items-center gap-3">
-        <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-2 border-[#67db23] bg-[#f3f3f3] p-2"><img src={avatar || accountLightIcon} alt="账号头像" className="h-full w-full object-contain" /></div>
-        <button type="button" onClick={() => avatarInput.current?.click()} className="cursor-pointer text-[17px] font-bold text-[#67db23]">更改头像</button>
-        <input ref={avatarInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => {
-          const file = event.target.files?.[0];
+        <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-2 border-[#67db23] bg-[#f3f3f3] p-2"><img src={avatar === "custom" && avatarImage ? avatarImage : avatar === "portrait" ? accountLightIcon : aiIcon} alt="账号头像" className="h-full w-full object-contain" /></div>
+        <button type="button" onClick={() => { avatarSelection.current = { scope: personalProfile.scope, change: personalProfile.change }; avatarInput.current?.click(); }} className="cursor-pointer text-[17px] font-bold text-[#67db23]">更改头像</button>
+        <input ref={avatarInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={async (event) => {
+          const file = event.target.files?.[0], selection = avatarSelection.current; event.target.value = ""; avatarSelection.current = null;
           if (!file) return;
-          if (file.size > 2 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setMessage("请选择不超过 2MB 的 PNG、JPG 或 WebP 图片。"); return; }
-          const reader = new FileReader();
-          reader.onload = () => { setAvatar(String(reader.result)); setMessage("头像已更新，仅用于当前预览。"); };
-          reader.readAsDataURL(file);
+          if (!selection || selection.scope !== personalProfile.scope) { setMessage("账户已切换，请在当前账户重新选择头像。"); return; }
+          try { const image = await accountAvatarImage(file); selection.change({ avatar: "custom", avatarImage: image }); setMessage("头像已保存，账户同步状态见下方。"); }
+          catch (error) { setMessage(error instanceof Error ? error.message : "头像尚未保存。"); }
         }} />
       </div>
       <label className="mb-4 block text-[19px] font-bold">姓名<input value={name} onChange={(event) => onNameChange(event.target.value)} maxLength={30} placeholder="请输入姓名" autoComplete="name" className={field} /></label>
-      <AccountSettings key={identity?.userId || "guest"} identity={identity} field={field} action={action} onReload={onReload} />
-      <label className="mb-4 block text-[19px] font-bold">邮箱<input type="email" value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} autoComplete="email" placeholder="请输入邮箱" className={field} /></label>
-      <label className="mb-4 block text-[19px] font-bold">电话号码<input type="tel" value={profile.phone} onChange={(event) => setProfile({ ...profile, phone: event.target.value })} autoComplete="tel" placeholder="请输入电话号码" className={field} /></label>
-      <p className="mb-5 text-[12px] text-[#999]">姓名保存在本机；邮箱、电话号码为当前页面的本机偏好，不用于登录。</p>
-      <button type="button" className={action} onClick={() => {
-        const url = URL.createObjectURL(new Blob([JSON.stringify({ name, email: profile.email, phone: profile.phone, username: identity?.username || null, settings: options }, null, 2)], { type: "application/json" }));
-        const link = document.createElement("a"); link.href = url; link.download = "黑白键-个人数据.json"; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setMessage("已导出本机个人资料和设置。");
-      }}>导出数据</button>
-      <button type="button" disabled className={`${action} mt-3 text-[#ef6666] disabled:opacity-50`}>删除账户（暂未开放）</button>
+      <AccountSettings identity={identity} field={field} action={action} onReload={onReload} />
+      <label className="mb-4 block text-[19px] font-bold">邮箱<input type="email" value={email} maxLength={254} onChange={(event) => changePreferences({ email: event.target.value })} autoComplete="email" placeholder="请输入邮箱" className={field} /></label>
+      <label className="mb-4 block text-[19px] font-bold">电话号码<input type="tel" value={phone} maxLength={40} onChange={(event) => changePreferences({ phone: event.target.value })} autoComplete="tel" placeholder="请输入电话号码" className={field} /></label>
+      <p role="status" className="mb-5 text-[12px] text-[#999]">{personalProfile.message} 邮箱、电话号码为个人联系资料，不用于登录，也未经验证。{identity && personalProfile.status !== "synced" && <button type="button" onClick={() => void personalProfile.retry()} className="ml-2 text-[#67db23]">重试同步</button>}</p>
+      <button type="button" disabled={exporting} className={`${action} disabled:opacity-50`} onClick={async () => {
+        const owner = identity?.userId || "guest", session = identity?.sessionId;
+        setExporting(true);
+        try {
+          const isCurrent = () => (account.current?.userId || "guest") === owner && account.current?.sessionId === session;
+          const localData = await exportOwnerLocalData(owner, isCurrent);
+          const data = identity ? { ...await account.exportData(), localData } : { schemaVersion: 1, scope: "guest-local", preferences: personalProfile.preferences, localData };
+          await savePersonalDataExport(data, identity, isCurrent);
+          setMessage(identity ? "已导出当前账户资料与本机曲谱、练习及待同步修改；录音文件需另行保存。" : "已导出访客本机资料、曲谱和练习记录，不含录音文件。");
+        } catch (error) { setMessage(error instanceof Error ? error.message : "数据导出尚未完成。"); }
+        finally { setExporting(false); }
+      }}>{exporting ? "正在导出…" : "导出数据"}</button>
       {notice}
     </div>
   );
 
-  if (title === "退出登录") return <div className="px-4 py-7"><AccountSettings key={identity?.userId || "guest"} identity={identity} field={field} action={action} onReload={onReload} /></div>;
+  if (title === "退出登录") return <div className="px-4 py-7"><AccountSettings identity={identity} field={field} action={action} onReload={onReload} /></div>;
 
   if (title === "通知") {
     const groups = [
@@ -420,10 +412,10 @@ function SettingsContent({ title, isDark, toggleTheme, name, onNameChange, ident
         </button>
         {notificationGroup === group.name && <div className={`mt-3 rounded-xl border px-3 ${outline}`}>{group.items.map((item) => <SettingSwitch key={item} label={item} checked={options[`通知-${item}`] ?? false} onChange={() => toggle(`通知-${item}`, false)} />)}</div>}
       </section>
-    ))}<p className="mt-5 text-[12px] leading-6 text-[#aaa]">此处保存通知偏好，实际推送尚未接入。</p></div>;
+    ))}<p className="mt-5 text-[12px] leading-6 text-[#aaa]">{personalProfile.message} 此处保存通知偏好，实际推送尚未接入。</p></div>;
   }
 
-  if (title === "隐私设置") return <div className="px-4 py-4">{toggleRow("信息收集", true, "广告跟踪及个性化")}{toggleRow("分享练琴录音", false, "与黑白键分享练琴录音，帮助优化练习体验") }<p className="mt-5 text-[12px] leading-6 text-[#aaa]">仅保存你的偏好，不会在此页面采集或上传录音。</p></div>;
+  if (title === "隐私设置") return <div className="px-4 py-4">{toggleRow("信息收集", true, "广告跟踪及个性化")}{toggleRow("分享练琴录音", false, "与黑白键分享练琴录音，帮助优化练习体验") }<p className="mt-5 text-[12px] leading-6 text-[#aaa]">{personalProfile.message} 仅保存你的偏好，不会在此页面采集或上传录音。</p></div>;
   if (title === "隐私政策") return <PrivacyDetails />;
 
   if (title === "黑白键课堂") return <ClassroomSettings key={identity?.userId || "guest"} identity={identity} history={history} image={aiIcon} outline={outline} field={field} action={action} onScores={onScores} />;
@@ -896,7 +888,7 @@ function OfficialScoresPage({ isDark }: { isDark: boolean }) {
         if (container.scrollTop <= 2) setScrollUp(false);
         else if (container.scrollHeight - container.clientHeight - container.scrollTop <= 2) setScrollUp(true);
       }
-    }} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    }} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain touch-pan-y pb-20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
     <div className="practice-path relative mx-auto max-w-[360px] pt-8">
       {Array.from({ length: 30 }, (_, offset) => {
         const displayedPart = offset + 1;
@@ -1082,26 +1074,14 @@ export default function App() {
   const analysisRequests = useRef(new Map<string, string>());
   const { identity, history, reload: reloadHistory } = usePracticeHistory();
   const historyOwner = history.status === "ready" ? identity?.userId || "guest" : null;
-  const [selectedCourse, setSelectedCourse] = useState<string | null>(() => {
-    try {
-      const saved = localStorage.getItem("music-selected-course");
-      return saved && courseImages[saved.split("-").pop() || ""] ? saved : null;
-    } catch { return null; }
-  });
+  const personalProfile = useAccountProfile(identity);
+  const { selectedCourse, displayName, avatar: savedAvatar, avatarImage } = personalProfile.preferences;
+  const changePreferences = (changes: ProfileChanges) => { try { personalProfile.change(changes); } catch { /* The profile status reports a failed local save. */ } };
+  const setSelectedCourse = (selectedCourse: string) => changePreferences({ selectedCourse });
+  const setDisplayName = (displayName: string) => changePreferences({ displayName });
   const selectedCourseImage = courseImages[selectedCourse?.split("-").pop() || "钢琴"] || pianoCourse;
-  useEffect(() => {
-    if (selectedCourse) {
-      try { localStorage.setItem("music-selected-course", selectedCourse); } catch {}
-    }
-  }, [selectedCourse]);
-  const [displayName, setDisplayName] = useState(() => {
-    try { return localStorage.getItem("music-display-name") || "名字"; } catch { return "名字"; }
-  });
-  useEffect(() => { try { localStorage.setItem("music-display-name", displayName); } catch {} }, [displayName]);
+  const savedAvatarImage = savedAvatar === "custom" && avatarImage ? avatarImage : savedAvatar === "portrait" ? accountLightIcon : aiIcon;
   const [activeTab, setActiveTab] = useState("library");
-  const [savedAvatar, setSavedAvatar] = useState(() => {
-    try { return localStorage.getItem("music-avatar") === "portrait" ? "portrait" : "mascot"; } catch { return "mascot"; }
-  });
   const [draftAvatar, setDraftAvatar] = useState(savedAvatar);
   const [previewOutfitId, setPreviewOutfitId] = useState("plain");
   const [wardrobeOpen, setWardrobeOpen, wardrobeDialog] = useAnimatedSheet();
@@ -1118,8 +1098,8 @@ export default function App() {
   }, [showOutfitProgress]);
   const previewOutfit = wardrobeOutfits.find((outfit) => outfit.id === previewOutfitId) || wardrobeOutfits[0];
   const previewLocked = wardrobeTab === "outfits" && previewOutfit.id !== "plain";
-  const draftAvatarImage = draftAvatar === "portrait" ? accountLightIcon : aiIcon;
-  useEffect(() => { try { localStorage.setItem("music-avatar", savedAvatar); } catch {} }, [savedAvatar]);
+  const draftAvatarImage = draftAvatar === "custom" && avatarImage ? avatarImage : draftAvatar === "portrait" ? accountLightIcon : aiIcon;
+  useEffect(() => { setDraftAvatar(savedAvatar); setWardrobeOpen(false); }, [identity?.userId, identity?.sessionId]);
   useEffect(() => {
     const dialog = wardrobeDialog.current;
     if (wardrobeOpen && !dialog?.open) dialog?.showModal();
@@ -1222,43 +1202,41 @@ export default function App() {
     setVisibleMonth(new Date(date.getFullYear(), date.getMonth(), 1));
     setHistoryOpen(true);
   }
-  const [today, setToday] = useState(currentPracticeDay);
-  const summary = practiceSummary(history, historyOwner, today);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const today = practiceDay(new Date(clockNow))!;
+  const summary = practiceSummary(history, historyOwner, today, clockNow);
   const streak = summary.streak;
   const historyStreak = streak;
-  const monthStart = Date.UTC(year, month, 1) / 86400000;
-  const monthlyPracticeDays = [...summary.days].filter((day) => day >= monthStart && day < monthStart + monthDays).length;
-  const elapsedMonthDays = Math.max(0, Math.min(monthDays, today - monthStart + 1));
-  const missedPracticeDays = elapsedMonthDays - monthlyPracticeDays;
+  const monthSummary = practiceMonthSummary(summary, year, month, today);
+  const monthlyPracticeDays = monthSummary.practiced;
+  const missedPracticeDays = monthSummary.missed;
+
+  useEffect(() => { setClockNow(Date.now()); }, [history]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setToday(currentPracticeDay()), 30000);
-    return () => window.clearInterval(timer);
+    let midnight = 0;
+    const update = () => {
+      const now = Date.now(); setClockNow(now);
+      window.clearTimeout(midnight);
+      midnight = window.setTimeout(update, Math.max(1, nextLocalPracticeDay(now) - now + 10));
+    };
+    const visible = () => { if (document.visibilityState === "visible") update(); };
+    update();
+    const timer = window.setInterval(update, 30000);
+    window.addEventListener("focus", update); document.addEventListener("visibilitychange", visible);
+    return () => { window.clearInterval(timer); window.clearTimeout(midnight); window.removeEventListener("focus", update); document.removeEventListener("visibilitychange", visible); };
   }, []);
 
-  const [isDark, setIsDark] = useState(() => {
-    try {
-      return localStorage.getItem("sheet-music-theme") === "dark";
-    } catch {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("sheet-music-theme", isDark ? "dark" : "light");
-    } catch {
-      return;
-    }
-  }, [isDark]);
+  const isDark = personalProfile.preferences.theme === "dark";
+  const toggleTheme = () => changePreferences({ theme: isDark ? "light" : "dark" });
 
   return (
-    <div data-theme={isDark ? "dark" : "light"} className={`app-root flex min-h-dvh justify-center font-sans transition-colors duration-200 ${isDark ? "bg-[#0a0a0a] text-white" : "bg-[#f5f5f5] text-black"}`}>
-      <div className={`app-shell relative flex h-dvh w-full max-w-none sm:max-w-[440px] flex-col overflow-hidden transition-colors duration-200 sm:shadow-[0_0_50px_rgba(0,0,0,0.04)] ${isDark ? "bg-[#141414]" : "bg-white"}`}>
+    <div data-theme={isDark ? "dark" : "light"} className={`app-root flex min-h-dvh min-w-0 overflow-x-clip justify-center font-sans transition-colors duration-200 ${isDark ? "bg-[#0a0a0a] text-white" : "bg-[#f5f5f5] text-black"}`}>
+      <div className={`app-shell relative flex h-dvh min-w-0 w-full max-w-none sm:max-w-[440px] flex-col overflow-hidden transition-colors duration-200 sm:shadow-[0_0_50px_rgba(0,0,0,0.04)] ${isDark ? "bg-[#141414]" : "bg-white"}`}>
         <header className={`relative z-20 flex shrink-0 items-center justify-between px-4 pt-[max(59px,env(safe-area-inset-top))] ${activeTab === "account" ? `border-b pb-3 ${accountScrolled ? isDark ? "border-white/10 bg-[#141414]" : "border-[#e5e5e5] bg-white" : isDark ? "border-transparent bg-[#252525]" : "border-transparent bg-[#e9e9e9]"}` : ""}`}>
           {activeTab === "account" ? (
             <>
-              <span className="flex h-11 min-w-0 items-center truncate pl-2 text-[23px] font-bold">{identity?.username || displayName || "名字"}</span>
+              <span className="flex h-11 min-w-0 items-center truncate pl-2 text-[23px] font-bold">{displayName && displayName !== "名字" ? displayName : identity?.username || displayName || "名字"}</span>
               <div className="flex shrink-0 items-center gap-1">
                 <button type="button" aria-label="装扮" onClick={() => accountAction("装扮")} className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current">
                   <img src={isDark ? outfitDarkIcon : outfitLightIcon} alt="" className="h-8 w-8 object-contain" />
@@ -1272,7 +1250,7 @@ export default function App() {
             <>
           <button
             type="button"
-            onClick={() => setIsDark((previous) => !previous)}
+            onClick={toggleTheme}
             aria-label={isDark ? "切换至浅色模式" : "切换至深色模式"}
             title={isDark ? "切换至浅色模式" : "切换至深色模式"}
             className={`flex h-11 w-11 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current ${isDark ? "active:bg-white/15" : "active:bg-black/10"}`}
@@ -1295,13 +1273,13 @@ export default function App() {
             </>
           )}
         </header>
-        <main data-page={activeTab} ref={mainScroll} onScroll={(event) => { if (activeTab === "account") setAccountScrolled(event.currentTarget.scrollTop > 5); }} className={`min-h-0 flex-1 overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${activeTab === "official" ? "overflow-hidden" : "overflow-y-auto"}`} aria-label={tabs.find((tab) => tab.id === activeTab)?.label}>
+        <main data-page={activeTab} ref={mainScroll} onScroll={(event) => { if (activeTab === "account") setAccountScrolled(event.currentTarget.scrollTop > 5); }} className={`min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-x-none overscroll-y-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${activeTab === "official" ? "overflow-hidden" : "overflow-y-auto"}`} aria-label={tabs.find((tab) => tab.id === activeTab)?.label}>
           {activeTab === "official" && <OfficialScoresPage isDark={isDark} />}
-          {activeTab === "library" && <MyScoresPage isDark={isDark} />}
+          {activeTab === "library" && <MyScoresPage isDark={isDark} onRequestSignIn={() => accountAction("个人档案")} />}
           {activeTab === "ai" && <MusicAssistantPage isDark={isDark} history={history} owner={historyOwner} requests={analysisRequests.current} />}
-          {activeTab === "account" && <AccountPage isDark={isDark} streak={streak} practiceCount={summary.count} statisticsKnown={summary.known} identity={identity} avatarSrc={savedAvatar === "portrait" ? accountLightIcon : aiIcon} courseImage={selectedCourseImage} onAction={accountAction} />}
+          {activeTab === "account" && <AccountPage isDark={isDark} streak={streak} practiceCount={summary.count} statisticsKnown={summary.known} identity={identity} avatarSrc={savedAvatarImage} courseImage={selectedCourseImage} onAction={accountAction} />}
         </main>
-        <footer className={`z-20 shrink-0 pb-[env(safe-area-inset-bottom)] transition-colors duration-200 ${isDark ? "bg-[#141414]" : "bg-white"}`}>
+        <footer className={`z-20 shrink-0 pb-[max(12px,env(safe-area-inset-bottom))] transition-colors duration-200 ${isDark ? "bg-[#141414]" : "bg-white"}`}>
           <nav aria-label="底部导航" className={`grid grid-cols-5 border-t px-3 pt-3 ${isDark ? "border-white/10" : "border-black/[0.08]"}`}>
             {tabs.map((tab) => (
               <button
@@ -1316,11 +1294,8 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <div aria-hidden="true" className="flex h-[27px] items-end justify-center pb-2">
-            <div className={`h-[5px] w-[134px] rounded-full ${isDark ? "bg-white" : "bg-black"}`} />
-          </div>
         </footer>
-        <dialog ref={accountMenu} aria-label="账号菜单" onCancel={() => setAccountMenuOpen(false)} onClose={() => setAccountMenuOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setAccountMenuOpen(false); }} className={`fixed inset-x-0 top-auto bottom-[calc(101px+env(safe-area-inset-bottom))] mx-auto mb-0 w-full max-w-none sm:max-w-[440px] border-0 p-0 font-sans backdrop:bg-black/40 backdrop:[clip-path:inset(0_0_calc(102px_+_env(safe-area-inset-bottom))_0)] open:animate-account-menu motion-reduce:animate-none ${isDark ? "bg-[#191919] text-white" : "bg-white text-[#4b4b4b]"}`}>
+        <dialog ref={accountMenu} aria-label="账号菜单" onCancel={() => setAccountMenuOpen(false)} onClose={() => setAccountMenuOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setAccountMenuOpen(false); }} className={`fixed inset-x-0 top-auto bottom-[calc(75px+max(12px,env(safe-area-inset-bottom)))] mx-auto mb-0 w-full max-w-none sm:max-w-[440px] border-0 p-0 font-sans backdrop:bg-black/40 backdrop:[clip-path:inset(0_0_calc(76px_+_max(12px,_env(safe-area-inset-bottom)))_0)] open:animate-account-menu motion-reduce:animate-none ${isDark ? "bg-[#191919] text-white" : "bg-white text-[#4b4b4b]"}`}>
           <div>
             {[{ name: "个人档案", kind: "person" }, { name: "订购", kind: "bolt" }].map((item) => <button key={item.name} type="button" disabled={isPurchaseEntry(item.name) && !releaseFeatures.inAppPurchases} onClick={() => { setAccountMenuOpen(false); accountAction(item.name === "订购" ? "挑选套餐" : item.name); }} className={`flex min-h-[72px] w-full cursor-pointer items-center gap-5 border-b-2 px-6 text-[21px] font-bold focus-visible:outline-2 focus-visible:outline-current disabled:cursor-default disabled:opacity-50 ${isDark ? "border-white/10" : "border-[#e5e5e5]"}`}><AccountSymbol kind={item.kind} className={`h-7 w-7 ${item.kind === "person" ? "text-[#29c6df]" : "text-[#7958ee]"}`} /><span>{item.name}{isPurchaseEntry(item.name) && !releaseFeatures.inAppPurchases && <small className="ml-2 text-[12px]">{releaseFeatures.purchaseUnavailableMessage}</small>}</span></button>)}
             <button type="button" aria-label="关闭账号菜单" onClick={() => setAccountMenuOpen(false)} className="absolute top-1 right-2 flex h-8 w-8 cursor-pointer items-center justify-center text-[20px] text-[#aaa]">×</button>
@@ -1332,7 +1307,7 @@ export default function App() {
               <header className="relative flex h-14 items-center justify-center">
                 <button type="button" aria-label="关闭造型选择" onClick={() => setWardrobeOpen(false)} className={`absolute left-3 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-current ${isDark ? "active:bg-white/15" : "active:bg-black/10"}`}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="m4 4 16 16M20 4 4 20" /></svg></button>
                 <h1 id="wardrobe-title" className="max-w-[60%] truncate text-[20px] font-bold">{previewLocked ? previewOutfit.label : "选择你的造型"}</h1>
-                <button type="button" disabled={previewLocked || draftAvatar === savedAvatar} onClick={() => { setSavedAvatar(draftAvatar); setWardrobeOpen(false); }} className={`absolute right-3 h-9 min-w-12 cursor-pointer rounded-[10px] border-b-[5px] border-[#ddd] bg-white px-2.5 text-[15px] font-bold text-[#4b4b4b] focus-visible:outline-2 focus-visible:outline-current disabled:cursor-default disabled:text-[#aaa] ${pressFeedback}`}>保存</button>
+                <button type="button" disabled={previewLocked || draftAvatar === savedAvatar} onClick={() => { changePreferences({ avatar: draftAvatar, avatarImage: draftAvatar === "custom" ? avatarImage : null }); setWardrobeOpen(false); }} className={`absolute right-3 h-9 min-w-12 cursor-pointer rounded-[10px] border-b-[5px] border-[#ddd] bg-white px-2.5 text-[15px] font-bold text-[#4b4b4b] focus-visible:outline-2 focus-visible:outline-current disabled:cursor-default disabled:text-[#aaa] ${pressFeedback}`}>保存</button>
               </header>
               <div className="relative flex h-[clamp(160px,32dvh,290px)] items-end justify-center overflow-hidden px-5 pt-4">
                 <img src={previewLocked ? previewOutfit.image : draftAvatarImage} alt={previewLocked ? `${previewOutfit.label}装扮预览，尚未解锁` : "当前头像预览"} className="h-full max-w-[75%] object-contain" />
@@ -1347,10 +1322,10 @@ export default function App() {
                 {wardrobeTab === "outfits" ? wardrobeOutfits.map((outfit) => <div key={outfit.id}>
                   <button type="button" aria-label={`${outfit.label}${outfit.practiceExclusive ? "，练琴专属" : ""}${outfit.id === "plain" ? "" : "，尚未解锁，可预览"}`} aria-pressed={previewOutfitId === outfit.id} onClick={() => { setPreviewOutfitId(outfit.id); setShowOutfitProgress(false); setWardrobeMessage(""); }} className={`relative flex aspect-[0.8] w-full cursor-pointer flex-col overflow-visible rounded-[20px] border-2 border-b-[5px] focus-visible:outline-2 focus-visible:outline-current ${pressFeedback} ${previewOutfitId === outfit.id ? "border-[#a0eb76] bg-[#effbe7]" : outfit.practiceExclusive ? "border-[#e0d5f0]" : isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
                     {outfit.practiceExclusive && <span className="absolute -top-3 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#b395d5] px-2 py-0.5 text-[12px] font-bold text-white">练琴专属</span>}
-                    <div className="min-h-0 flex-1 overflow-hidden rounded-t-[17px] px-1 pt-2"><img src={outfit.id === "plain" ? draftAvatarImage : outfit.image} alt="" loading="lazy" decoding="async" className="h-full w-full object-contain" /></div>
-                    {outfit.id !== "plain" && <div className={`flex h-7 shrink-0 items-center justify-center rounded-b-[15px] ${previewOutfitId === outfit.id ? "bg-[#d3f5bd] text-[#67db23]" : outfit.practiceExclusive ? "bg-[#f0eaf8] text-[#ac91cf]" : isDark ? "bg-white/5 text-[#aaa]" : "bg-[#f7f7f7] text-[#aaa]"}`}><AccountSymbol kind="lock" className="h-4 w-4" /></div>}
+                    <div className="min-h-0 w-full flex-1 overflow-hidden rounded-t-[17px] px-1 pt-2"><img src={outfit.id === "plain" ? draftAvatarImage : outfit.image} alt="" loading="lazy" decoding="async" className="h-full w-full object-contain" /></div>
+                    {outfit.id !== "plain" && <div data-outfit-lock-strip className={`flex h-7 w-full self-stretch shrink-0 items-center justify-center rounded-b-[15px] ${previewOutfitId === outfit.id ? "bg-[#d3f5bd] text-[#67db23]" : outfit.practiceExclusive ? "bg-[#f0eaf8] text-[#ac91cf]" : isDark ? "bg-white/5 text-[#aaa]" : "bg-[#f7f7f7] text-[#aaa]"}`}><AccountSymbol kind="lock" className="h-4 w-4" /></div>}
                   </button><p className={`mt-2 text-center text-[15px] font-bold leading-5 ${previewOutfitId === outfit.id ? "text-[#67db23]" : "text-[#aaa]"}`}>{outfit.label}</p>
-                </div>) : [{ id: "mascot", label: "黑白键小猫3D", image: aiIcon }, { id: "portrait", label: "黑白键小猫2D", image: accountLightIcon }].map((avatar) => <div key={avatar.id}><button type="button" aria-label={avatar.label} aria-pressed={draftAvatar === avatar.id} onClick={() => { setDraftAvatar(avatar.id); setPreviewOutfitId("plain"); setShowOutfitProgress(false); setWardrobeMessage(""); }} className={`flex aspect-[0.8] w-full cursor-pointer items-center justify-center rounded-[20px] border-2 border-b-[5px] p-2 focus-visible:outline-2 focus-visible:outline-current ${pressFeedback} ${draftAvatar === avatar.id ? "border-[#a0eb76] bg-[#effbe7]" : isDark ? "border-white/15" : "border-[#e5e5e5]"}`}><img src={avatar.image} alt="" className="h-full w-full object-contain" /></button><p className={`mt-2 text-center text-[15px] font-bold ${draftAvatar === avatar.id ? "text-[#67db23]" : "text-[#aaa]"}`}>{avatar.label}</p></div>)}
+                </div>) : [{ id: "mascot", label: "黑白键小猫3D", image: aiIcon }, { id: "portrait", label: "黑白键小猫2D", image: accountLightIcon }].map((avatar) => <div key={avatar.id}><button type="button" aria-label={avatar.label} aria-pressed={draftAvatar === avatar.id} onClick={() => { setDraftAvatar(avatar.id === "portrait" ? "portrait" : "mascot"); setPreviewOutfitId("plain"); setShowOutfitProgress(false); setWardrobeMessage(""); }} className={`flex aspect-[0.8] w-full cursor-pointer items-center justify-center rounded-[20px] border-2 border-b-[5px] p-2 focus-visible:outline-2 focus-visible:outline-current ${pressFeedback} ${draftAvatar === avatar.id ? "border-[#a0eb76] bg-[#effbe7]" : isDark ? "border-white/15" : "border-[#e5e5e5]"}`}><img src={avatar.image} alt="" className="h-full w-full object-contain" /></button><p className={`mt-2 text-center text-[15px] font-bold ${draftAvatar === avatar.id ? "text-[#67db23]" : "text-[#aaa]"}`}>{avatar.label}</p></div>)}
               </div>
               <p role="status" className="mt-4 text-[12px] leading-6 text-[#999]">{wardrobeMessage}</p>
             </div>
@@ -1376,7 +1351,7 @@ export default function App() {
             </header>
             <div className="relative mt-1 flex h-10 items-center justify-center border-b-[3px] border-[#8acb62] text-[17px] font-bold text-[#25351e] after:absolute after:inset-x-0 after:-bottom-[3px] after:h-[4px] after:rounded-full after:bg-[#8acb62]">个人连胜</div>
             <div className="px-5 py-3">
-              <section aria-label={summary.known ? `${historyStreak}天连胜啦！` : "练习记录尚未读取"} className="flex h-[clamp(90px,15dvh,130px)] items-center justify-between gap-3">
+              <section aria-label={summary.known ? `连续练琴 ${historyStreak} 天` : "练习记录尚未读取"} className="flex h-[clamp(90px,15dvh,130px)] items-center justify-between gap-3">
                 <div className="flex flex-col items-start">
                   {!summary.known ? <span className="text-[clamp(60px,9dvh,86px)] font-extrabold leading-none">—</span> : historyStreak === 0 ? <svg role="img" aria-label="0" viewBox="0 0 110 160" className="h-[clamp(60px,9dvh,86px)] w-auto">
                     <ellipse cx="55" cy="80" rx="49" ry="76" fill="#b3e38d" />
@@ -1387,7 +1362,7 @@ export default function App() {
                     <span aria-hidden="true" className="[grid-area:1/1] text-white [-webkit-text-stroke:5px_white]">{historyStreak}</span>
                     <span className="[grid-area:1/1] text-[#b3e38d]">{historyStreak}</span>
                   </span>}
-                  <span className="mt-1 pl-5 text-[20px] font-bold leading-7 text-[#25351e]">天连胜啦！</span>
+                  <span className="mt-1 pl-5 text-[20px] font-bold leading-7 text-[#25351e]">{!summary.known ? "记录待读取" : historyStreak > 0 ? "天连胜啦！" : "天连续练琴"}</span>
                 </div>
                 <StreakNote active={historyStreak > 0} isDark={isDark} className="mr-3 h-full w-[110px] shrink-0" />
               </section>
@@ -1422,9 +1397,10 @@ export default function App() {
               </div>
               <div className={`flex items-start gap-2 rounded-[20px] border-2 px-3 py-3 ${isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-1 shrink-0"><circle cx="12" cy="12" r="12" fill="#adadb7" /><path d="M7 12h10" stroke="white" strokeWidth="2.5" strokeLinecap="round" /></svg>
-                <div><span className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? missedPracticeDays : "—"}</span><p className="whitespace-nowrap text-[15px] text-[#aaaaaa]">未打卡天数</p></div>
+                <div><span aria-describedby="checkin-rules" className="text-[22px] font-bold leading-7 tabular-nums">{summary.known ? missedPracticeDays : "—"}</span><p className="whitespace-nowrap text-[15px] text-[#aaaaaa]">未打卡天数</p></div>
               </div>
               </div>
+              <p id="checkin-rules" className="mt-2 shrink-0 text-[11px] leading-4 text-[#999]">练琴按本机开始日期打卡，试听不计；未打卡从首次练琴起统计，不含今天。</p>
               <section aria-label={`${year}年${month + 1}月练琴日历`} className={`mt-3 flex min-h-0 flex-1 flex-col rounded-[20px] border-2 px-3 py-3 ${isDark ? "border-white/15" : "border-[#e5e5e5]"}`}>
                 <div className="grid grid-cols-7 text-center text-[16px] font-medium text-[#aaaaaa]">
                   {["日", "一", "二", "三", "四", "五", "六"].map((weekday) => <div key={weekday} className="py-2">{weekday}</div>)}
@@ -1437,7 +1413,7 @@ export default function App() {
                     const practiced = summary.days.has(dayNumber);
                     const isToday = dayNumber === today;
                     return (
-                      <div key={day} aria-label={`${month + 1}月${day}日${isToday ? "，今天" : ""}，${practiced ? "已练琴" : "无练琴记录"}`} aria-current={isToday ? "date" : undefined} className="flex min-h-0 items-center justify-center">
+                      <div key={day} aria-label={`${month + 1}月${day}日${isToday ? "，今天" : ""}，${practiceCalendarLabel(summary, dayNumber, today)}`} aria-current={isToday ? "date" : undefined} className="flex min-h-0 items-center justify-center">
                         <div className={`relative flex aspect-square h-full max-h-9 w-auto max-w-9 items-center justify-center rounded-full text-[15px] font-bold tabular-nums ${practiced ? "bg-[#67db23] text-white" : isToday ? `${isDark ? "bg-white/15" : "bg-[#e9e9e9]"} text-[#aaaaaa]` : "text-[#aaaaaa]"}`}>{day}</div>
                       </div>
                     );
@@ -1467,7 +1443,7 @@ export default function App() {
               </div>
             </header>
             {settingsDetail === "课程" ? <CoursesPage isDark={isDark} selectedCourse={selectedCourse} onCourseChange={setSelectedCourse} onContinue={() => setSettingsOpen(false)} /> : settingsDetail ? (
-              <SettingsContent key={settingsDetail} title={settingsDetail} isDark={isDark} toggleTheme={() => setIsDark((previous) => !previous)} name={displayName} onNameChange={setDisplayName} identity={identity} history={history} onReload={() => void reloadHistory()} onScores={() => { setSettingsOpen(false); setActiveTab("library"); }} />
+              <SettingsContent key={`${settingsDetail}|${identity?.userId || "guest"}|${identity?.sessionId || "guest"}`} personalProfile={personalProfile} title={settingsDetail} isDark={isDark} toggleTheme={toggleTheme} name={displayName} onNameChange={setDisplayName} identity={identity} history={history} onReload={() => void reloadHistory()} onScores={() => { setSettingsOpen(false); setActiveTab("library"); }} />
             ) : (
               <div className="px-4">
                 {[

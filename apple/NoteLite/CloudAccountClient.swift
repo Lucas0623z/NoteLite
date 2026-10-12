@@ -137,10 +137,11 @@ final class CloudAccountClient {
             let verbs: [String: Set<String>] = ["health": ["GET"], "register": ["POST"], "login": ["POST"],
                 "me": ["GET"], "logout": ["POST"], "account": ["DELETE"], "sessions": ["GET"], "catalog": ["GET"],
                 "scores": ["GET", "POST"], "history": ["GET", "POST"], "courses": ["GET", "POST"], "uploads": ["POST"],
-                "practice-analysis": ["POST"]]
+                "practice-analysis": ["POST"], "profile": ["GET", "PUT"]]
             allowed = verbs[p[0]]?.contains(method) == true
         case 2:
-            if p[0] == "course-codes" { allowed = method == "POST" && ["preview", "join"].contains(p[1]) }
+            if p == ["account", "export"] { allowed = method == "GET" }
+            else if p[0] == "course-codes" { allowed = method == "POST" && ["preview", "join"].contains(p[1]) }
             else if uuid(1) {
                 switch p[0] {
                 case "sessions": allowed = method == "DELETE"
@@ -268,7 +269,7 @@ final class CloudAccountClient {
                 }
                 if deleting {
                     guard let object = body as? [String: Any], Set(object.keys) == ["password", "confirmation"],
-                          let password = object["password"] as? String, (15...256).contains(password.unicodeScalars.count),
+                          let password = object["password"] as? String, (1...256).contains(password.unicodeScalars.count),
                           password.utf8.count <= 1024, object["confirmation"] as? String == "DELETE_ACCOUNT" else { throw Self.invalidRequest() }
                 }
                 let data = try JSONSerialization.data(withJSONObject: value)
@@ -278,8 +279,14 @@ final class CloudAccountClient {
             } else if auth || deleting { throw Self.invalidRequest() }
         }
         if let etag = input["etag"] {
-            guard let etag = etag as? String, route.path.count == 4, route.path[2] == "scores", method == "PUT",
-                  etag.range(of: "^\"" + NSRegularExpression.escapedPattern(for: route.path[3]) + ":[1-9][0-9]{0,12}\"$", options: .regularExpression) != nil else { throw Self.invalidRequest() }
+            guard let etag = etag as? String, method == "PUT" else { throw Self.invalidRequest() }
+            let pattern: String
+            if route.path == ["api", "account", "profile"] {
+                pattern = "^\"profile-(?:0|[1-9][0-9]{0,12})\"$"
+            } else if route.path.count == 4, route.path[2] == "scores" {
+                pattern = "^\"" + NSRegularExpression.escapedPattern(for: route.path[3]) + ":[1-9][0-9]{0,12}\"$"
+            } else { throw Self.invalidRequest() }
+            guard etag.range(of: pattern, options: .regularExpression) != nil else { throw Self.invalidRequest() }
             request.setValue(etag, forHTTPHeaderField: "If-Match")
         }
         do {
@@ -289,7 +296,7 @@ final class CloudAccountClient {
                 try removeIfCurrent(identity)
                 return ["authenticated": false]
             }
-            try Self.validate(response, data: data, accepted: auth ? [201] : deleting ? [200, 202] : method == "POST" ? [200, 201] : [200])
+            try Self.validate(response, data: data, accepted: auth ? [201] : deleting ? [200, 202] : method == "POST" ? [200, 201] : [200], authentication: auth)
             guard data.count <= (representation == "text" ? 10 * 1024 * 1024 : 16 * 1024 * 1024) else { throw NoteLiteError.invalidResponse }
             try checkStillCurrent(identity)
             if representation == "text" {
@@ -415,9 +422,12 @@ final class CloudAccountClient {
             throw CloudOMRError(code: "identity_changed", message: "账号已切换，请刷新后再操作。", status: 409)
         }
     }
-    private static func validate(_ response: URLResponse, data: Data?, accepted: Set<Int>) throws {
+    private static func validate(_ response: URLResponse, data: Data?, accepted: Set<Int>, authentication: Bool = false) throws {
         do { try CloudOMRClient.validate(response, data: data, accepted: accepted) }
         catch let error as CloudOMRError where error.status == 401 {
+            if authentication {
+                throw CloudOMRError(code: "invalid_credentials", message: "用户名或密码不正确。请检查输入；还没有账户请先注册。", status: 401)
+            }
             throw CloudOMRError(code: "unauthorized", message: "登录已失效，请重新登录。", status: 401)
         }
     }

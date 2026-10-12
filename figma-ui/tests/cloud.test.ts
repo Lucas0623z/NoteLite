@@ -1,10 +1,75 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cancelNativeFileRequests, CloudClient, CloudError, createUUID, errorMessage, nativeRequest } from "../src/app/cloud.ts";
+import { AccountFileSelection, cancelNativeFileRequests, CloudClient, CloudError, createUUID, errorMessage, nativeRequest, recheckImportAuthentication, scopedAccountWrite, type AccountOperationScope, type ScoreFileSource } from "../src/app/cloud.ts";
 import { completedJobNotice, uploadedJobNotice } from "../src/app/job-notice.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const job = { id, filename: "练习.pdf", state: "succeeded", revision: 2, scores: [], artifacts: {} };
+
+for (const source of ["files", "photos", "camera"] as ScoreFileSource[]) test(`account import guard prevents ${source} opened by A from uploading to B or a renewed A session`, async () => {
+  const selections = new AccountFileSelection();
+  const original: AccountOperationScope = { owner: id, sessionId: "A-session", generation: 1 };
+  let current = original, uploads = 0;
+  const isCurrent = (scope: AccountOperationScope) => scope.owner === current.owner && scope.sessionId === current.sessionId && scope.generation === current.generation;
+  const consume = async () => { if (selections.take(source, isCurrent)) uploads++; };
+  selections.begin(source, original);
+  current = { owner: "22222222-2222-4222-8222-222222222222", sessionId: "B-session", generation: 2 };
+  await consume(); assert.equal(uploads, 0);
+  current = original; selections.begin(source, original);
+  current = { ...original, sessionId: "new-A-session", generation: 3 };
+  await consume(); assert.equal(uploads, 0);
+  current = original; selections.begin(source, original); selections.clear();
+  await consume(); assert.equal(uploads, 0, "an account event explicitly invalidates an already open picker");
+  selections.begin(source, current); await consume(); await consume();
+  assert.equal(uploads, 1, "one unchanged account selection is accepted once");
+});
+
+for (const operation of ["official correction", "personal rename"] as const) test(`account import guard prevents ${operation} writing XML to a new account after an asynchronous read`, async () => {
+  let current = true, writes = 0, release!: (value: string) => void;
+  const source = new Promise<string>((resolve) => { release = resolve; });
+  const saving = scopedAccountWrite(() => current, () => source, async () => { writes++; return job; });
+  current = false; release("private A XML");
+  await assert.rejects(saving, (error: unknown) => error instanceof CloudError && error.code === "identity_changed");
+  assert.equal(writes, 0, "identity must be checked before the SDK chooses an account for the write");
+});
+
+test("account import guard rejects an old remote write reply before local/UI installation", async () => {
+  let current = true, release!: (value: typeof job) => void, entered!: () => void, installed = 0;
+  const write = new Promise<typeof job>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const saving = scopedAccountWrite(() => current, async () => "A XML", async () => { entered(); return write; }).then(() => { installed++; });
+  await started; current = false; release(job);
+  await assert.rejects(saving, (error: unknown) => error instanceof CloudError && error.code === "identity_changed");
+  assert.equal(installed, 0);
+});
+
+test("account import guard confirms expiry through the account SDK before requesting sign-in", async () => {
+  const original = { userId: id, sessionId: "A-session" };
+  let identity: typeof original | null = original, reads = 0;
+  const client = { get current() { return identity; }, me: async () => { reads++; identity = null; return null; } };
+  const result = await recheckImportAuthentication(original, client, () => identity === original);
+  assert.equal(result, "expired"); assert.equal(reads, 1); assert.equal(client.current, null);
+  assert.equal(errorMessage(new CloudError("old device error", 401)), "请先登录账户，再上传或读取云端曲谱。");
+});
+
+test("account import guard preserves a still valid account when only OMR refuses authentication", async () => {
+  const original = { userId: id, sessionId: "A-session" };
+  const client = { current: original, me: async () => original };
+  assert.equal(await recheckImportAuthentication(original, client, () => true), "active");
+  assert.equal(client.current, original, "an OMR error cannot force a valid account to log out");
+});
+
+test("account import guard ignores old401 recovery after another account logs in", async () => {
+  const original = { userId: id, sessionId: "A-session" }, second = { userId: "22222222-2222-4222-8222-222222222222", sessionId: "B-session" };
+  let identity: typeof original | null = original, release!: (value: typeof original | null) => void, reads = 0;
+  const refresh = new Promise<typeof original | null>((resolve) => { release = resolve; });
+  const client = { get current() { return identity; }, me: () => { reads++; return refresh; } };
+  const recovery = recheckImportAuthentication(original, client, () => identity === original);
+  identity = second; release(second);
+  assert.equal(await recovery, "changed"); assert.equal(client.current, second);
+  assert.equal(await recheckImportAuthentication(original, client, () => false), "changed");
+  assert.equal(reads, 1, "a previously superseded401 must not even refresh the new account");
+});
 
 test("the upload notice follows its actual successful or failed recognition result", () => {
   const waiting = uploadedJobNotice({ id, state: "running", recognitionMode: "audiveris" });
@@ -73,9 +138,100 @@ test("conflicting edits surface status 409 without an automatic overwrite", asyn
   assert.equal(calls.length, 2);
 });
 
-test("authorization failures surface an actionable connection message", async () => {
+test("authorization failures direct the user to account login", async () => {
   const { client } = mock({ "GET /api/jobs": () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }) });
-  await assert.rejects(client.jobs(), (error) => error instanceof CloudError && errorMessage(error).includes("云端识谱设置"));
+  await assert.rejects(client.jobs(), (error) => error instanceof CloudError && errorMessage(error).includes("登录账户") && !errorMessage(error).includes("连接设备"));
+});
+
+test("account-cookie upload and XML editing use the existing login without configuration or pairing", async () => {
+  const { client, calls } = mock({ "GET /api/session": { authenticated: true, csrf: "account-csrf", owner: id },
+    "POST /api/jobs?filename=score.png": job, [`GET /api/jobs/${id}`]: job,
+    [`GET /api/jobs/${id}/score/musicxml?score=0`]: () => new Response("<score-partwise/>"),
+    [`PUT /api/jobs/${id}/score?score=0`]: { ...job, revision: 3 },
+  });
+  client.useAccount(id);
+  assert.equal((await client.upload(new Blob(["synthetic image"]), "score.png")).id, id);
+  assert.equal((await client.job(id)).revision, 2);
+  assert.equal(await client.score(id, 0), "<score-partwise/>");
+  assert.equal((await client.put(id, 0, 2, "<score-partwise version=\"4.0\"/>")).revision, 3);
+  assert.ok(calls.every((call) => call.headers.get("X-NoteLite-Expected-User") === id));
+  assert.ok(calls.every((call) => call.init.credentials === "same-origin" && !call.headers.has("Authorization")));
+  assert.equal(calls.filter((call) => call.path.includes("pair") || call.path.includes("configure")).length, 0);
+  assert.equal(calls[1].headers.get("X-NoteLite-CSRF"), "account-csrf");
+  assert.equal(calls[4].headers.get("If-Match"), '"2"');
+});
+
+test("native account import, notes, XML and MIDI exports preserve the account without a device code", async () => {
+  const calls: { action: string; payload: Record<string, unknown> }[] = [];
+  const client = new CloudClient(async () => { throw new Error("native must not use browser fetch"); }, () => true,
+    async <T>(action: string, payload: unknown = {}): Promise<T> => { calls.push({ action, payload: payload as Record<string, unknown> }); return job as T; });
+  client.useAccount(id);
+  await client.importNative(); await client.notes(id, 0);
+  await client.export(id, 0, "musicxml", "score.musicxml"); await client.export(id, 0, "midi", "score.mid");
+  assert.deepEqual(calls.map((call) => call.action), ["jobs/import", "notes/get", "files/export", "files/export"]);
+  assert.ok(calls.every((call) => call.payload.expectedUserId === id));
+  assert.deepEqual(calls.slice(2).map((call) => call.payload.kind), ["musicxml", "midi"]);
+});
+
+test("switching accounts while CSRF is loading prevents the old selected file from being uploaded", async () => {
+  let resolve!: (response: Response) => void;
+  const waiting = new Promise<Response>((yes) => { resolve = yes; });
+  const paths: string[] = [];
+  const client = new CloudClient(async (path) => { paths.push(String(path)); return waiting; }, () => false);
+  client.useAccount(id);
+  const upload = client.upload(new Blob(["A's score"]), "score.png");
+  client.useAccount("22222222-2222-4222-8222-222222222222");
+  resolve(new Response(JSON.stringify({ authenticated: true, csrf: "old-csrf" })));
+  await assert.rejects(upload, (error) => error instanceof CloudError && error.code === "identity_changed");
+  assert.deepEqual(paths, ["/api/session"], "the POST must not use a new account's cookie with an old file");
+});
+
+test("logout or a same-user new session rejects the previous native picker result", async () => {
+  for (const sameUser of [false, true]) {
+    let resolve!: (value: unknown) => void;
+    const result = new Promise<unknown>((yes) => { resolve = yes; });
+    const client = new CloudClient(async () => { throw new Error("unused"); }, () => true,
+      async <T>() => await result as T);
+    client.useAccount(id);
+    const importing = client.importNative();
+    if (sameUser) client.resetSession(); else client.useAccount(null);
+    resolve(job);
+    await assert.rejects(importing, (error) => error instanceof CloudError && error.code === "identity_changed");
+  }
+});
+
+test("an account switch during response body reading cannot install the previous cloud result", async () => {
+  let release!: (value: unknown) => void;
+  const body = new Promise<unknown>((yes) => { release = yes; });
+  const response = { ok: true, json: () => body } as Response;
+  const client = new CloudClient(async () => response, () => false);
+  client.useAccount(id);
+  const reading = client.job(id);
+  await Promise.resolve();
+  client.useAccount(null); release(job);
+  await assert.rejects(reading, (error) => error instanceof CloudError && error.code === "identity_changed");
+});
+
+test("a delayed old-account 401 body cannot clear the new account's upload session", async () => {
+  let release!: (value: unknown) => void;
+  const oldBody = new Promise<unknown>((yes) => { release = yes; });
+  const second = "22222222-2222-4222-8222-222222222222";
+  let sessions = 0;
+  const client = new CloudClient(async (path, init = {}) => {
+    if (String(path) === `/api/jobs/${id}`) return { ok: false, status: 401, json: () => oldBody } as Response;
+    if (String(path) === "/api/session") { sessions++; return new Response(JSON.stringify({ authenticated: true, csrf: "new-account-csrf" })); }
+    assert.equal(new Headers(init.headers).get("X-NoteLite-Expected-User"), second);
+    assert.equal(new Headers(init.headers).get("X-NoteLite-CSRF"), "new-account-csrf");
+    return new Response(JSON.stringify(job));
+  }, () => false);
+  client.useAccount(id);
+  const stale = client.job(id); await Promise.resolve();
+  client.useAccount(second);
+  await client.upload(new Blob(["B's first score"]), "first.png");
+  release({ error: "expired" });
+  await assert.rejects(stale, (error) => error instanceof CloudError && error.code === "identity_changed");
+  await client.upload(new Blob(["B's second score"]), "second.png");
+  assert.equal(sessions, 1, "an old 401 may not erase the newer session's CSRF");
 });
 
 test("a lost write response is marked unknown so the UI must reload before another edit", async () => {

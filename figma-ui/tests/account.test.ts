@@ -1,10 +1,74 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AccountClient } from "../src/app/account.ts";
+import { AccountClient, accountErrorMessage, authenticationIssue, passwordIssue } from "../src/app/account.ts";
 import { CloudError } from "../src/app/cloud.ts";
 
 const owner = "11111111-1111-4111-8111-111111111111";
 const identity = { authenticated: true, userId: owner, username: "tester", sessionId: owner, deviceName: "Browser", expiresAt: "2026-11-01T00:00:00Z", kind: "browser" };
+test("login verifies existing short credentials while new registrations require 15 Unicode characters", async () => {
+  const calls: { path: string; body: unknown }[] = [];
+  const client = new AccountClient(async (path, init = {}) => { calls.push({ path: String(path), body: JSON.parse(init.body as string) }); return new Response(JSON.stringify(identity)); }, () => false, undefined, () => {});
+  await client.authenticate("login", "  Lucas  ", "synthetic");
+  assert.equal(calls[0].path, "/api/account/login");
+  assert.equal((calls[0].body as { username: string }).username, "Lucas");
+  await assert.rejects(client.authenticate("register", "Lucas", "synthetic"), /15 个字符/);
+  assert.equal(calls.length, 1);
+  assert.equal(authenticationIssue("register", "Lucas", "🎵".repeat(15)), "");
+  assert.match(authenticationIssue("register", "Lucas", "🎵".repeat(14)), /14 个/);
+  assert.match(passwordIssue(""), /请输入当前密码/);
+  assert.match(passwordIssue("a".repeat(257)), /256/);
+  assert.match(passwordIssue("\uD800"), /有效文字/);
+});
+
+test("account feedback preserves credential and username errors without OMR substitutions", () => {
+  assert.match(accountErrorMessage(new CloudError("用户名或密码不正确。", 401)), /用户名或密码/);
+  assert.equal(accountErrorMessage(new CloudError("用户名已被使用。", 409)), "用户名已被使用。");
+  assert.match(accountErrorMessage(new CloudError("unknown", undefined, "write_status_unknown")), /账户操作结果/);
+});
+
+test("an expired native account clears JS identity and notifies its dependents", async () => {
+  let expired = false, changed = 0;
+  const client = new AccountClient(() => { throw new Error("browser transport forbidden"); }, () => true, (async () => {
+    if (expired) throw new CloudError("登录已失效，请重新登录。", 401);
+    return { ...identity, kind: "native" };
+  }) as never, () => { changed++; });
+  await client.me(); expired = true;
+  assert.equal(await client.me(), null); assert.equal(client.current, null); assert.equal(changed, 1);
+  assert.equal(await client.me(), null); assert.equal(changed, 1);
+});
+
+test("failed authentication does not sign out a different valid existing session", async () => {
+  const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { error: "用户名或密码不正确。" }), { status: String(path).endsWith("/me") ? 200 : 401 }), () => false, undefined, () => {});
+  await client.me(); await assert.rejects(client.authenticate("login", "other", "synthetic"), /用户名或密码/);
+  assert.equal(client.current?.userId, owner);
+});
+
+test("revoking one's current session clears JS identity while another session does not", async () => {
+  let changed = 0;
+  const currentSession = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, sessionId: currentSession, csrf: "proof" } : { revoked: true })), () => false, undefined, () => { changed++; });
+  await client.me(); await client.revoke("22222222-2222-4222-8222-222222222222");
+  assert.equal(client.current?.userId, owner); assert.equal(changed, 0);
+  await client.revoke(currentSession.toUpperCase()); assert.equal(client.current, null); assert.equal(changed, 1);
+});
+
+test("explicit logout treats expired identity as signed out but retains it on unavailable service", async () => {
+  for (const status of [401, 503]) {
+    let changed = 0;
+    const client = new AccountClient(async (path) => new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { error: "unavailable" }), { status: String(path).endsWith("/me") ? 200 : status }), () => false, undefined, () => { changed++; });
+    await client.me();
+    if (status === 401) { await client.logout(); assert.equal(client.current, null); assert.equal(changed, 1); }
+    else { await assert.rejects(client.logout()); assert.equal(client.current?.userId, owner); assert.equal(changed, 0); }
+  }
+});
+
+test("malformed successful authentication cannot manufacture a signed-in identity", async () => {
+  for (const value of [null, {}, { ...identity, authenticated: false }, { ...identity, userId: "foreign" }]) {
+    const client = new AccountClient(async () => new Response(JSON.stringify(value)), () => false, undefined, () => {});
+    await assert.rejects(client.authenticate("login", "tester", "synthetic")); assert.equal(client.current, null);
+  }
+});
+
 test("browser account writes use same-origin cookie, CSRF and expected owner; never a Bearer token", async () => {
   const calls: { path: string; init: RequestInit }[] = [];
   const client = new AccountClient(async (path, init = {}) => { calls.push({ path: String(path), init }); return new Response(JSON.stringify(String(path).endsWith("/me") ? { ...identity, csrf: "proof" } : { id: owner, etag: '"1"' })); }, () => false, undefined, () => {});

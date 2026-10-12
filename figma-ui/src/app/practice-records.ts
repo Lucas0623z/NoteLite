@@ -1,7 +1,7 @@
 import { account, ACCOUNT_EVENT, type AccountClient, type PracticeEvent, type PracticeAnalysis } from "./account.ts";
 import { openOwnedDatabase, ownedStores, guardAccountWrite, isDeletedAccountOwner } from "./account-local-data.ts";
-import { createUUID } from "./cloud.ts";
-import type { NoteWiseAnalysis } from "./notewise.ts";
+import { CloudError, createUUID } from "./cloud.ts";
+import { scoreDigest, type NoteWiseAnalysis } from "./notewise.ts";
 
 export const PRACTICE_RECORD_EVENT = "notelite-practice-records-changed";
 export type PracticeRecord = {
@@ -30,7 +30,7 @@ const storage: RecordStore = { put: async (record) => {
     transaction.onabort = transaction.onerror = () => { database.close(); reject(new Error("账户已注销，练习记录不再保存。")); };
   });
 }, getAll: () => recordsDB("readonly", (store) => store.getAll()) };
-type RecordAccount = Pick<AccountClient, "current" | "createScore" | "addHistory" | "history"> & Partial<Pick<AccountClient,"addHistoryAnalysis"|"historyAnalyses"|"historyAnalysis">>;
+type RecordAccount = Pick<AccountClient, "current" | "createScore" | "addHistory" | "history"> & Partial<Pick<AccountClient,"addHistoryAnalysis"|"historyAnalyses"|"historyAnalysis"|"historyXML">>;
 
 /** A queued record belongs to its original account, never the next account that logs in. */
 export class PracticeRecords {
@@ -98,16 +98,52 @@ export class PracticeRecords {
     await this.put(record);this.changed();return record;
   }
   async retry(): Promise<void> { for (const record of await this.local()) if (record.sync === "pending"||record.pendingAnalysis) await this.sync(record); }
+  async snapshot(record: PracticeRecord): Promise<string> {
+    const identity = this.client.current;
+    const requireCurrent = () => {
+      if ((identity?.userId || "guest") !== record.userId || this.client.current?.userId !== identity?.userId || this.client.current?.sessionId !== identity?.sessionId || isDeletedAccountOwner(record.userId)) throw new CloudError("账户已切换，请重新读取当前账户的练习原谱。", 409, "identity_changed");
+    };
+    requireCurrent();
+    // Always use the immutable performed snapshot, never the currently edited score.
+    const xml = record.sync === "synced" && this.client.historyXML ? await this.client.historyXML(record.eventId) : record.musicxml;
+    requireCurrent();
+    if (!xml) throw new Error("此练习的原谱尚未保存，请在原设备完成同步。");
+    if (record.scoreSha256) {
+      const digest = await scoreDigest(xml);
+      requireCurrent();
+      if (digest !== record.scoreSha256) throw new Error("练习原谱完整性校验未通过，请重新读取记录。");
+    }
+    return xml;
+  }
   async list(): Promise<PracticeRecord[]> {
-    const owner = this.client.current?.userId, local = await this.local();
+    const owner = this.client.current?.userId, session = this.client.current?.sessionId;
+    const requireCurrent = () => {
+      if (this.client.current?.userId !== owner || this.client.current?.sessionId !== session) throw new CloudError("账户已切换，请重新读取当前账户的练习记录。", undefined, "identity_changed");
+    };
+    const local = await this.local();
+    requireCurrent();
     if (!owner) return local;
     const values = new Map(local.map((record) => [record.eventId, record]));
-    const { events } = await this.client.history();
-    if (this.client.current?.userId !== owner) return [];
-    for (const event of events) {
-      const existing = values.get(event.eventId);
-      values.set(event.eventId, { ...existing, ...event, userId: owner, name: existing?.name || (event.sourceKind === "official" ? "官方曲谱练习" : "个人曲谱练习"), musicxml: existing?.musicxml || "", scoreIdentity: existing?.scoreIdentity || event.scoreId, sync: "synced" });
+    const cursors = new Set<string>();
+    let cursor: string | undefined, received = 0;
+    // The service stores at most 20,000 events. A full final page may need one empty page.
+    for (let page = 0; ; page++) {
+      requireCurrent();
+      if (page > 100) throw new CloudError("练习历史分页超过当前上限，无法确认完整统计。请重新读取。", undefined, "history_incomplete");
+      const result = await this.client.history(cursor);
+      requireCurrent();
+      if (!result || !Array.isArray(result.events) || result.events.length > 200 || !(result.nextCursor === null || typeof result.nextCursor === "string" && result.nextCursor.length > 0 && result.nextCursor.length <= 256)) throw new CloudError("练习历史分页返回无效，无法确认完整统计。请重新读取。", undefined, "history_incomplete");
+      received += result.events.length;
+      if (received > 20000) throw new CloudError("练习历史超过当前上限，无法确认完整统计。请重新读取。", undefined, "history_incomplete");
+      for (const event of result.events) {
+        const existing = values.get(event.eventId);
+        values.set(event.eventId, { ...existing, ...event, userId: owner, name: existing?.name || (event.sourceKind === "official" ? "官方曲谱练习" : "个人曲谱练习"), musicxml: existing?.musicxml || "", scoreIdentity: existing?.scoreIdentity || event.scoreId, sync: "synced" });
+      }
+      if (result.nextCursor === null) break;
+      if (!result.events.length || cursors.has(result.nextCursor)) throw new CloudError("练习历史分页未能结束，无法确认完整统计。请重新读取。", undefined, "history_incomplete");
+      cursors.add(result.nextCursor); cursor = result.nextCursor;
     }
+    requireCurrent();
     return Array.from(values.values()).sort((left, right) => right.endedAt.localeCompare(left.endedAt));
   }
 }

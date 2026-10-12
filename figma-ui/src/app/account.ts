@@ -2,6 +2,7 @@ import { CloudError, cloud, createUUID, isNativeCloud, nativeRequest } from "./c
 import { purgeDeletedAccountData } from "./account-local-data.ts";
 import { requireAllowedRequest } from "./purchases.ts";
 import type { NoteWiseAnalysis } from "./notewise.ts";
+import { validateAccountProfile, validateProfileChanges, type AccountProfile, type ProfileChanges } from "./profile-model.ts";
 
 export type AccountDeletion = { authenticated: false; accountDeleted: true; deletionRequested: true; deleted: boolean; status: "completed" | "pending"; localCleanupPending?: boolean; localCleanupMessage?: string };
 export type AccountIdentity = { authenticated: true; userId: string; username: string; sessionId: string; deviceName: string; expiresAt: string; kind: "browser" | "native" };
@@ -23,6 +24,25 @@ export type AccountRequest = { path: string; method: "GET" | "POST" | "PUT" | "D
 const id = (value: string) => { if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)) throw new CloudError("记录标识无效。"); return value; };
 const catalogID = (value: string) => { if (!/^[A-Za-z0-9_-]{1,80}$/.test(value)) throw new CloudError("曲谱标识无效。"); return value; };
 
+export function passwordIssue(password: string, creating = false): string {
+  const count = Array.from(password).length;
+  if (!count) return creating ? "请输入新账户密码。" : "请输入当前密码。";
+  if (creating && count < 15) return `新密码至少需要 15 个字符，目前为 ${count} 个。`;
+  if (count > 256 || new TextEncoder().encode(password).length > 1024 || /[\uD800-\uDFFF]/u.test(password)) return "密码须为有效文字，最多 256 个字符。";
+  return "";
+}
+
+export function authenticationIssue(mode: "login" | "register", username: string, password: string): string {
+  if (!username.trim()) return "请输入用户名。";
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{2,31}$/.test(username.trim())) return "用户名须为 3 至 32 位字母、数字、点、下划线或连字符。";
+  return passwordIssue(password, mode === "register");
+}
+
+export function accountErrorMessage(error: unknown): string {
+  if (error instanceof CloudError && error.code === "write_status_unknown") return "账户操作结果尚未确认，请先刷新账户状态，再决定是否重试。";
+  return error instanceof Error ? error.message : "账户服务暂时无法连接，请稍后重试。";
+}
+
 /** The browser receives only HttpOnly sessions; native replies exclude their Keychain token. */
 export class AccountClient {
   private csrf = "";
@@ -35,12 +55,21 @@ export class AccountClient {
   private purge: (owner: string) => Promise<void>;
   constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, changed: () => void = () => { cloud.resetSession(); window.dispatchEvent(new Event(ACCOUNT_EVENT)); }, purge: (owner: string) => Promise<void> = purgeDeletedAccountData) { this.purge = purge; this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.changed = changed; }
   get current(): AccountIdentity | null { return this.identity; }
+  private expire(generation: number) {
+    if (generation !== this.generation) return;
+    const hadIdentity = this.identity !== null;
+    this.generation++; this.csrf = ""; this.identity = null;
+    if (hadIdentity) this.changed();
+  }
   private async request<T>(input: AccountRequest): Promise<T> {
     requireAllowedRequest("account/request", input);
     const generation = this.generation;
     input = { ...input, expectedUserId: input.path === "/me" || ["/register", "/login"].includes(input.path) ? undefined : this.identity?.userId };
-    if (this.native()) return this.bridge<T>("account/request", input, input.base64 ? 300000 : input.path === "/practice-analysis" ? 180000 : 60000);
     const publicWrite = ["/register", "/login"].includes(input.path);
+    if (this.native()) {
+      try { return await this.bridge<T>("account/request", input, input.base64 ? 300000 : input.path === "/practice-analysis" ? 180000 : 60000); }
+      catch (error) { if (!publicWrite && error instanceof CloudError && error.status === 401) this.expire(generation); throw error; }
+    }
     if (input.method !== "GET" && !publicWrite && !this.csrf) { if (!await this.me()) throw new CloudError("请先登录账户。", 401); }
     if (generation !== this.generation) throw new CloudError("账户已切换，请重新执行此操作。", 409);
     const headers = new Headers();
@@ -57,19 +86,22 @@ export class AccountClient {
       try { result = await this.fetcher(`/api/account${input.path}`, { method: input.method, headers, body, credentials: "same-origin", signal: abort.signal }); }
       catch { throw new CloudError(input.method === "GET" ? "账号服务暂时无法连接。" : "提交结果待确认，请重新读取后重试。", undefined, input.method === "GET" ? "network" : "write_status_unknown"); }
       if (!result.ok) {
-        if (result.status === 401 && generation === this.generation) { this.csrf = ""; this.identity = null; }
-        let message = result.status === 401 ? "请先登录账户。" : `账号服务暂时无法处理请求（${result.status}）。`;
+        if (result.status === 401 && !publicWrite) this.expire(generation);
+        let message = result.status === 401 ? publicWrite ? "用户名或密码不正确。还没有账户请先注册。" : "登录已失效，请重新登录。" : `账号服务暂时无法处理请求（${result.status}）。`;
         try { const value = await result.json(); if (typeof value.error === "string") message = value.error; } catch { /* Proxy response may be HTML. */ }
         throw new CloudError(message, result.status);
       }
       if (input.response === "text") return await result.text() as T;
       if (input.response === "base64") return await result.blob() as T;
-      const value = await result.json();
-      if (typeof value.csrf === "string" && generation === this.generation) this.csrf = value.csrf;
+      let value;
+      try { value = await result.json(); }
+      catch { throw new CloudError(input.method === "GET" ? "账户服务返回了无效响应，请重试。" : "账户操作结果尚未确认，请刷新账户状态。", undefined, input.method === "GET" ? "invalid_response" : "write_status_unknown"); }
+      if (value && typeof value.csrf === "string" && generation === this.generation) this.csrf = value.csrf;
       return value as T;
     } finally { clearTimeout(timer); }
   }
   private retain(value: AccountIdentity): AccountIdentity {
+    if (!value || value.authenticated !== true || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.userId) || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.sessionId) || typeof value.username !== "string" || !["browser", "native"].includes(value.kind)) throw new CloudError("账户服务返回了无效身份，请重新读取账户状态。", undefined, "invalid_response");
     // Copy public fields explicitly, so a service regression cannot persist a token in JS state.
     this.identity = { authenticated: true, userId: value.userId, username: value.username, sessionId: value.sessionId, deviceName: value.deviceName, expiresAt: value.expiresAt, kind: value.kind };
     return this.identity;
@@ -80,13 +112,17 @@ export class AccountClient {
     catch (error) { if (error instanceof CloudError && error.status === 401) return generation === this.generation ? null : this.identity; throw error; }
   }
   async authenticate(mode: "register" | "login", username: string, password: string): Promise<AccountIdentity> {
+    const issue = authenticationIssue(mode, username, password);
+    if (issue) throw new CloudError(issue, 400, "invalid_request");
     const generation = ++this.generation;
-    const value = await this.request<AccountIdentity>({ path: `/${mode}`, method: "POST", body: { username, password, mode: this.native() ? "native" : "browser", deviceName: this.native() ? "黑白键 Apple" : "黑白键浏览器" }, response: "json" });
+    const value = await this.request<AccountIdentity>({ path: `/${mode}`, method: "POST", body: { username: username.trim(), password, mode: this.native() ? "native" : "browser", deviceName: this.native() ? "黑白键 Apple" : "黑白键浏览器" }, response: "json" });
     if (generation !== this.generation) throw new CloudError("账户操作已更新，请重新读取当前账户。");
     this.retain(value); this.changed(); return this.identity!;
   }
   async deleteAccount(password: string): Promise<AccountDeletion> {
     if (!this.identity) throw new CloudError("请先登录账户。", 401);
+    const issue = passwordIssue(password);
+    if (issue) throw new CloudError(issue, 400, "invalid_request");
     const owner = this.identity.userId, generation = ++this.generation;
     const result = await this.request<AccountDeletion>({ path: "/account", method: "DELETE", body: { password, confirmation: "DELETE_ACCOUNT" }, response: "json" });
     if (result?.authenticated !== false || result.accountDeleted !== true || result.deletionRequested !== true || typeof result.deleted !== "boolean" || result.status !== (result.deleted ? "completed" : "pending")) throw new CloudError("注销结果尚未确认，请重新读取账户状态。", undefined, "write_status_unknown");
@@ -95,9 +131,33 @@ export class AccountClient {
     catch { return { ...result, localCleanupPending: true, localCleanupMessage: "账户已注销，本机资料清理待重试。请关闭其他旧版应用窗口并重新打开应用。" }; }
     return result;
   }
-  async logout(): Promise<void> { const generation = ++this.generation; await this.request({ path: "/logout", method: "POST", response: "json" }); if (generation !== this.generation) return; this.identity = null; this.csrf = ""; this.changed(); }
+  async logout(): Promise<void> { const generation = ++this.generation; try { await this.request({ path: "/logout", method: "POST", response: "json" }); } catch (error) { if (!(error instanceof CloudError && error.status === 401)) throw error; return; } if (generation !== this.generation) return; this.identity = null; this.csrf = ""; this.changed(); }
   sessions() { return this.request<{ sessions: { sessionId: string; deviceName: string; kind: string; createdAt: string; expiresAt: string }[] }>({ path: "/sessions", method: "GET", response: "json" }); }
-  revoke(sessionId: string) { return this.request({ path: `/sessions/${id(sessionId)}`, method: "DELETE", response: "json" }); }
+  async profile(): Promise<AccountProfile> {
+    const owner = this.identity?.userId, session = this.identity?.sessionId;
+    if (!owner) throw new CloudError("请先登录账户。", 401);
+    const result = await this.request<unknown>({ path: "/profile", method: "GET", response: "json" });
+    if (this.identity?.userId !== owner || this.identity?.sessionId !== session) throw new CloudError("账户已切换，请重新读取个人设置。", 409);
+    return validateAccountProfile(result, owner);
+  }
+  async updateProfile(etag: string, changes: ProfileChanges, requestId: string): Promise<AccountProfile> {
+    const owner = this.identity?.userId, session = this.identity?.sessionId;
+    if (!owner) throw new CloudError("请先登录账户。", 401);
+    if (!/^"profile-\d+"$/.test(etag)) throw new CloudError("个人设置版本无效。");
+    const result = await this.request<unknown>({ path: "/profile", method: "PUT", etag, body: { requestId: id(requestId), changes: validateProfileChanges(changes) }, response: "json" });
+    if (this.identity?.userId !== owner || this.identity?.sessionId !== session) throw new CloudError("账户已切换，请重新读取个人设置。", 409);
+    return validateAccountProfile(result, owner);
+  }
+  async exportData(): Promise<Record<string, unknown>> {
+    const owner = this.identity?.userId, session = this.identity?.sessionId;
+    if (!owner) throw new CloudError("请先登录账户。", 401);
+    const value = await this.request<Record<string, unknown>>({ path: "/account/export", method: "GET", response: "json" });
+    if (this.identity?.userId !== owner || this.identity?.sessionId !== session) throw new CloudError("账户已切换，已取消旧账户导出。", 409);
+    const user = value?.user as { id?: string } | undefined, profile = value?.profile as { userId?: string } | undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value) || user?.id !== owner || profile?.userId !== owner) throw new CloudError("账户导出响应归属无效。");
+    return value;
+  }
+  async revoke(sessionId: string) { const generation = this.generation, current = this.identity?.sessionId; const result = await this.request({ path: `/sessions/${id(sessionId)}`, method: "DELETE", response: "json" }); if (generation === this.generation && current?.toLowerCase() === sessionId.toLowerCase()) this.expire(generation); return result; }
   catalog() { return this.request<{ scores: CatalogScore[] }>({ path: "/catalog", method: "GET", response: "json" }); }
   officialXML(scoreId: string) { return this.request<string>({ path: `/catalog/${catalogID(scoreId)}/musicxml`, method: "GET", response: "text" }); }
   scores() { return this.request<{ scores: PersonalScore[] }>({ path: "/scores", method: "GET", response: "json" }); }

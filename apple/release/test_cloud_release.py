@@ -127,6 +127,24 @@ class AcceptanceGateTests(unittest.TestCase):
                 with self.assertRaises(cloud.release.ReleaseError):
                     cloud.validate_test_results(platform, tree, summary)
 
+    def test_account_identity_profile_and_recording_regressions_cannot_be_missing_or_skipped(self):
+        for platform in cloud.PLATFORMS:
+            required = cloud.required_tests(platform)
+            for suite in ("CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests"):
+                names = sorted(name for name in required if name.startswith(suite + "/"))
+                self.assertTrue(names, suite)
+                for name in names:
+                    for outcome in ("Skipped", None):
+                        tree = test_tree(platform)
+                        leaves = tree["testNodes"][0]["children"]
+                        actual = next(leaf for leaf in leaves if leaf["nodeIdentifier"] == name + "()")
+                        if outcome is None:
+                            leaves.remove(actual)
+                        else:
+                            actual["result"] = outcome
+                        with self.assertRaises(cloud.release.ReleaseError):
+                            cloud.validate_test_results(platform, tree, {"result": "Passed", "failedTests": 0, "passedTests": len(required)})
+
 
 class PackagingGateTests(unittest.TestCase):
     def setUp(self):

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PracticeRecords, type PracticeRecord } from "../src/app/practice-records.ts";
+import type { PracticeEvent } from "../src/app/account.ts";
+import { CloudError } from "../src/app/cloud.ts";
 import {NoteWiseMatcher,expectedPerformance} from "../src/app/notewise.ts";
 import {scoreXML,noteXML,attributesXML} from "./xml-dom.ts";
 const alice = "11111111-1111-4111-8111-111111111111", bob = "22222222-2222-4222-8222-222222222222";
@@ -8,7 +10,7 @@ const input = { eventId: "33333333-3333-4333-8333-333333333333", name: "自编�
 function fixture(owner: string | null = alice) {
   const records = new Map<string, PracticeRecord>(), historyCalls: unknown[] = [], scoreCalls: unknown[] = [];
   const store = { put: async (record: PracticeRecord) => { records.set(record.eventId, structuredClone(record)); }, getAll: async () => Array.from(records.values()).map((record) => structuredClone(record)) };
-  const client = { current: owner ? { userId: owner } : null, createScore: async (...args: unknown[]) => { scoreCalls.push(args); return { id: alice, revision: 1 }; }, addHistory: async (event: unknown) => { historyCalls.push(event); return { event: { ...event as object, analysis: { status: "unanalysed", source: "none", errors: null, verifiedByServer: false } } }; }, history: async () => ({ events: [], nextCursor: null }) };
+  const client = { current: owner ? { userId: owner } as { userId: string; sessionId?: string } : null, createScore: async (...args: unknown[]) => { scoreCalls.push(args); return { id: alice, revision: 1 }; }, addHistory: async (event: unknown) => { historyCalls.push(event); return { event: { ...event as object, analysis: { status: "unanalysed", source: "none", errors: null, verifiedByServer: false } } }; }, history: async (_cursor?: string) => ({ events: [] as PracticeEvent[], nextCursor: null as string | null }) };
   const repository = new PracticeRecords(store, client as never, () => {});
   return { records, historyCalls, scoreCalls, store, client, repository };
 }
@@ -58,4 +60,123 @@ test("unknown append response retries the same version identity and account swit
  const stored={...await f.repository.save(input),sync:"synced" as const,scoreSha256:"a".repeat(64),analysisVersion:1};const pending=await f.repository.reviseAnalysis(stored,revision);assert.ok(pending.pendingAnalysis);
  f.client.current={userId:bob};await f.repository.sync(pending);assert.equal(requests.length,1);
  f.client.current={userId:alice};fail=false;await f.repository.retry();assert.deepEqual(requests[0],requests[1]);assert.equal(f.records.get(input.eventId)?.analysisVersion,2);assert.equal(f.historyCalls.length,0);
+});
+
+function cloudEvent(index: number): PracticeEvent {
+  return { eventId: `44444444-4444-4444-8444-${index.toString(16).padStart(12, "0")}`, sourceKind: "official", scoreId: "notelite-four-notes-v1", mode: "free", durationSeconds: 12, startedAt: "2026-10-01T10:00:00Z", endedAt: "2026-10-01T10:00:12Z", receivedAt: "2026-10-12T10:00:00Z" };
+}
+const rejectedIncomplete = (error: unknown) => error instanceof CloudError && error.code === "history_incomplete";
+const rejectedIdentity = (error: unknown) => error instanceof CloudError && error.code === "identity_changed";
+
+test("a new device reads every cloud history page and keeps performed dates rather than receipt dates", async () => {
+  const f = fixture(), events = Array.from({ length: 450 }, (_, index) => cloudEvent(index));
+  const cursors: (string | undefined)[] = [];
+  f.client.history = async (cursor) => {
+    cursors.push(cursor);
+    const offset = cursor ? Number(cursor) : 0;
+    return { events: events.slice(offset, offset + 200), nextCursor: offset + 200 < events.length ? String(offset + 200) : null };
+  };
+  const records = await f.repository.list();
+  assert.deepEqual(cursors, [undefined, "200", "400"]); assert.equal(records.length, 450);
+  assert.equal(records[449].startedAt, events[449].startedAt); assert.equal(records[449].endedAt, events[449].endedAt);
+  assert.ok(records.every((record) => record.userId === alice && record.sync === "synced"));
+  assert.equal(f.records.size, 0, "reading account statistics must not inject or fabricate local practice");
+});
+
+test("history merges the same event once across local and remote pages without losing its local snapshot", async () => {
+  const f = fixture(); await f.repository.save(input);
+  let reads = 0;
+  f.client.history = async () => ++reads === 1
+    ? { events: [{ ...cloudEvent(0), eventId: input.eventId }], nextCursor: "next" }
+    : { events: [{ ...cloudEvent(0), eventId: input.eventId }, cloudEvent(1)], nextCursor: null };
+  const records = await f.repository.list();
+  assert.equal(records.length, 2); const merged = records.find((record) => record.eventId === input.eventId)!;
+  assert.equal(merged.musicxml, input.musicxml); assert.equal(merged.name, input.name); assert.equal(merged.sync, "synced");
+  assert.equal(f.historyCalls.length, 0, "listing must not create a new event for a duplicate");
+});
+
+test("failure on a later history page rejects the whole load instead of reporting partial statistics", async () => {
+  const f = fixture(); let reads = 0;
+  f.client.history = async () => { if (++reads === 2) throw new Error("history offline"); return { events: [cloudEvent(0)], nextCursor: "next" }; };
+  await assert.rejects(f.repository.list(), /history offline/);
+  assert.equal(reads, 2); assert.equal(f.records.size, 0);
+});
+
+test("repeated and cycling history cursors fail within bounded requests", async () => {
+  for (const sequence of [["same", "same"], ["one", "two", "one"]]) {
+    const f = fixture(); let reads = 0;
+    f.client.history = async () => ({ events: [cloudEvent(reads)], nextCursor: sequence[reads++] });
+    await assert.rejects(f.repository.list(), rejectedIncomplete); assert.equal(reads, sequence.length);
+  }
+});
+
+for (const change of ["another owner", "renewed session", "logout"] as const) test(`a ${change} during pagination cannot install the previous account's history`, async () => {
+  const f = fixture(); f.client.current = { userId: alice, sessionId: "original-session" }; let reads = 0;
+  f.client.history = async () => {
+    if (++reads === 1) return { events: [cloudEvent(0)], nextCursor: "next" };
+    f.client.current = change === "logout" ? null : { userId: change === "another owner" ? bob : alice, sessionId: "different-session" };
+    return { events: [cloudEvent(1)], nextCursor: null };
+  };
+  await assert.rejects(f.repository.list(), rejectedIdentity); assert.equal(reads, 2); assert.equal(f.records.size, 0);
+});
+
+test("guest history stays local and a login during its local read cannot return guest history for the new account", async () => {
+  const f = fixture(null); await f.repository.save(input); let reads = 0;
+  f.client.history = async () => { reads++; return { events: [], nextCursor: null }; };
+  assert.equal((await f.repository.list()).length, 1); assert.equal(reads, 0);
+  const originalRead = f.store.getAll;
+  f.store.getAll = async () => { const values = await originalRead(); f.client.current = { userId: alice }; return values; };
+  await assert.rejects(f.repository.list(), rejectedIdentity); assert.equal(reads, 0);
+});
+
+test("invalid or empty continuation pages cannot look like a complete empty account", async () => {
+  for (const result of [{ events: [], nextCursor: "next" }, { events: [cloudEvent(0)] }, { events: [cloudEvent(0)], nextCursor: "" }, { events: [], nextCursor: 5 }]) {
+    const f = fixture(); f.client.history = async () => result as never;
+    await assert.rejects(f.repository.list(), rejectedIncomplete);
+  }
+});
+
+test("the service's full 20,000 record quota includes its final empty page and further records fail explicitly", async () => {
+  for (const overflow of [false, true]) {
+    const f = fixture(); let reads = 0;
+    f.client.history = async () => {
+      const page = reads++;
+      return page < 100 ? { events: Array.from({ length: 200 }, (_, index) => cloudEvent(page * 200 + index)), nextCursor: String(page + 1) }
+        : { events: overflow ? [cloudEvent(20000)] : [], nextCursor: null };
+    };
+    if (overflow) await assert.rejects(f.repository.list(), rejectedIncomplete);
+    else assert.equal((await f.repository.list()).length, 20000);
+    assert.equal(reads, 101);
+  }
+});
+
+test("a new device downloads the immutable performed score and verifies its digest without another practice event", async () => {
+  const f = fixture();
+  const xml = "<score-partwise><work><work-title>Original</work-title></work></score-partwise>";
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(xml))), (value) => value.toString(16).padStart(2, "0")).join("");
+  const record = { ...input, userId: alice, sync: "synced" as const, musicxml: "", scoreSha256: hash };
+  let requested = "";
+  Object.assign(f.client, { historyXML: async (eventId: string) => { requested = eventId; return xml; } });
+  assert.equal(await f.repository.snapshot(record), xml); assert.equal(requested, input.eventId);
+  assert.equal(f.historyCalls.length, 0); assert.equal(f.scoreCalls.length, 0); assert.equal(f.records.size, 0);
+  Object.assign(f.client, { historyXML: async () => "<score-partwise>Edited after practice</score-partwise>" });
+  await assert.rejects(f.repository.snapshot(record), /完整性/);
+});
+
+test("a late performed snapshot cannot cross an owner, session or logout boundary", async () => {
+  for (const change of ["owner", "session", "logout"] as const) {
+    const f = fixture(); f.client.current = { userId: alice, sessionId: "start" };
+    const record = { ...input, userId: alice, sync: "synced" as const, musicxml: "" };
+    Object.assign(f.client, { historyXML: async () => { f.client.current = change === "logout" ? null : { userId: change === "owner" ? bob : alice, sessionId: "renewed" }; return input.musicxml; } });
+    await assert.rejects(f.repository.snapshot(record), rejectedIdentity); assert.equal(f.records.size, 0);
+  }
+});
+
+test("guest and unsynced owned practice use their original local XML without fetching cloud data", async () => {
+  const f = fixture(null); let reads = 0;
+  Object.assign(f.client, { historyXML: async () => { reads++; return "wrong"; } });
+  const record = await f.repository.save(input); assert.equal(await f.repository.snapshot(record), input.musicxml);
+  f.client.current = { userId: alice }; await assert.rejects(f.repository.snapshot(record), rejectedIdentity);
+  const pending = await f.repository.save({ ...input, eventId: bob }); assert.equal(await f.repository.snapshot(pending), input.musicxml);
+  assert.equal(reads, 0);
 });

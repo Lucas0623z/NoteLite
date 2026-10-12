@@ -99,7 +99,7 @@ def test_outcomes(value):
                     components = identifier.split("/")
                     key = "/".join(components[-2:])
                 else:
-                    suite = next((s for s in reversed(ancestry) if s in {"FigmaShellUITests", "NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "ReleaseFeatureTests", "AccountDeletionNativeTests", "CloudAccountLiveLifecycleTests"}), None)
+                    suite = next((s for s in reversed(ancestry) if s in {"FigmaShellUITests", "NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "ReleaseFeatureTests", "AccountDeletionNativeTests", "CloudAccountLiveLifecycleTests", "CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests"}), None)
                     key = (suite + "/" + name) if suite and name.startswith("test") else None
                 if key:
                     release.require(key not in result, "Duplicate native test result; release requires one actual result per test.")
@@ -117,7 +117,7 @@ def required_tests(platform):
     release.require(platform in PLATFORMS, "Unknown Apple acceptance platform.")
     required = CORE_TESTS | NOTEWISE_TESTS | {LIVE_ACCOUNT_TEST} | (MAC_TESTS if platform == "macOS" else {DIRECTION_TEST})
     # Any added NoteWise inference regression in this exact source must also pass.
-    for suite in ("NoteWiseTests", "NoteWiseRecordedTranscriptionTests"):
+    for suite in ("NoteWiseTests", "NoteWiseRecordedTranscriptionTests", "CloudAccountTests", "FigmaCloudRequestIdentityTests", "NoteWiseRecordingStatusTests"):
         source = (ROOT / "apple/NoteLiteTests" / (suite + ".swift")).read_text(encoding="utf-8")
         required |= {suite + "/" + name for name in re.findall(r"\bfunc\s+(test[A-Za-z0-9_]+)\s*\(", source)}
     source = (ROOT / "apple/NoteLiteTests/ReleaseFeatureTests.swift").read_text(encoding="utf-8")

@@ -31,11 +31,45 @@ export class CloudError extends Error {
   constructor(message: string, status?: number, code?: string) { super(message); this.name = "CloudError"; this.status = status; this.code = code; }
 }
 export function errorMessage(error: unknown): string {
-  if (error instanceof CloudError && error.status === 401) return "请先在云端识谱设置中连接设备。";
+  if (error instanceof CloudError && error.status === 401) return "请先登录账户，再上传或读取云端曲谱。";
   if (error instanceof CloudError && error.status === 409) return "曲谱已更新或正在保存。请重新载入最新版本，再校对。";
   if (error instanceof CloudError && error.status === 413) return "文件太大，请使用小于 32 MB 的曲谱。";
   if (error instanceof CloudError && error.code === "write_status_unknown") return "保存结果待确认，请重新载入最新版本后再修改。";
   return error instanceof Error ? error.message : "连接失败，请稍后重试。";
+}
+
+export type AccountOperationScope = { owner: string; sessionId: string | null; generation: number };
+export type ScoreFileSource = "files" | "photos" | "camera";
+/** The selected file belongs to the account that opened the picker, not its later callback. */
+export class AccountFileSelection {
+  private pending = new Map<ScoreFileSource, AccountOperationScope>();
+  begin(source: ScoreFileSource, scope: AccountOperationScope): void { this.pending.clear(); this.pending.set(source, { ...scope }); }
+  clear(): void { this.pending.clear(); }
+  take(source: ScoreFileSource, isCurrent: (scope: AccountOperationScope) => boolean): AccountOperationScope | null {
+    const scope = this.pending.get(source); this.pending.delete(source);
+    return scope && isCurrent(scope) ? scope : null;
+  }
+}
+
+/** Read a file/XML first, then recheck identity before any remote write and after its reply. */
+export async function scopedAccountWrite<Source, Result>(isCurrent: () => boolean, read: () => Promise<Source>, write: (source: Source) => Promise<Result>): Promise<Result> {
+  const requireCurrent = () => { if (!isCurrent()) throw new CloudError("账户已切换，请重新执行此操作。", 409, "identity_changed"); };
+  requireCurrent(); const source = await read(); requireCurrent();
+  const result = await write(source); requireCurrent(); return result;
+}
+
+/** An OMR401 alone must not expire a different account or imply that pairing is required. */
+export async function recheckImportAuthentication(
+  expected: { userId: string; sessionId: string },
+  client: { readonly current: { userId: string; sessionId: string } | null; me: () => Promise<{ userId: string; sessionId: string } | null> },
+  isCurrent: () => boolean,
+): Promise<"expired" | "active" | "changed" | "unavailable"> {
+  if (!isCurrent() || client.current?.userId !== expected.userId || client.current.sessionId !== expected.sessionId) return "changed";
+  try {
+    const identity = await client.me();
+    if (!identity && !client.current) return "expired";
+    return isCurrent() && identity?.userId === expected.userId && identity.sessionId === expected.sessionId && client.current?.sessionId === expected.sessionId ? "active" : "changed";
+  } catch { return isCurrent() ? "unavailable" : "changed"; }
 }
 
 const pending = new Map<string, { action: string; resolve: (result: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
@@ -98,7 +132,24 @@ function jobPath(jobId: string, suffix = "", score?: number): string {
 /** Injectable transport lets tests verify actual HTTP contracts without exposing credentials. */
 export class CloudClient {
   private csrf = "";
-  resetSession(): void { this.csrf = ""; }
+  private generation = 0;
+  private accountUserId: string | null = null;
+  resetSession(): void { this.csrf = ""; this.generation++; }
+  /** Public identity only; cookies/Keychain continue to authenticate every request. */
+  useAccount(userId: string | null): void {
+    if (userId !== null && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(userId)) throw new CloudError("账户标识无效。");
+    if (this.accountUserId === userId) return;
+    this.accountUserId = userId; this.resetSession();
+  }
+  private requireCurrent(generation: number): void {
+    if (generation !== this.generation) throw new CloudError("账户已切换，请重新执行此操作。", 409, "identity_changed");
+  }
+  private async accountBridge<T>(action: string, payload: Record<string, unknown> = {}, timeout?: number): Promise<T> {
+    const generation = this.generation;
+    const result = await this.bridge<T>(action, { ...payload, ...(this.accountUserId ? { expectedUserId: this.accountUserId } : {}) }, timeout);
+    this.requireCurrent(generation);
+    return result;
+  }
   private fetcher: typeof fetch;
   private native: typeof isNativeCloud;
   private bridge: typeof nativeRequest;
@@ -106,9 +157,12 @@ export class CloudClient {
   private previewEnabled: () => boolean;
   constructor(fetcher: typeof fetch = (...args) => fetch(...args), native = isNativeCloud, bridge = nativeRequest, timeouts = { read: 30000, write: 300000 }, previewEnabled = developmentProxyEnabled) { this.fetcher = fetcher; this.native = native; this.bridge = bridge; this.timeouts = timeouts; this.previewEnabled = previewEnabled; }
   private async request(path: string, init: RequestInit = {}, response: "json" | "text" | "blob" = "json"): Promise<unknown> {
+    const generation = this.generation, accountUserId = this.accountUserId;
     const method = (init.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD" && path !== "/api/pair" && !this.csrf) await this.session();
+    this.requireCurrent(generation);
     const headers = new Headers(init.headers);
+    if (accountUserId) headers.set("X-NoteLite-Expected-User", accountUserId);
     if (method !== "GET" && method !== "HEAD" && path !== "/api/pair") headers.set("X-NoteLite-CSRF", this.csrf);
     let result: Response;
     const abort = new AbortController();
@@ -116,20 +170,26 @@ export class CloudClient {
     try {
     try { result = await this.fetcher(path, { ...init, headers, credentials: "same-origin", signal: abort.signal }); }
     catch { throw new CloudError(abort.signal.aborted ? "连接超时，请重新读取任务状态。" : "无法连接识谱服务，请检查网络后重试。", undefined, method === "PATCH" || method === "PUT" ? "write_status_unknown" : "network"); }
+    this.requireCurrent(generation);
     if (!result.ok) {
       let message = `识谱服务暂时无法处理请求（${result.status}）。`;
       try { const body = await result.json(); if (typeof body.error === "string") message = body.error; else if (body.error?.message) message = body.error.message; }
       catch { /* A reverse proxy may return an HTML error page. */ }
+      this.requireCurrent(generation);
       if (result.status === 401) this.csrf = "";
       throw new CloudError(message, result.status, (method === "PATCH" || method === "PUT") && result.status >= 500 ? "write_status_unknown" : undefined);
     }
-    try { return await (response === "text" ? result.text() : response === "blob" ? result.blob() : result.json()); }
+    let value: unknown;
+    try { value = await (response === "text" ? result.text() : response === "blob" ? result.blob() : result.json()); }
     catch { throw new CloudError("服务响应未完整收到，请重新读取任务状态。", undefined, method === "PATCH" || method === "PUT" ? "write_status_unknown" : "network"); }
+    this.requireCurrent(generation); return value;
     } finally { clearTimeout(timer); }
   }
   private async session(): Promise<{ authenticated: boolean; csrf: string }> {
+    const generation = this.generation;
     const session = await this.request("/api/session") as { authenticated: boolean; csrf: string };
-    if (!session.authenticated || !session.csrf) throw new CloudError("请先连接设备。", 401);
+    this.requireCurrent(generation);
+    if (!session.authenticated || !session.csrf) throw new CloudError("请先登录账户。", 401);
     this.csrf = session.csrf; return session;
   }
   async configuration(): Promise<CloudConfiguration> {
@@ -158,64 +218,69 @@ export class CloudClient {
   }
   async health(): Promise<unknown> { return this.native() ? this.bridge("health") : this.request("/api/health"); }
   async jobs(): Promise<CloudJob[]> {
-    const result = this.native() ? await this.bridge<{ jobs: CloudJob[] }>("jobs/list") : await this.request("/api/jobs") as { jobs: CloudJob[] };
+    const result = this.native() ? await this.accountBridge<{ jobs: CloudJob[] }>("jobs/list") : await this.request("/api/jobs") as { jobs: CloudJob[] };
     return result.jobs;
   }
   async job(jobId: string): Promise<CloudJob> {
     const path = jobPath(jobId);
-    return this.native() ? this.bridge<CloudJob>("jobs/get", { jobId }) : this.request(path) as Promise<CloudJob>;
+    return this.native() ? this.accountBridge<CloudJob>("jobs/get", { jobId }) : this.request(path) as Promise<CloudJob>;
   }
   async upload(file: Blob, filename: string): Promise<CloudJob> {
+    const generation = this.generation;
     if (file.size > 32 * 1024 * 1024) throw new CloudError("文件太大，请使用小于 32 MB 的曲谱。", 413);
     if (!file.size) throw new CloudError("曲谱文件为空。");
     if (this.native()) {
       const bytes = new Uint8Array(await file.arrayBuffer());
+      this.requireCurrent(generation);
       const chunks: string[] = [];
       for (let index = 0; index < bytes.length; index += 32768) chunks.push(String.fromCharCode(...bytes.subarray(index, index + 32768)));
-      return this.bridge<CloudJob>("jobs/upload", { filename, base64: btoa(chunks.join("")) }, 300000);
+      return this.accountBridge<CloudJob>("jobs/upload", { filename, base64: btoa(chunks.join("")) }, 300000);
     }
     return this.request(`/api/jobs?filename=${encodeURIComponent(filename)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file }) as Promise<CloudJob>;
   }
-  async importNative(): Promise<CloudJob> { return this.bridge<CloudJob>("jobs/import", {}, 600000); }
+  async importNative(): Promise<CloudJob> { return this.accountBridge<CloudJob>("jobs/import", {}, 600000); }
   async original(jobId: string, score: number, filename?: string): Promise<Blob | undefined> {
     const path = jobPath(jobId, "/original", score);
-    if (this.native()) { await this.bridge("files/view", { jobId, score, kind: "original", filename }, 300000); return; }
+    if (this.native()) { await this.accountBridge("files/view", { jobId, score, kind: "original", filename }, 300000); return; }
     return this.request(path, {}, "blob") as Promise<Blob>;
   }
   async score(jobId: string, score: number): Promise<string> {
     const path = jobPath(jobId, "/score/musicxml", score);
-    return this.native() ? this.bridge<string>("score/get", { jobId, score }) : this.request(path, {}, "text") as Promise<string>;
+    return this.native() ? this.accountBridge<string>("score/get", { jobId, score }) : this.request(path, {}, "text") as Promise<string>;
   }
   async notes(jobId: string, score: number): Promise<NoteListing> {
     const path = jobPath(jobId, "/notes", score);
-    return this.native() ? this.bridge<NoteListing>("notes/get", { jobId, score }) : this.request(path) as Promise<NoteListing>;
+    return this.native() ? this.accountBridge<NoteListing>("notes/get", { jobId, score }) : this.request(path) as Promise<NoteListing>;
   }
   async patch(jobId: string, score: number, revision: number, edits: NoteEdit[]): Promise<CloudJob> {
     const path = jobPath(jobId, "/notes", score);
     if (!Number.isInteger(revision) || revision < 1) throw new CloudError("请重新载入当前曲谱版本。");
-    return this.native() ? this.bridge<CloudJob>("notes/patch", { jobId, score, revision, edits }, 300000) : this.request(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision, score, edits }) }) as Promise<CloudJob>;
+    return this.native() ? this.accountBridge<CloudJob>("notes/patch", { jobId, score, revision, edits }, 300000) : this.request(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision, score, edits }) }) as Promise<CloudJob>;
   }
   async put(jobId: string, score: number, revision: number, musicxml: string): Promise<CloudJob> {
     const path = jobPath(jobId, "/score", score);
     if (!Number.isInteger(revision) || revision < 1) throw new CloudError("请重新载入当前曲谱版本。");
-    return this.native() ? this.bridge<CloudJob>("score/put", { jobId, score, revision, musicxml }, 300000) : this.request(path, { method: "PUT", headers: { "Content-Type": "application/vnd.recordare.musicxml+xml", "If-Match": `"${revision}"` }, body: musicxml }) as Promise<CloudJob>;
+    return this.native() ? this.accountBridge<CloudJob>("score/put", { jobId, score, revision, musicxml }, 300000) : this.request(path, { method: "PUT", headers: { "Content-Type": "application/vnd.recordare.musicxml+xml", "If-Match": `"${revision}"` }, body: musicxml }) as Promise<CloudJob>;
   }
   async export(jobId: string, score: number, kind: "musicxml" | "midi" | "original" | "omr", filename: string): Promise<void> {
     const suffix = { musicxml: "/score/musicxml", midi: "/score/midi", original: "/original", omr: "/project/omr" }[kind];
     const path = jobPath(jobId, suffix, score);
-    if (this.native()) { await this.bridge("files/export", { jobId, score, kind, filename }, 600000); return; }
+    if (this.native()) { await this.accountBridge("files/export", { jobId, score, kind, filename }, 600000); return; }
     await downloadBlob(await this.request(path, {}, "blob") as Blob, filename);
   }
 }
-export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+export type DownloadAccountScope = { expectedUserId: string; expectedSessionId: string | null; isCurrent?: () => boolean } | { expectedUserId?: never; expectedSessionId?: never; isCurrent: () => boolean };
+export async function downloadBlob(blob: Blob, filename: string, scope?: DownloadAccountScope): Promise<void> {
+  const guard = () => { if (scope?.isCurrent && !scope.isCurrent()) throw new CloudError("账户已切换，已取消旧资料导出。", 409); };
+  guard();
   if (isNativeCloud()) {
     if (blob.size > 16 * 1024 * 1024) throw new CloudError("本机导出文件大于 16 MB，请使用云端文件导出。");
-    const bytes = new Uint8Array(await blob.arrayBuffer()); const chunks: string[] = [];
+    const bytes = new Uint8Array(await blob.arrayBuffer()); guard(); const chunks: string[] = [];
     for (let index = 0; index < bytes.length; index += 32768) chunks.push(String.fromCharCode(...bytes.subarray(index, index + 32768)));
-    await nativeRequest("files/save", { filename, base64: btoa(chunks.join("")) }, 600000); return;
+    await nativeRequest("files/save", { filename, base64: btoa(chunks.join("")), ...(scope?.expectedUserId ? { expectedUserId: scope.expectedUserId, expectedSessionId: scope.expectedSessionId } : {}) }, 600000); guard(); return;
   }
   const objectUrl = URL.createObjectURL(blob);
-  const link = document.createElement("a"); link.href = objectUrl; link.download = filename; link.click();
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  try { const link = document.createElement("a"); link.href = objectUrl; link.download = filename; guard(); link.click(); }
+  finally { setTimeout(() => URL.revokeObjectURL(objectUrl), 1000); }
 }
 export const cloud = new CloudClient();

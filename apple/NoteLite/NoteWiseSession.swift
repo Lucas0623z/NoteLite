@@ -253,4 +253,16 @@ final class NoteWiseSession {
         guard takeID != id else { throw NoteLiteError.server("请先结束并保存这次录音。") }
         return try takeStore.recording(id, scope: scope)
     }
+
+    func recordingStatus(_ raw: String, scope: String) throws -> [String: Any] {
+        try requireAvailable(scope: scope)
+        let id = try validate(raw)
+        guard takeID != id || self.scope != scope else {
+            return ["takeId": id, "available": false, "storage": "device", "reason": "recording_in_progress"]
+        }
+        let available = try takeStore.hasRecording(id, scope: scope)
+        if available { return ["takeId": id, "available": true, "storage": "device"] }
+        // Missing and differently owned files have the same public result.
+        return ["takeId": id, "available": false, "storage": "device", "reason": "not_on_this_device"]
+    }
 }

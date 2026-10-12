@@ -1,4 +1,5 @@
 import { createUUID, isNativeCloud, nativeRequest } from "./cloud.ts";
+import type { PracticeOwner } from "./practice-owner.ts";
 import { createScoreTimeline, noteKey, type NoteKey } from "./score-position.ts";
 import { resolveInstrument, soundingMidi } from "./instrument-profiles.ts";
 
@@ -177,9 +178,11 @@ export class NoteWiseInput {
   private takeId:string;
   private accept:(value:ActualEvent)=>void;
   private interrupted:(message:string)=>void;
-  constructor(takeId:string,accept:(value:ActualEvent)=>void,interrupted:(message:string)=>void){this.takeId=takeId;this.accept=accept;this.interrupted=interrupted;}
+  private owner?:PracticeOwner;
+  constructor(takeId:string,accept:(value:ActualEvent)=>void,interrupted:(message:string)=>void,owner?:PracticeOwner){this.takeId=takeId;this.accept=accept;this.interrupted=interrupted;this.owner=owner?{...owner}:undefined;}
+  private payload(){return{takeId:this.takeId,...(this.owner?{expectedUserId:this.owner.owner,expectedSessionId:this.owner.sessionId}:{})};}
   private receive=(message:Event)=>{const e=(message as CustomEvent).detail;if(!this.active||e?.type!=="notewiseInput"||e.takeId!==this.takeId||!Number.isInteger(e.sequence)||e.sequence<=this.sequence)return;this.sequence=e.sequence;if(e.status==="interrupted")this.interrupted(typeof e.message==="string"?e.message:"演奏输入中断");else if(validActualEvent(e.event))this.accept(e.event);};
-  async start(settings:NoteWiseSettings,instrument:string){if(!isNativeCloud())throw new Error("请在 Apple 应用中连接 MIDI 或使用麦克风；浏览器可继续自由计时。");const request=++this.request;this.active=true;window.addEventListener("notelite-cloud-event",this.receive);try{const result=await nativeRequest("notewise/start",{takeId:this.takeId,inputKind:settings.inputKind,tuning:settings.tuning,instrument},60000);if(request!==this.request){await nativeRequest("notewise/stop",{takeId:this.takeId});throw new Error("开始演奏输入已取消。");}return result;}catch(error){this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);throw error;}}
-  async pause(){await nativeRequest("notewise/pause",{takeId:this.takeId});}
-  async stop(){++this.request;this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);return nativeRequest<NonNullable<NoteWiseAnalysis["recording"]>>("notewise/stop",{takeId:this.takeId});}
+  async start(settings:NoteWiseSettings,instrument:string){if(!isNativeCloud())throw new Error("请在 Apple 应用中连接 MIDI 或使用麦克风；浏览器可继续自由计时。");const request=++this.request;this.active=true;window.addEventListener("notelite-cloud-event",this.receive);try{const result=await nativeRequest("notewise/start",{...this.payload(),inputKind:settings.inputKind,tuning:settings.tuning,instrument},60000);if(request!==this.request){await nativeRequest("notewise/stop",this.payload());throw new Error("开始演奏输入已取消。");}return result;}catch(error){this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);throw error;}}
+  async pause(){await nativeRequest("notewise/pause",this.payload());}
+  async stop(){++this.request;this.active=false;window.removeEventListener("notelite-cloud-event",this.receive);return nativeRequest<NonNullable<NoteWiseAnalysis["recording"]>>("notewise/stop",this.payload());}
 }

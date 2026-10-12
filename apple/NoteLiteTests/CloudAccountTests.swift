@@ -3,6 +3,43 @@ import XCTest
 
 /// An in-memory credential store and HTTP transport exercise the native contract without production credentials.
 final class CloudAccountTests: XCTestCase {
+    @MainActor func testIncorrectLoginReportsAccountCredentialsInsteadOfExpiredPairing() async throws {
+        let store = AccountMemoryCredentials()
+        AccountContractProtocol.responder = { _ in (401, self.json(["error": "用户名或密码不正确。 "])) }
+        let client = try CloudAccountClient(origin: origin, credentials: store, sessionConfiguration: configuration())
+        do {
+            _ = try await client.request(["path": "/login", "method": "POST", "response": "json", "body": ["username": "musician", "password": "synthetic"]])
+            XCTFail("Incorrect credentials were accepted")
+        } catch let error as CloudOMRError {
+            XCTAssertEqual(error.code, "invalid_credentials")
+            XCTAssertEqual(error.status, 401)
+            XCTAssertTrue(error.message.contains("用户名或密码"))
+            XCTAssertFalse(error.message.contains("配对"))
+        }
+        XCTAssertNil(try store.read(origin: origin))
+    }
+
+    @MainActor func testDeletionConfirmsExistingShortCredentialAndRejectsEmptyBeforeNetwork() async throws {
+        let store = AccountMemoryCredentials()
+        try store.save(identity(), origin: origin)
+        var calls = 0
+        AccountContractProtocol.responder = { request in
+            calls += 1
+            let body = try! JSONSerialization.jsonObject(with: AccountContractProtocol.body(request)) as! [String: Any]
+            XCTAssertEqual(body["password"] as? String, "synthetic")
+            return (200, self.json(["authenticated": false, "accountDeleted": true, "deletionRequested": true, "deleted": true, "status": "completed"]))
+        }
+        let client = try CloudAccountClient(origin: origin, credentials: store, sessionConfiguration: configuration())
+        do {
+            _ = try await client.request(["path": "/account", "method": "DELETE", "response": "json", "body": ["password": "", "confirmation": "DELETE_ACCOUNT"]])
+            XCTFail("Empty credential was accepted")
+        } catch let error as CloudOMRError { XCTAssertEqual(error.code, "invalid_request") }
+        XCTAssertEqual(calls, 0)
+        _ = try await client.request(["path": "/account", "method": "DELETE", "response": "json", "body": ["password": "synthetic", "confirmation": "DELETE_ACCOUNT"]])
+        XCTAssertEqual(calls, 1)
+        XCTAssertNil(try store.read(origin: origin))
+    }
+
     private let origin = "https://example.com"
     private let userID = "11111111-1111-4111-8111-111111111111"
     private let sessionID = "22222222-2222-4222-8222-222222222222"
@@ -160,6 +197,93 @@ final class CloudAccountTests: XCTestCase {
         let client = try CloudAccountClient(origin: origin, credentials: store, sessionConfiguration: configuration())
         _ = try await client.request(["path": "/scores/\(recordID)", "method": "PUT", "response": "json", "etag": etag,
                                       "expectedUserId": userID, "body": ["musicxml": "<score-partwise/>"]])
+    }
+
+    @MainActor func testProfileReadsAndWritesKeepAccountIdentityAndRevisionPrecondition() async throws {
+        let store = AccountMemoryCredentials()
+        try store.save(identity(), origin: origin)
+        var calls = 0
+        AccountContractProtocol.responder = { request in
+            calls += 1
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/api/account/profile")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer native-account-only")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-NoteLite-Expected-User"), self.userID)
+            if request.httpMethod == "PUT" {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"profile-0\"")
+                let body = try! JSONSerialization.jsonObject(with: AccountContractProtocol.body(request)) as! [String: Any]
+                XCTAssertEqual(body["requestId"] as? String, self.recordID)
+                XCTAssertEqual((body["changes"] as? [String: Any])?["theme"] as? String, "dark")
+                return (200, self.json(["revision": 1, "etag": "\"profile-1\"", "preferences": ["theme": "dark"]]))
+            }
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertNil(request.value(forHTTPHeaderField: "If-Match"))
+            return (200, self.json(["revision": 0, "etag": "\"profile-0\"", "preferences": ["theme": "light"]]))
+        }
+        let client = try CloudAccountClient(origin: origin, credentials: store, sessionConfiguration: configuration())
+        let read = try await client.request(["path": "/profile", "method": "GET", "response": "json", "expectedUserId": userID]) as! [String: Any]
+        XCTAssertEqual(read["etag"] as? String, "\"profile-0\"")
+        let write = try await client.request(["path": "/profile", "method": "PUT", "response": "json", "expectedUserId": userID,
+                                             "etag": read["etag"]!, "body": ["requestId": recordID, "changes": ["theme": "dark"]]]) as! [String: Any]
+        XCTAssertEqual(write["revision"] as? Int, 1)
+        XCTAssertEqual(calls, 2)
+        for etag in ["profile-1", "\"profile-01\"", "\"profile--1\"", "\"\(recordID):1\"", "\"profile-1\"\r\nAuthorization: evil"] {
+            do {
+                _ = try await client.request(["path": "/profile", "method": "PUT", "response": "json", "expectedUserId": userID,
+                                             "etag": etag, "body": ["requestId": recordID, "changes": ["theme": "dark"]]])
+                XCTFail("Invalid profile ETag was accepted")
+            } catch let error as CloudOMRError { XCTAssertEqual(error.code, "invalid_request") }
+        }
+        XCTAssertEqual(calls, 2)
+    }
+
+    @MainActor func testProfileAndAccountExportRejectMissingForeignOrChangedSession() async throws {
+        let store = AccountMemoryCredentials()
+        let client = try CloudAccountClient(origin: origin, credentials: store, sessionConfiguration: configuration())
+        var calls = 0
+        AccountContractProtocol.responder = { _ in calls += 1; return (200, self.json(["revision": 0])) }
+        for path in ["/profile", "/account/export"] {
+            do { _ = try await client.request(["path": path, "method": "GET", "response": "json", "expectedUserId": userID]); XCTFail("Guest read account data") }
+            catch let error as CloudOMRError { XCTAssertEqual(error.status, 401) }
+        }
+        XCTAssertEqual(calls, 0)
+        try store.save(identity(), origin: origin)
+        for path in ["/profile", "/account/export"] {
+            do { _ = try await client.request(["path": path, "method": "GET", "response": "json", "expectedUserId": recordID]); XCTFail("Foreign owner read account data") }
+            catch let error as CloudOMRError { XCTAssertEqual(error.status, 409) }
+        }
+        XCTAssertEqual(calls, 0)
+        AccountContractProtocol.responder = { request in
+            calls += 1
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-NoteLite-Expected-User"), self.userID)
+            try! store.save(CloudAccountCredential(token: "another-native-session-token", userID: self.userID, sessionID: self.recordID), origin: self.origin)
+            return (200, self.json(["revision": 0]))
+        }
+        for path in ["/profile", "/account/export"] {
+            try store.save(identity(), origin: origin)
+            do { _ = try await client.request(["path": path, "method": "GET", "response": "json", "expectedUserId": userID]); XCTFail("Old session received account data") }
+            catch let error as CloudOMRError { XCTAssertEqual(error.status, 409) }
+        }
+        XCTAssertEqual(calls, 2)
+    }
+
+    @MainActor func testAccountExportUsesAuthenticatedOwnerOnlyAllowlist() async throws {
+        for method in ["GET", "PUT"] { XCTAssertNoThrow(try CloudAccountClient.route(path: "/profile", method: method)) }
+        for method in ["POST", "DELETE"] { XCTAssertThrowsError(try CloudAccountClient.route(path: "/profile", method: method)) }
+        XCTAssertNoThrow(try CloudAccountClient.route(path: "/account/export", method: "GET"))
+        for method in ["PUT", "POST", "DELETE"] { XCTAssertThrowsError(try CloudAccountClient.route(path: "/account/export", method: method)) }
+        XCTAssertThrowsError(try CloudAccountClient.route(path: "/account/export?userId=\(recordID)", method: "GET"))
+        let store = AccountMemoryCredentials()
+        try store.save(identity(), origin: origin)
+        AccountContractProtocol.responder = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/api/account/account/export")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer native-account-only")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-NoteLite-Expected-User"), self.userID)
+            return (200, self.json(["schemaVersion": 1, "userId": self.userID, "scores": [], "history": []]))
+        }
+        let client = try CloudAccountClient(origin: origin, credentials: store, sessionConfiguration: configuration())
+        let result = try await client.request(["path": "/account/export", "method": "GET", "response": "json", "expectedUserId": userID]) as! [String: Any]
+        XCTAssertEqual(result["userId"] as? String, userID)
     }
 
     @MainActor func testBinaryChunkUsesBoundedBodyAndUploadOffset() async throws {

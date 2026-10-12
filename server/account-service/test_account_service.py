@@ -3,6 +3,7 @@
 Synthetic accounts and tiny generated WAV only; no production credentials.
 """
 import hashlib
+from email.message import Message
 from http.client import HTTPConnection
 from http.cookies import SimpleCookie
 import io
@@ -13,6 +14,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import uuid
 import wave
 
@@ -20,6 +22,89 @@ import account_service as service
 
 
 class AccountHTTPTests(unittest.TestCase):
+    def test_17_rejected_origin_drains_only_bounded_unread_body_and_preserves_403(self):
+        entered = threading.Event()
+        discarded = []
+        original = service.Handler.discard_rejected_body
+        def observed(handler):
+            entered.set()
+            result = original(handler)
+            discarded.append(result)
+            return result
+        body = json.dumps({"title": "Never created after rejected origin"}).encode("utf8")
+        with self.store.connect() as db:
+            before = db.execute("SELECT count(*) FROM courses").fetchone()[0]
+        # Split headers and body deliberately. The rejection must wait only for
+        # this bounded unread body instead of closing while it is still sent.
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=10)
+        try:
+            with patch.object(service.Handler, "discard_rejected_body", observed):
+                connection.putrequest("POST", service.PREFIX + "/courses", skip_host=True)
+                for name, value in {"Host": "notelite.example", "Origin": "https://attacker.example", "Authorization": "Bearer " + self.accounts["student"]["token"], "Content-Type": "application/json", "Content-Length": str(len(body))}.items():
+                    connection.putheader(name, value)
+                connection.endheaders()
+                self.assertTrue(entered.wait(1), "origin must reject before parsing the delayed body")
+                connection.send(body)
+                response = connection.getresponse()
+                self.assertEqual(response.status, 403)
+                self.assertEqual(response.getheader("Connection"), "close")
+                self.assertEqual(json.loads(response.read()), {"error": "请求来源无效。"})
+            self.assertEqual(discarded, [len(body)])
+        finally:
+            connection.close()
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM courses").fetchone()[0], before)
+
+        class Connection:
+            def __init__(self): self.timeout, self.applied = 30, []
+            def gettimeout(self): return self.timeout
+            def settimeout(self, value): self.timeout = value; self.applied.append(value)
+        def handler(headers, raw=b"abc", started=False):
+            value = object.__new__(service.Handler)
+            value.headers = Message()
+            for name, content in headers: value.headers[name] = content
+            value._body_started, value.connection = started, Connection()
+            value.rfile = io.BufferedReader(io.BytesIO(raw))
+            return value
+        for headers, started in [
+            ([("Content-Length", str(service.MAX_REJECT_DRAIN + 1))], False),
+            ([("Content-Length", "3"), ("Content-Length", "3")], False),
+            ([("Content-Length", "3"), ("Transfer-Encoding", "chunked")], False),
+            ([("Content-Length", "3"), ("Expect", "100-continue")], False),
+            ([("Content-Length", "3")], True),
+        ]:
+            value = handler(headers, started=started)
+            self.assertEqual(value.discard_rejected_body(), 0)
+            self.assertEqual(value.rfile.read(), b"abc", "ambiguous, large or consumed bodies must not be drained")
+            self.assertEqual(value.connection.applied, [])
+        value = handler([("Content-Length", "3")])
+        value.rfile.read1 = lambda _: b"x"
+        with patch.object(service.time, "monotonic", side_effect=[0, 0.1, 0.3]):
+            self.assertEqual(value.discard_rejected_body(), 1, "dripping bytes cannot extend the absolute deadline")
+        self.assertAlmostEqual(value.connection.applied[0], 0.15)
+        self.assertEqual(value.connection.timeout, 30)
+
+    def test_15_existing_short_credentials_are_verified_without_weakening_registration(self):
+        short = "synthetic"
+        new = self.checked(201, "POST", "/register", {"username": "legacy_short", "password": "synthetic long initial password", "mode": "native"})
+        # A synthetic older credential, only in this temporary database. Public
+        # registration must still reject a new password shorter than 15 chars.
+        salt, digest = service.password_hash(short, creating=False)
+        with self.store.connect() as db:
+            db.execute("UPDATE users SET salt=?,password_hash=? WHERE id=?", (salt, digest, new["userId"]))
+        self.checked(400, "POST", "/register", {"username": "short_new", "password": short, "mode": "native"})
+        self.checked(401, "POST", "/login", {"username": "legacy_short", "password": "incorrect", "mode": "native"})
+        self.checked(401, "POST", "/login", {"username": "unknown_short", "password": short, "mode": "native"})
+        for invalid in ("", "x" * 257):
+            self.checked(400, "POST", "/login", {"username": "legacy_short", "password": invalid, "mode": "native"})
+        authenticated = self.checked(201, "POST", "/login", {"username": "LEGACY_SHORT", "password": short, "mode": "native"})
+        self.assertEqual(authenticated["userId"], new["userId"])
+        self.accounts["legacy_short"] = authenticated
+        self.checked(403, "DELETE", "/account", {"password": "incorrect", "confirmation": "DELETE_ACCOUNT"}, "legacy_short")
+        deleted = self.checked(200, "DELETE", "/account", {"password": short, "confirmation": "DELETE_ACCOUNT"}, "legacy_short")
+        self.assertTrue(deleted["accountDeleted"])
+        self.checked(401, "GET", "/me", account="legacy_short")
+
     @classmethod
     def setUpClass(cls):
         cls.root = tempfile.TemporaryDirectory()

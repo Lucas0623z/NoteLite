@@ -1,3 +1,24 @@
+.app-root dialog.scores-dialog:not([data-workspace="true"]) {
+  /* The generic dialog safe-area rule must not erase the sheet's gutters. */
+  box-sizing: border-box;
+  padding: 20px;
+  padding-left: calc(20px + env(safe-area-inset-left, 0px));
+  padding-right: calc(20px + env(safe-area-inset-right, 0px));
+  overflow-wrap: anywhere;
+}
+
+.scores-dialog:not([data-workspace="true"]) > .grid {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.scores-dialog:not([data-workspace="true"]) .scores-action {
+  min-width: 0;
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .scores-dialog[data-workspace="true"] {
   inset: 0;
   width: 100%;

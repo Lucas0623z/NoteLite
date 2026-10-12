@@ -8,6 +8,7 @@ import { practiceRecords, PRACTICE_RECORD_EVENT, newPracticeEventId, type Practi
 import { isNativeCloud, nativeRequest } from "./cloud";
 import { expectedPerformance, NoteWiseInput, NoteWiseMatcher, refineRecording, scoreDigest, type InputKind, type NoteWiseFeedback, type NoteWiseSettings } from "./notewise";
 import { INSTRUMENT_PROFILES, resolveProfile } from "./instrument-profiles";
+import { capturePracticeOwner, requirePracticeOwner, startOwnedPracticeInput, type PracticeOwner } from "./practice-owner";
 
 type Settings = { instrument: string; instrumentVariant: string; part: string; mode: string; input:InputKind; bpm: number; tuning: number; first: number; last: number; checked: boolean };
 
@@ -36,7 +37,7 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const started = useRef(0);
   const accumulated = useRef(0);
-  const activeRecord = useRef<{ eventId: string; owner: string; startedAt: string; name: string; musicxml: string; scoreIdentity: string; source?: PracticeSource; mode:PracticeRecord["mode"]; elapsed: number; anchor: number | null } | null>(null);
+  const activeRecord = useRef<{ eventId: string; owner: string; sessionId: string | null; startedAt: string; name: string; musicxml: string; scoreIdentity: string; source?: PracticeSource; mode:PracticeRecord["mode"]; elapsed: number; anchor: number | null } | null>(null);
   const recordWriter = useRef<(interrupted?: boolean) => Promise<void>>(async () => {});
   const pendingSave = useRef<{ input: Omit<PracticeRecord, "userId" | "sync">; owner: string } | null>(null);
   const savingRecord = useRef(false);
@@ -138,17 +139,37 @@ export default function PracticeSession({ name, measures, parts, musicxml, score
     if (finished) { accumulated.current = 0; setSeconds(0);setFeedback(null); }
     playback.current?.stop();setStartingInput(true);
     const eventId=activeRecord.current?.eventId||newPracticeEventId();
+    const owner:PracticeOwner=activeRecord.current ? { owner:activeRecord.current.owner,sessionId:activeRecord.current.sessionId } : capturePracticeOwner(account.current);
+    let input=listening.current;
     try {
+      await startOwnedPracticeInput(owner,()=>account.current,async()=>{
       if(settings.input!=="timer") {
         const options:NoteWiseSettings={...settings,inputKind:settings.input,mode:settings.mode==="跟随节奏"?"strict":settings.mode==="等我弹对"?"wait":"follow",scoreRevision:source?.revision};
-        if(!matcher.current)matcher.current=new NoteWiseMatcher(expectedPerformance(musicxml,options),options,{takeId:eventId,sourceScoreSha256:await scoreDigest(musicxml)},value=>{setFeedback(value);positionCallback.current(value.position);feedbackCallback.current?.(value.noteStates);setPerformanceConnected(true);});
-        if(!listening.current)listening.current=new NoteWiseInput(eventId,e=>matcher.current?.accept(e),message=>{pause();setNotice(`${message}。练习已暂停，不会将中断判为漏音。`);});
-        await listening.current.start(options,settings.instrument);matcher.current.resume();setPerformanceConnected(true);
+        if(!matcher.current){
+          const sourceScoreSha256=await scoreDigest(musicxml);
+          requirePracticeOwner(owner,account.current);
+          matcher.current=new NoteWiseMatcher(expectedPerformance(musicxml,options),options,{takeId:eventId,sourceScoreSha256},value=>{setFeedback(value);positionCallback.current(value.position);feedbackCallback.current?.(value.noteStates);setPerformanceConnected(true);});
+        }
+        if(!input)input=new NoteWiseInput(eventId,e=>matcher.current?.accept(e),message=>{pause();setNotice(`${message}。练习已暂停，不会将中断判为漏音。`);},owner);
+        listening.current=input;
+        await input.start(options,settings.instrument);
       }
+      },async()=>{
+        if(input){
+          const recording=await input.stop();
+          if(matcher.current)matcher.current.report.recording=recording;
+          if(listening.current===input)listening.current=null;
+        }
+      });
+      matcher.current?.resume();if(settings.input!=="timer")setPerformanceConnected(true);
       started.current = performance.now();setFinished(false);setRunning(true);
-      if(!activeRecord.current)activeRecord.current={eventId,owner:account.current?.userId||"guest",startedAt:new Date().toISOString(),name,musicxml,scoreIdentity:recordIdentity,source,mode:settings.input==="timer"?"free":settings.mode==="跟随节奏"?"strict":"follow",elapsed:0,anchor:started.current};else activeRecord.current.anchor=started.current;
+      if(!activeRecord.current)activeRecord.current={eventId,...owner,startedAt:new Date().toISOString(),name,musicxml,scoreIdentity:recordIdentity,source,mode:settings.input==="timer"?"free":settings.mode==="跟随节奏"?"strict":"follow",elapsed:0,anchor:started.current};else activeRecord.current.anchor=started.current;
       setNotice(settings.input==="timer"?"正在自由练习计时；未采集演奏。":settings.input==="midi"?"已连接 MIDI · 指针跟随弹奏；错音会立即提示。":"麦克风已开始本地录音与单音听音 · 不清晰或和弦保留待复核；录音仅在你提交作业时上传。");
-    } catch(error){setNotice(error instanceof Error?error.message:"输入未能连接。请检查后重试。");if(!activeRecord.current){matcher.current=null;listening.current=null;setPerformanceConnected(false);}}
+    } catch(error){
+      setNotice(error instanceof Error?error.message:"输入未能连接。请检查后重试。");setRunning(false);setPerformanceConnected(false);
+      if(activeRecord.current){setFinished(true);await recordWriter.current(true);if(pendingSave.current)setSaveFailed(true);}
+      else{matcher.current=null;listening.current=null;}
+    }
     finally{setStartingInput(false);}
   }
   function pause() {

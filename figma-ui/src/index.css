@@ -2,3 +2,19 @@
 @import 'tailwindcss';
 @import './styles/theme.css';
 @import './styles/score-workspace.css';
+
+/* The app document fits the device width. Scores keep their own overflow-auto
+   viewport, so this does not disable horizontal scrolling inside the music. */
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+html,
+body {
+  overscroll-behavior-x: none;
+}

@@ -70,6 +70,10 @@ are rejected. Protected endpoints require the authentication described above.
 | GET | `/health` | Public status and ownership-adapter availability |
 | POST | `/register`, `/login` | `{username,password,mode,deviceName?}` → identity/session |
 | GET | `/me` | Current identity; browser additionally receives `csrf` |
+| GET | `/profile` | Own `{userId,revision,etag,updatedAt,preferences}` and HTTP ETag |
+| PUT | `/profile` | `{requestId:UUID,changes:Partial<preferences>}`, mandatory `If-Match` |
+| GET | `/account/export` | Owner-only JSON export, maximum 16 MiB; oversized export fails with `413` |
+| DELETE | `/account` | `{password,confirmation:'DELETE_ACCOUNT'}`; remove personal data and every session |
 | POST | `/logout` | Revoke current session; clear account cookie |
 | GET | `/sessions` | `{sessions:[{sessionId,deviceName,kind,createdAt,expiresAt}]}` |
 | DELETE | `/sessions/{uuid}` | Revoke only a session belonging to the authenticated user |
@@ -128,6 +132,54 @@ No third-party score collection is silently downloaded or uploaded.
 
 The UUIDs/token text in this example are placeholders, not usable credentials.
 Browser responses omit `token` and include `csrf`.
+
+### Personal settings and owner export
+
+`GET /profile` has a stable default revision `0`, ETag `"profile-0"`, and the
+account creation time as `updatedAt`. Its default preferences are
+`{displayName:'名字',avatar:'mascot',avatarImage:null,email:'',phone:'',selectedCourse:null,theme:'light',options:{}}`.
+Reading a default does not create a row or import a previous user's device data.
+Profile rows and request receipts are keyed by the persistent user UUID, so all
+sessions of the same account share them after a service restart or database move.
+
+Saving takes one `If-Match` header and merges only the submitted fields; `options`
+also merges submitted boolean keys. A stale precondition returns `412` without
+writing; the client reads the latest profile before merging its pending edits.
+The same user, UUID `requestId`, and canonical `changes` return the original
+successful response even with its original stale ETag, without applying the edit
+again. Different contents with that request ID return `409`. A replay is still
+authenticated, owner checked, and protected by Origin/CSRF and Expected-User.
+
+Only the eight declared preference fields are accepted. Display names, email and
+phone are bounded at 80, 254 and 40 characters, without control characters. These
+contact fields never change credentials or prove email/phone ownership. Avatar
+is `mascot`, `portrait` or `custom`; theme is `light` or `dark`. Course selection
+is null or one of the 15 instrument selections offered by the current UI. Options
+allow up to 200 boolean keys, each at most 80 characters; prototype-related keys
+are rejected. A custom image is null or a PNG/JPEG/WebP base64 data URI of at most
+196608 characters with a matching container signature; it is not an SVG or a
+remote URL. Image signature validation does not guarantee image decoding. The
+whole request and merged preferences are limited to 256 KiB of UTF-8 JSON.
+
+`GET /account/export` includes the owner's profile and settings request receipts,
+personal MusicXML, immutable practice-score snapshots, detection analysis
+versions, their own classroom submissions, and stored AI result/cache metadata.
+It excludes password salts/hashes, session/token/CSRF records, internal keys,
+other students' submissions, and recording bytes. The export is complete for
+those sections or fails explicitly with `413`; it never truncates an over-16-MiB
+account into a successful partial export. It is an owner data download, not a
+server backup or an import endpoint. Normal personal recordings stay on the
+original device; the existing explicit classroom-submission flow remains separate.
+Permanent account deletion removes both profile tables in the same transaction
+as scores/history/session data, and late writes cannot recreate deleted users.
+
+For a server move, use an offline or consistent SQLite backup of the entire
+`/var/lib/notelite-accounts` database, together with any existing classroom
+recording files, the gateway's ownership database, and the OMR worker task store.
+Preserve UUIDs and private operator configuration outside source archives. Copying
+only application source or only the account database does not restore original
+OMR PDFs, job artifacts or gateway job ownership. No automated full-server
+backup/restore drill is claimed by these local endpoint tests.
 
 ### Score sync and retry
 
