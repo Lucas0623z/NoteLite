@@ -125,7 +125,7 @@ if __name__=='__main__':
 PY_XCODEGEN_VALIDATOR
 
 binary="$installation/products/xcodegen.artifactbundle/xcodegen-2.46.0-macosx/bin/xcodegen"
-lipo -verify_arch "$architecture" "$binary" >&2
+lipo "$binary" -verify_arch "$architecture" >&2
 actual_version=$("$binary" --version)
 case ${actual_version//$'\r'/} in
   '2.46.0'|'Version: 2.46.0'|'xcodegen, version 2.46.0'|'xcodegen 2.46.0'|'XcodeGen 2.46.0') ;;

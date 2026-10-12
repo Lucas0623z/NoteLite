@@ -122,7 +122,7 @@ class InstallerBoundaryTests(unittest.TestCase):
         self.assertIn("--retry 2", text)
         self.assertIn("--max-time 90", text)
         self.assertIn("--retry-max-time 180", text)
-        self.assertIn("lipo -verify_arch", text)
+        self.assertIn('lipo "$binary" -verify_arch "$architecture" >&2', text)
         self.assertIn('actual_version=$("$binary" --version)', text)
         self.assertNotIn("brew install", text)
         self.assertNotIn("sudo ", text)
